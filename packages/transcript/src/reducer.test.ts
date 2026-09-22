@@ -8,21 +8,26 @@ import {
   applyServerRequest,
   applySubagentSnapshot,
   beginLocalTurn,
+  beginSteer,
   confirmSubmit,
+  dropSteer,
   markInterrupted,
   type SubagentSnapshotRow,
   type TranscriptEvent
 } from './reducer'
-import { latestStatus } from './selectors'
+import { latestStatus, visibleItems } from './selectors'
 import {
   approvalRequest,
   clarifyRequest,
   delegationEvents,
   dmDispatchTurn,
   erroredTurn,
-  streamedTurn
+  streamedTurn,
+  thinkingSummarisedAfterToolTurn,
+  thinkingTurn
 } from './__fixtures__/events'
-import { dmReplyProcessText } from './__fixtures__/rows'
+import { rowsToItems } from './rows-to-items'
+import { cronBotChatBody, cronBotChatText, dmReplyProcessText } from './__fixtures__/rows'
 import {
   type ApprovalItem,
   type AssistantItem,
@@ -30,8 +35,10 @@ import {
   type ChatState,
   type ClarifyItem,
   createChatState,
+  type CronDeliveryItem,
   type SubagentGroupItem,
   type ToolItem,
+  type TranscriptItem,
   type UserItem
 } from './types'
 
@@ -342,6 +349,119 @@ describe('local submits', () => {
 
     expect((list(state)[0] as UserItem).displayKind).toBe('steer')
   })
+
+  /**
+   * A steer taken out of the queue strip and handed to `session.steer`.
+   *
+   * `beginLocalTurn` cannot do this job: it claims `turn.active`,
+   * `turn.startedAt` and `turn.local`, all three of which belong to the turn the
+   * steer is being folded INTO. Painting nothing at all was the build-176 bug —
+   * the strip dropped the chip and the words were gone.
+   */
+  describe('a steer painted into the turn already running', () => {
+    it('paints the bubble and leaves the running turn alone', () => {
+      let state = beginLocalTurn(fresh(), 'go', undefined, NOW)
+
+      state = confirmSubmit(state, { status: 'streaming' }, NOW)
+
+      const turn = state.turn
+
+      state = beginSteer(state, 'use the cached copy', undefined, NOW)
+
+      const painted = list(state).at(-1) as UserItem
+
+      expect(painted).toMatchObject({ kind: 'user', text: 'use the cached copy', displayKind: 'steer' })
+      expect(painted.origin).toBe('optimistic')
+      // `pending` means "parked behind the running turn", which is what the
+      // queue strip said and what this message stopped being.
+      expect(painted.pending).toBeUndefined()
+      expect(state.turn.active).toBe(turn.active)
+      expect(state.turn.startedAt).toBe(turn.startedAt)
+      expect(state.turn.local).toBe(turn.local)
+    })
+
+    it('projects `@file:` directives out of the text, exactly as a send does', () => {
+      const reference = '@file:/srv/work/notes.md'
+      const state = beginSteer(fresh(), `look at ${reference}`, undefined, NOW)
+      const painted = list(state).at(-1) as UserItem
+
+      expect(painted.text).toBe('look at')
+      expect(painted.attachments).toEqual([reference])
+    })
+
+    it('takes the newest matching bubble back off when the gateway refuses', () => {
+      let state = beginSteer(fresh(), 'too late', undefined, NOW)
+
+      state = dropSteer(state, 'too late')
+
+      expect(list(state)).toEqual([])
+    })
+
+    it('leaves an ordinary user turn with the same words alone', () => {
+      // Only an optimistic STEER is ours to delete. A persisted row, or the
+      // prompt that opened the turn, says the same words and is not this.
+      let state = beginLocalTurn(fresh(), 'too late', undefined, NOW)
+
+      state = dropSteer(state, 'too late')
+
+      expect(list(state)).toHaveLength(1)
+      expect((list(state)[0] as UserItem).displayKind).toBeUndefined()
+    })
+  })
+
+  /**
+   * `UserItem.attachments` is one contract on both sides of the wire: the
+   * `@file:` / `@image:` reference strings, as the persisted row carries them.
+   * The bubble derives its chip from that (`attachmentName` in the chat kit) and
+   * reconciliation derives its match key from it — a display name stored here
+   * instead is a name nothing on the other side can be compared against, which
+   * is how a file-only send came back as a second bubble.
+   */
+  describe('what an optimistic turn records as its attachments', () => {
+    const REF = '@file:"/srv/work/uploads/hermie/2026-09-20/8setj4h3-ui.xml"'
+
+    it('takes the references out of the body, where the row will repeat them', () => {
+      const state = beginLocalTurn(fresh(), `have a look\n\n${REF}`, undefined, NOW)
+
+      expect(list(state)[0]).toMatchObject({ kind: 'user', text: 'have a look', attachments: [REF] })
+    })
+
+    it('records a file-only send as no text and one reference', () => {
+      const state = beginLocalTurn(fresh(), REF, [REF], NOW)
+
+      expect(list(state)[0]).toMatchObject({ kind: 'user', text: '', attachments: [REF] })
+    })
+
+    it('keeps an image reference the body cannot carry', () => {
+      // `image.attach_bytes` takes the bytes out of band, so the prompt says
+      // nothing about it and the caller's reference is the only record until the
+      // gateway persists its own.
+      const state = beginLocalTurn(fresh(), 'what is this', ['@image:shot.png'], NOW)
+
+      expect(list(state)[0]).toMatchObject({ text: 'what is this', attachments: ['@image:shot.png'] })
+    })
+
+    it('does not record the same attachment twice when the body already named it', () => {
+      const state = beginLocalTurn(fresh(), `read this\n\n${REF}`, [REF], NOW)
+
+      expect((list(state)[0] as UserItem).attachments).toEqual([REF])
+    })
+
+    it('keeps both when a send carries a file and an image', () => {
+      const state = beginLocalTurn(fresh(), `both\n\n${REF}`, [REF, '@image:shot.png'], NOW)
+
+      expect((list(state)[0] as UserItem).attachments).toEqual([REF, '@image:shot.png'])
+    })
+
+    it('never drops a reference the body carries in favour of the caller', () => {
+      // A send with a file AND an image: the file is in the prompt, the image is
+      // not, and the row will carry both. Keeping only what the caller passed
+      // would lose the file's chip and leave an attachment set nothing matches.
+      const state = beginLocalTurn(fresh(), `both\n\n${REF}`, ['@image:shot.png'], NOW)
+
+      expect((list(state)[0] as UserItem).attachments).toEqual([REF, '@image:shot.png'])
+    })
+  })
 })
 
 describe('bot-to-bot dispatch', () => {
@@ -581,6 +701,34 @@ describe('session-level events', () => {
     expect(list(state)[0]).toMatchObject({ kind: 'notice', noticeKind: 'notice', title: 'capabilities refreshed' })
   })
 
+  it('takes `command` from a notice event, for a slash command this client ran', () => {
+    const state = applyEvent(
+      fresh(),
+      { type: 'notice', seq: 1, payload: { message: '/help', detail: 'usage: …', noticeKind: 'command' } },
+      NOW
+    )
+
+    expect(list(state)[0]).toMatchObject({ noticeKind: 'command', title: '/help', body: 'usage: …' })
+  })
+
+  /**
+   * `command` is the ONLY kind the field may name.
+   *
+   * The privilege behind it is real — that kind survives `quiet` and opens
+   * itself — and the event is a wire shape, so a gateway that started sending
+   * `noticeKind` could otherwise promote its own narration into it. An
+   * unrecognised value is a plain notice, which is what the event meant before
+   * the field existed.
+   */
+  it.each([['error'], ['process_complete'], ['internal_notification'], ['banana']])(
+    'refuses `%s` as a notice kind and leaves the row a plain notice',
+    kind => {
+      const state = applyEvent(fresh(), { type: 'notice', seq: 1, payload: { message: 'hi', noticeKind: kind } }, NOW)
+
+      expect(list(state)[0]).toMatchObject({ noticeKind: 'notice', title: 'hi' })
+    }
+  )
+
   it('surfaces a side-question answer', () => {
     const state = applyEvent(
       fresh(),
@@ -693,6 +841,45 @@ describe('server requests', () => {
     )
 
     expect(list(state).filter(item => item.kind === 'approval')).toHaveLength(2)
+  })
+
+  it('lets a new question reuse the TRANSPORT id of one already answered', () => {
+    /*
+      The same rule, on the other id a question carries — and the one that was
+      missing. `srq-N` is a per-process counter that the gateway restarts at 1
+      for every process, which is the same fact `cache.ts` carries
+      `lastSeqSessionId` for. So an answered card cached from before a restart
+      sits on `srq-1`, the first question of the new session arrives as `srq-1`,
+      and the guard used to drop it: no card, no sheet, and a turn parked on an
+      answer nobody was asked for.
+    */
+    let state = applyServerRequest(fresh(), approvalRequest, NOW)
+
+    state = answerRequest(state, 'srq-7', 'once')
+    state = applyServerRequest(
+      state,
+      { id: 'srq-7', method: 'clarify', params: { question: 'Which branch?', choices: ['main', 'next'] } },
+      NOW
+    )
+
+    const clarify = list(state).find(item => item.kind === 'clarify') as ClarifyItem | undefined
+
+    expect(clarify).toMatchObject({ requestId: 'srq-7', state: 'open' })
+    // Distinct item ids, so the answered card stays where it was and the list
+    // does not lose a row to a key collision.
+    expect(new Set(list(state).map(item => item.id)).size).toBe(list(state).length)
+
+    // …and the answer goes to the LIVE card, not back to the settled one.
+    state = answerRequest(state, 'srq-7', 'next')
+
+    expect(list(state).filter(item => item.kind === 'approval')[0]).toMatchObject({ state: 'answered', answer: 'once' })
+    expect(list(state).find(item => item.kind === 'clarify')).toMatchObject({ state: 'answered' })
+  })
+
+  it('still ignores a redelivered request whose card is still open', () => {
+    const once = applyServerRequest(fresh(), approvalRequest, NOW)
+
+    expect(applyServerRequest(once, { ...approvalRequest, replayed: true }, NOW)).toBe(once)
   })
 
   it('withdraws a cancel addressed to the approval queue id rather than the request id', () => {
@@ -810,6 +997,39 @@ describe('resume snapshots', () => {
     expect(state.byRequestId['srq-4']).toBeDefined()
   })
 
+  it('rebuilds an in-flight cron delivery as a cron card, not as the owner speaking', () => {
+    // A resume can land mid-turn on a turn nobody local submitted. The live path
+    // has to reach the same item the history path would, or the chat changes
+    // shape the moment the rows persist.
+    const running = applyResumeSnapshot(fresh(), { inflight: { user: cronBotChatText }, running: true }, NOW)
+    const first = list(running)[0] as CronDeliveryItem
+
+    expect(first).toMatchObject({
+      kind: 'cron_delivery',
+      jobName: 'Inbox scan',
+      shape: 'bot_chat',
+      origin: 'inflight'
+    })
+    expect(first.body).toBe(cronBotChatBody)
+  })
+
+  it('reaches the identical item live and from history', () => {
+    const live = list(applyResumeSnapshot(fresh(), { inflight: { user: cronBotChatText } }, NOW))[0]!
+    const [fromHistory] = rowsToItems([{ role: 'user', text: cronBotChatText }], 'rpc') as [CronDeliveryItem]
+
+    // Everything but the bookkeeping the two paths cannot share: an id, a seq, an
+    // origin and a timestamp the row has and a resume snapshot does not.
+    const body = ({ id: _i, seq: _s, origin: _o, ts: _t, ...rest }: TranscriptItem) => rest
+
+    expect(body(live)).toEqual(body(fromHistory))
+  })
+
+  it('still rebuilds an ordinary in-flight turn as the owner speaking', () => {
+    const typed = applyResumeSnapshot(fresh(), { inflight: { user: '[urgent] deploy staging' } }, NOW)
+
+    expect(list(typed)[0]).toMatchObject({ kind: 'user', text: '[urgent] deploy staging' })
+  })
+
   it('rebuilds a retained failed turn as a failure', () => {
     const failed = applyResumeSnapshot(
       fresh(),
@@ -879,5 +1099,97 @@ describe('applySubagentSnapshot', () => {
     const state = run(delegationEvents)
 
     expect(applySubagentSnapshot(state, [], NOW)).toBe(state)
+  })
+})
+
+/**
+ * One turn is one thought, and one preview is not three messages.
+ *
+ * Both halves of the owner's "every thought appears twice with Show thinking
+ * on": a summary that lands after the tool that interrupted the thinking used to
+ * open a second bubble carrying the same block, and every `message.interim` used
+ * to stack another muted copy of the same growing sentence above the answer.
+ *
+ * Measured through `visibleItems` rather than off the state, because "appears
+ * twice" is a statement about what the reader sees.
+ */
+describe('a thinking turn', () => {
+  const shown = (state: ChatState) => visibleItems(state, { level: 'normal', showBotToBot: true, showThinking: true })
+  const thoughts = (state: ChatState) =>
+    shown(state)
+      .map(entry => entry.item)
+      .filter((item): item is AssistantItem => item.kind === 'assistant' && Boolean(item.reasoning?.trim()))
+  const replies = (state: ChatState) =>
+    shown(state)
+      .map(entry => entry.item)
+      .filter((item): item is AssistantItem => item.kind === 'assistant' && Boolean(item.text.trim()))
+
+  describe('reasoning → interim → interim → complete', () => {
+    const state = run(thinkingTurn)
+
+    it('shows the thought exactly once', () => {
+      expect(thoughts(state).map(item => item.reasoning)).toEqual(['The changelog is the place to look.'])
+    })
+
+    it('shows one reply, not a preview stacked under every preview', () => {
+      expect(replies(state).map(item => item.text)).toEqual(['Version 1.2.0 ships three fixes.'])
+    })
+
+    it('replaces the preview rather than appending to it', () => {
+      // The whole turn is one bubble here: the second interim overwrote the
+      // first, and the completion settled onto it because it continued it.
+      expect(state.order.filter(id => state.items[id]?.kind === 'assistant')).toHaveLength(1)
+      expect((list(state).at(-1) as AssistantItem).interim).toBe(false)
+    })
+  })
+
+  describe('a summary that arrives after the tool that interrupted it', () => {
+    const state = run(thinkingSummarisedAfterToolTurn)
+
+    it('keeps the thought on the bubble that was thinking it', () => {
+      expect(thoughts(state).map(item => item.reasoning)).toEqual(['Read the changelog.'])
+    })
+
+    it('does not open a second bubble for the same thinking', () => {
+      const assistants = list(state).filter(item => item.kind === 'assistant') as AssistantItem[]
+
+      expect(assistants.map(item => item.text)).toEqual(['Let me check.', 'Version 1.2.0 ships three fixes.'])
+      expect(assistants.filter(item => item.reasoning)).toHaveLength(1)
+    })
+
+    it('forgets the thought when the turn ends, so the next one thinks afresh', () => {
+      expect(state.turn.reasoningId).toBeUndefined()
+    })
+  })
+
+  describe('the same turn, hydrated from history', () => {
+    // What the gateway persists for the turn above: the previews are live-only,
+    // so one assistant row carries the thought and the reply. Both sidecar keys
+    // are set because providers send both, and the projection must not read the
+    // thought out of each of them.
+    const items = rowsToItems(
+      [
+        { role: 'user', text: 'What is in 1.2.0?', row_id: 1 },
+        {
+          role: 'assistant',
+          text: 'Version 1.2.0 ships three fixes.',
+          reasoning: 'The changelog is the place to look.',
+          reasoning_content: 'The changelog is the place to look.',
+          row_id: 2
+        }
+      ],
+      'rpc'
+    )
+    const assistants = items.filter((item): item is AssistantItem => item.kind === 'assistant')
+
+    it('shows one thought and one reply', () => {
+      expect(assistants).toHaveLength(1)
+      expect(assistants[0]?.reasoning).toBe('The changelog is the place to look.')
+      expect(assistants[0]?.text).toBe('Version 1.2.0 ships three fixes.')
+    })
+
+    it('carries no interim, so nothing is drawn muted under the answer', () => {
+      expect(assistants.every(item => !item.interim)).toBe(true)
+    })
   })
 })

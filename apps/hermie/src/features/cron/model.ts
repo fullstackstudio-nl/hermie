@@ -1,12 +1,23 @@
 /**
- * The routine model: one shape for a cron job, whichever surface it arrived on.
+ * The cron model: one shape for a cron job, whichever surface it arrived on.
  *
  * The gateway has two of them and they do not agree. `cron.manage {action:
  * 'list'}` answers with `_format_job` rows, which key the job as `job_id` and
- * carry a `prompt_preview`; `GET /api/cron/jobs/{id}` answers with the stored
- * job, which keys it as `id` and carries the full `prompt`. Normalising both
- * here is what lets the list and the detail screen read the same fields, and
- * what keeps that difference from leaking into three components.
+ * carry a `prompt_preview`; the HTTP routes answer the STORED job, which keys
+ * it as `id` and carries the full `prompt`. Normalising both here is what lets
+ * the list and the detail screen read the same fields, and what keeps that
+ * difference from leaking into three components.
+ *
+ * Two fields differ by more than their name, and both used to read as empty:
+ *
+ * - **schedule.** `_format_job` flattens it to the human `schedule_display`
+ *   string, while the stored job keeps the PARSED spec — an object — under
+ *   `schedule` and the human string under `schedule_display`. Reading
+ *   `record.schedule` alone therefore got `''` from every HTTP row.
+ * - **repeat.** `_format_job` renders it ("forever", "once", "2/3"); the stored
+ *   job keeps `{times, completed}`, where `times: null` means forever. Only the
+ *   count is modelled — a rendered string cannot be counted back — so a WS row's
+ *   `repeat` stays null rather than being parsed out of its own prose.
  */
 import type { CronJobRow } from '@hermes/shared/gateway-contract'
 
@@ -30,10 +41,16 @@ export interface CronJob {
   lastError: string | null
   pausedAt: string | null
   pausedReason: string | null
+  /** How many times in total; null is "until removed". */
   repeat: number | null
   skills: string[]
   model: string | null
-  /** Set when the job lives in a profile's cron store rather than the default one. */
+  /**
+   * Which profile's cron store the job lives in. The HTTP list tags every row
+   * with it (`_annotate_cron_job`); every mutation and detail read has to hand
+   * it back, because `cron.manage` binds HERMES_HOME to it and would otherwise
+   * look for the job in the launch profile's store.
+   */
   profile: string | null
 }
 
@@ -69,6 +86,46 @@ function num(value: unknown): number | null {
   return null
 }
 
+/**
+ * The schedule as a line, from either surface.
+ *
+ * Mirrors `cron/jobs.py::_schedule_display_for_job`: the stored spec is an
+ * object whose readable form is one of a known set of keys, and a spec that
+ * carries none of them is better shown as nothing than as `[object Object]`.
+ */
+function scheduleDisplay(record: Record<string, unknown>): string {
+  const display = str(record.schedule_display).trim()
+
+  if (display) {
+    return display
+  }
+
+  const schedule = record.schedule
+
+  if (typeof schedule === 'string') {
+    return schedule
+  }
+
+  if (isRecord(schedule)) {
+    for (const key of ['display', 'value', 'expr', 'run_at']) {
+      const text = str(schedule[key]).trim()
+
+      if (text) {
+        return text
+      }
+    }
+  }
+
+  return ''
+}
+
+/** `{times, completed}` from the stored job, or a plain count. */
+function repeatTimes(value: unknown): number | null {
+  return num(isRecord(value) ? value.times : value)
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
+
 /** Normalise either surface's row. `job_id` wins when both keys are present. */
 export function cronJobFromRow(row: CronJobRow | Record<string, unknown>): CronJob {
   const record = row as Record<string, unknown>
@@ -79,7 +136,7 @@ export function cronJobFromRow(row: CronJobRow | Record<string, unknown>): CronJ
   return {
     id: str(record.job_id) || str(record.id),
     name: str(record.name),
-    schedule: str(record.schedule),
+    schedule: scheduleDisplay(record),
     prompt: str(record.prompt),
     promptPreview: str(record.prompt_preview) || str(record.prompt),
     deliver: str(record.deliver) || 'local',
@@ -92,24 +149,51 @@ export function cronJobFromRow(row: CronJobRow | Record<string, unknown>): CronJ
     lastRunAt: nullableStr(record.last_run_at),
     lastStatus: nullableStr(record.last_status),
     lastError:
-      nullableStr(record.last_error) ?? nullableStr(record.last_fire_error) ?? nullableStr(record.last_delivery_error),
+      nullableStr(record.last_error) ??
+      lastFireError(record.last_fire_error) ??
+      nullableStr(record.last_delivery_error),
     pausedAt: nullableStr(record.paused_at),
     pausedReason: nullableStr(record.paused_reason),
-    repeat: num(record.repeat),
+    repeat: repeatTimes(record.repeat),
     skills,
     model: nullableStr(record.model),
-    profile: nullableStr(record.profile)
+    // `profile_name` is the same value under the key the profiles routes use;
+    // accepting both means one annotated row shape fewer to care about.
+    profile: nullableStr(record.profile) ?? nullableStr(record.profile_name)
   }
 }
 
-/** One `/runs` row. They are ordinary session rows, in `list_sessions_rich` shape. */
+/**
+ * A missed fire, which the gateway records as an OBJECT.
+ *
+ * `last_error` and `last_delivery_error` are strings; `last_fire_error` is
+ * `{at, detail}` — the scheduler stamps when it could not start the job. Read as
+ * a string it was silently dropped, so a cron that never got off the ground
+ * showed no error at all in this app. The detail is the sentence worth showing.
+ */
+function lastFireError(value: unknown): string | null {
+  if (isRecord(value)) {
+    return nullableStr(value.detail)
+  }
+
+  return nullableStr(value)
+}
+
+/**
+ * One `/runs` row. They are ordinary session rows, in `list_sessions_rich` shape.
+ *
+ * A session row has NO `status` column — the outcome is `end_reason`, which the
+ * portability layer copies straight out of the sessions table. Reading `status`
+ * alone meant every run rendered as the "ok" it fell back to, including the ones
+ * that were interrupted or died, and nothing said otherwise.
+ */
 export function cronRunFromRow(row: Record<string, unknown>): CronRun {
   return {
     id: str(row.id),
     startedAt: num(row.started_at),
     endedAt: num(row.ended_at),
     lastActive: num(row.last_active),
-    status: nullableStr(row.status),
+    status: nullableStr(row.status) ?? nullableStr(row.end_reason),
     messageCount: num(row.message_count) ?? 0,
     preview: str(row.preview),
     title: str(row.title)
@@ -152,6 +236,32 @@ export function cronStatusOf(job: CronJob): CronStatus {
 
 export function cronStatusLabel(status: CronStatus): string {
   return cronStrings.status[status]
+}
+
+/**
+ * The job one id names, or nothing.
+ *
+ * The inverse of the chat transcript's own lookup, which goes from a cron
+ * card's NAME to an id. This direction is what an id arriving from outside the
+ * list needs — a notification payload's `jobId`, a route parameter — and
+ * `nothing` is a real answer rather than a failure: the crons list is read by
+ * the Crons screen's own controller, so before that screen has been opened once
+ * this app genuinely does not know what the id refers to.
+ */
+export function cronJobFor(jobs: readonly CronJob[], jobId: string): CronJob | null {
+  return jobId ? (jobs.find(job => job.id === jobId) ?? null) : null
+}
+
+/**
+ * What to CALL a job, given its id.
+ *
+ * Empty where the id resolves to nothing, and the callers are expected to say
+ * something general rather than print the id: an id is not a name, and a line
+ * reading `cron "8f3a-…" failed` has told the reader less than "a scheduled run
+ * failed" would have.
+ */
+export function cronJobName(jobs: readonly CronJob[], jobId: string): string {
+  return cronJobFor(jobs, jobId)?.name ?? ''
 }
 
 // The scheduler stores `last_error` as raw exception text, e.g.

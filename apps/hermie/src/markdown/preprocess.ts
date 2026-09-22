@@ -2,12 +2,17 @@
  * Hermes-specific Markdown fixes, applied before the lexer sees the text.
  *
  * This is the subset of `apps/desktop/src/lib/markdown-preprocess.ts` that
- * still applies here. Deliberately dropped: everything about math. The desktop
- * app renders KaTeX; Hermie has no math renderer, so normalising `$$` fences
- * and escaping currency dollars would only churn text nobody looks at
- * differently. Dropped for the same reason: preview targets, session-ref
+ * still applies here. Deliberately dropped: preview targets, session-ref
  * linkification and the HTML nesting clamp — all three route into desktop-only
  * renderers that do not exist on this side.
+ *
+ * **Mathematics is not here either, and that is a decision rather than a gap.**
+ * There IS a math renderer now (ADR-0020), and the desktop app protects `$…$`
+ * from the lexer by rewriting it in a file like this one. Hermie does it one
+ * level down instead, as real tokens — `markdown/math/marked-math.ts` — because
+ * a mask applied here would have to survive every other rewrite below it, and
+ * each of those is a pass over the same string that does not know what it is
+ * stepping through. A tokenizer says it once, at the level that owns it.
  *
  * What is ported, and why each one matters while a reply is still streaming:
  *
@@ -22,6 +27,9 @@
  *   - Table spacing. Models routinely emit a table with no blank line above
  *     it; GFM then reads the header row as the tail of the paragraph and the
  *     table renders as pipes.
+ *   - Stray spaces inside an emphasis run (`** bold**`). CommonMark says that
+ *     opens nothing, so the lexer emits no `strong` token at all and the reader
+ *     sees the asterisks.
  */
 
 // Same tag set as the upstream scrubber, plus the desktop-only `scratchpad`
@@ -453,6 +461,195 @@ function normalizeVisibleProse(text: string): string {
 }
 
 /**
+ * A maximal run of `*` or `_`. Only runs of exactly two are candidates below,
+ * which is what keeps `***bold italic***` (one run of three) and a `* item`
+ * bullet (one run of one) out of the transform entirely.
+ */
+const DELIMITER_RUN_RE = /\*+|_+/g
+const EMPHASIS_PUNCTUATION_RE = /[\p{P}\p{S}]/u
+
+interface DelimiterRun {
+  char: string
+  start: number
+  end: number
+}
+
+/**
+ * Inline code replaced by a filler of the same length, so a `**` inside a code
+ * span is invisible to the scan while the two halves of ``** `x` y**`` can
+ * still find each other. Same length means every index maps straight back onto
+ * the original line. NUL is the filler because it reads as a word character to
+ * the flanking checks — which is what a code span is — and cannot occur in text.
+ */
+function maskInlineCode(line: string): string {
+  return line
+    .split(INLINE_CODE_SPLIT_RE)
+    .map(part => (part.startsWith('`') ? '\0'.repeat(part.length) : part))
+    .join('')
+}
+
+function isSpaceAt(text: string, index: number): boolean {
+  const char = text[index]
+
+  // Off the end of the line counts as whitespace, the way CommonMark treats the
+  // start and end of a line.
+  return char === undefined || /\s/.test(char)
+}
+
+function isPunctuationAt(text: string, index: number): boolean {
+  const char = text[index]
+
+  return char !== undefined && EMPHASIS_PUNCTUATION_RE.test(char)
+}
+
+// CommonMark's flanking rules, only as far as a two-character run needs them.
+// Without these the transform would happily produce a delimiter pair the lexer
+// still refuses — `see** (x)**` → `see**(x)**` opens nothing either — and churn
+// text for no gain.
+function isLeftFlanking(text: string, start: number, end: number): boolean {
+  if (isSpaceAt(text, end)) {
+    return false
+  }
+
+  return !isPunctuationAt(text, end) || isSpaceAt(text, start - 1) || isPunctuationAt(text, start - 1)
+}
+
+function isRightFlanking(text: string, start: number, end: number): boolean {
+  if (isSpaceAt(text, start - 1)) {
+    return false
+  }
+
+  return !isPunctuationAt(text, start - 1) || isSpaceAt(text, end) || isPunctuationAt(text, end)
+}
+
+function canOpen(text: string, run: DelimiterRun): boolean {
+  if (!isLeftFlanking(text, run.start, run.end)) {
+    return false
+  }
+
+  // `_` is the intraword-safe delimiter: it may only open when it is not also a
+  // closer, so `snake_case` stays prose.
+  return run.char !== '_' || !isRightFlanking(text, run.start, run.end) || isPunctuationAt(text, run.start - 1)
+}
+
+function canClose(text: string, run: DelimiterRun): boolean {
+  if (!isRightFlanking(text, run.start, run.end)) {
+    return false
+  }
+
+  return run.char !== '_' || !isLeftFlanking(text, run.start, run.end) || isPunctuationAt(text, run.end)
+}
+
+function delimiterRuns(masked: string): DelimiterRun[] {
+  const runs: DelimiterRun[] = []
+
+  for (const match of masked.matchAll(DELIMITER_RUN_RE)) {
+    const run = match[0]
+
+    if (run.length === 2) {
+      runs.push({ char: run[0] ?? '*', start: match.index, end: match.index + run.length })
+    }
+  }
+
+  return runs
+}
+
+function whitespaceEndAfter(text: string, from: number): number {
+  let cursor = from
+
+  while (cursor < text.length && /[^\S\n]/.test(text[cursor] ?? '')) {
+    cursor += 1
+  }
+
+  return cursor
+}
+
+function whitespaceStartBefore(text: string, before: number): number {
+  let cursor = before
+
+  while (cursor > 0 && /[^\S\n]/.test(text[cursor - 1] ?? '')) {
+    cursor -= 1
+  }
+
+  return cursor
+}
+
+/**
+ * Drop the stray space out of one line's emphasis runs.
+ *
+ * Runs are paired left to right, and a pair is only repaired when exactly ONE
+ * of its two ends is broken by whitespace. That single rule is what keeps the
+ * transform off `a ** b ** c` — arithmetic and literal asterisks break BOTH
+ * ends, so there is nothing to anchor the intent on — while still catching the
+ * two shapes a model actually emits, `** bold**` and `**bold **`. It also makes
+ * the transform idempotent: a repaired pair has no broken end left.
+ */
+function repairEmphasisLine(line: string): string {
+  const masked = maskInlineCode(line)
+  const runs = delimiterRuns(masked)
+  const cuts: { start: number; end: number }[] = []
+
+  for (let index = 0; index + 1 < runs.length; index += 2) {
+    const open = runs[index]
+    const close = runs[index + 1]
+
+    if (!open || !close || open.char !== close.char) {
+      continue
+    }
+
+    const openSpaceEnd = whitespaceEndAfter(masked, open.end)
+    const closeSpaceStart = whitespaceStartBefore(masked, close.start)
+    const openBroken = openSpaceEnd > open.end
+    const closeBroken = closeSpaceStart < close.start
+
+    if (openBroken === closeBroken) {
+      continue
+    }
+
+    const cut = openBroken ? { start: open.end, end: openSpaceEnd } : { start: closeSpaceStart, end: close.start }
+    const content = masked.slice(openBroken ? openSpaceEnd : open.end, openBroken ? close.start : closeSpaceStart)
+
+    if (!content.trim()) {
+      continue
+    }
+
+    // Verify against the repaired line rather than trusting the shape: the cut
+    // has to leave a run the lexer will really treat as a delimiter pair.
+    const repaired = masked.slice(0, cut.start) + masked.slice(cut.end)
+    const shift = cut.end - cut.start
+    const movedClose = { char: close.char, start: close.start - shift, end: close.end - shift }
+
+    if (canOpen(repaired, open) && canClose(repaired, movedClose)) {
+      cuts.push(cut)
+    }
+  }
+
+  // Right to left, so an earlier cut does not move a later one's indices.
+  let out = line
+
+  for (const cut of cuts.reverse()) {
+    out = out.slice(0, cut.start) + out.slice(cut.end)
+  }
+
+  return out
+}
+
+/**
+ * `** bold**` and `**bold **` → `**bold**`.
+ *
+ * Line by line, because emphasis that has to reach across a line break is not a
+ * shape worth guessing at. Fenced blocks never get here — `preprocessMarkdown`
+ * splits them off first — and inline code is masked out per line.
+ */
+export function repairStrayEmphasisSpaces(text: string): string {
+  if (!text.includes('**') && !text.includes('__')) {
+    return text
+  }
+
+  return text.split('\n').map(repairEmphasisLine).join('\n')
+}
+
+/**
  * The one entry point. Safe to call on every streaming flush: it is pure, and
  * every transform is written so that a half-arrived construct settles into its
  * final shape rather than flipping between two renderings.
@@ -471,7 +668,7 @@ export function preprocessMarkdown(text: string): string {
         return part
       }
 
-      return spaceTableBlocks(normalizeVisibleProse(renderMediaTags(part)))
+      return spaceTableBlocks(normalizeVisibleProse(repairStrayEmphasisSpaces(renderMediaTags(part))))
     })
     .join('')
 }

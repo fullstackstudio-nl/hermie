@@ -41,8 +41,19 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      # The runner has two cores; say so, rather than let jest size its own pool.
+      # Called on the workspace directly: `npm run test:app -- …` would hand the
+      # flag to the nested npm call as an npm option instead of to jest.
       - name: App tests
-        run: npm run test:app
+        run: npm run test --workspace @hermie/app -- --maxWorkers=2
+
+      # The browser export is the one build a static check cannot stand in for:
+      # a native-only import added to a shared file compiles, typechecks and
+      # lints perfectly and then fails to bundle for the web. Ten seconds here
+      # is what keeps `packages/hermie-web` from shipping an app that cannot be
+      # built any more.
+      - name: The web build still exports
+        run: npm run web:build
 
       - name: Vendored sources are in sync
         run: npm run sync:hermes-shared:check
@@ -50,15 +61,22 @@ jobs:
       - name: Icons match the design source
         run: npm run icons:check
 
+      - name: Ink clears AA on every composited surface
+        run: npm run contrast:check
+
+      - name: Third-party licences match the dependency tree
+        run: npm run licences:check
+
       - name: Commit messages
         if: github.event_name == 'pull_request'
         run: node scripts/check-no-trailers.mjs origin/${{ github.base_ref }}..HEAD
 
   # The native builds are the slow, expensive half: they run on demand and on
-  # every release tag, not on every push. Nothing here signs anything — signing
-  # and notarisation live in release.yml, behind secrets. See docs/release.md.
+  # every release tag, not on every push. Nothing here signs anything. The Mac
+  # is not a job of its own: it is the iOS build, run on a different destination
+  # (ADR-0011), and a GitHub runner cannot sign one without a real team.
   android:
-    name: Android debug build
+    name: Android build
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
@@ -84,14 +102,21 @@ jobs:
         run: npx expo prebuild --platform android --no-install
         working-directory: apps/hermie
 
+      # Release as well as Debug, deliberately. The template gives the debug
+      # manifest keys the main one lacks — `usesCleartextTraffic` was exactly
+      # that until ADR-0014 — so a debug-only job is blind to the configuration
+      # every user actually runs. Release is also the only one that minifies.
+      # Neither APK is signed with anything but the template's debug key.
       - name: Assemble
-        run: ./gradlew assembleDebug --no-daemon
+        run: ./gradlew assembleDebug assembleRelease --no-daemon
         working-directory: apps/hermie/android
 
       - uses: actions/upload-artifact@v4
         with:
-          name: hermie-android-debug-apk
-          path: apps/hermie/android/app/build/outputs/apk/debug/app-debug.apk
+          name: hermie-android-apks
+          path: |
+            apps/hermie/android/app/build/outputs/apk/debug/app-debug.apk
+            apps/hermie/android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
 
   ios:
@@ -128,53 +153,3 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO \
             build
-
-  macos:
-    name: macOS build
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - name: Install
-        run: npm ci
-
-      - name: Pods
-        run: pod install
-        working-directory: apps/hermie/macos
-
-      # Release rather than Debug: only a Release build runs the phase that
-      # bundles the JavaScript into the app, so a Debug product is not something
-      # anyone can run without a Metro server.
-      - name: Build
-        working-directory: apps/hermie/macos
-        run: |
-          xcodebuild \
-            -workspace Hermie.xcworkspace \
-            -scheme Hermie-macOS \
-            -configuration Release \
-            -derivedDataPath build/DerivedData \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            build
-
-      # ditto, not zip: a .app is a bundle with symlinks and resource forks, and
-      # a plain zip of one does not survive the round trip.
-      - name: Package
-        working-directory: apps/hermie/macos
-        run: |
-          ditto -c -k --sequesterRsrc --keepParent \
-            build/DerivedData/Build/Products/Release/Hermie.app \
-            Hermie-macos-unsigned.zip
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: hermie-macos-unsigned
-          path: apps/hermie/macos/Hermie-macos-unsigned.zip
-          if-no-files-found: error

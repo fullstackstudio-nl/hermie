@@ -1,9 +1,12 @@
 import { View } from 'react-native'
 
+import { GatewayAddressRow } from '../../../gateway/GatewayAddressRow'
+import { RefreshNotice } from '../../../gateway/RefreshNotice'
 import { strings } from '../../../i18n/strings'
-import { InsetGroup, InsetValueRow, Text } from '../../../ui/primitives'
+import { InsetGroup, InsetValueRow } from '../../../ui/primitives'
 import { useTheme } from '../../../ui/theme'
 import { authModeOf, type OnboardingDraft } from '../draft'
+import { StatusLine } from '../StatusLine'
 
 export interface DoneStepProps {
   draft: OnboardingDraft
@@ -15,14 +18,9 @@ export function DoneStep({ draft, error }: DoneStepProps) {
   const authMode = authModeOf(draft.probe)
 
   return (
-    <View style={{ gap: theme.space.xl }}>
-      <View style={{ gap: theme.space.sm }}>
-        <Text variant="title">{strings.onboarding.done.title}</Text>
-        <Text color="textMuted">{strings.onboarding.done.subtitle}</Text>
-      </View>
-
+    <View style={{ gap: theme.space.md }}>
       <InsetGroup header={strings.onboarding.done.gateway}>
-        <InsetValueRow label={strings.settings.address} value={draft.baseUrl ?? ''} />
+        <GatewayAddressRow baseUrl={draft.baseUrl} />
         <InsetValueRow
           label={strings.settings.provider}
           value={
@@ -37,10 +35,18 @@ export function DoneStep({ draft, error }: DoneStepProps) {
         ) : null}
       </InsetGroup>
 
+      {/*
+        Said here rather than only in Settings, because this is the last screen
+        where the owner is still thinking about the sign-in they just did. The
+        draft's own token set is what answers it — nothing has been written to
+        the keychain yet at this point in the wizard.
+      */}
+      <RefreshNotice canRefresh={!draft.tokens || Boolean(draft.tokens.refreshToken)} testID="done-no-refresh" />
+
       {error ? (
-        <Text color="danger" testID="done-error">
+        <StatusLine testID="done-error" tone="error">
           {error}
-        </Text>
+        </StatusLine>
       ) : null}
     </View>
   )

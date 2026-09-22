@@ -1,0 +1,9 @@
+{
+  "name": "hermie-dev-launch",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Android counterpart of the iOS dev launch arguments: reads this launch's Intent extras",
+  "license": "MIT",
+  "author": "FullStack Studio",
+  "homepage": "https://hermie.dev"
+}

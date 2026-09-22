@@ -1,0 +1,9 @@
+{
+  "name": "hermie-drop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Accepts files dragged onto the chat from the Finder or another app",
+  "license": "MIT",
+  "author": "FullStack Studio",
+  "homepage": "https://hermie.dev"
+}

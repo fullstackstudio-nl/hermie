@@ -1,29 +1,34 @@
 /**
- * Everything Routines needs from the gateway.
+ * Everything the Crons screen needs from the gateway.
  *
  * The cron surface is split across two transports and the split is not
  * arbitrary, so it is worth stating once instead of guessing at each call site:
  *
- * - The **list** is WS `cron.manage {action:'list', include_disabled:true}`.
- *   It is the only call that answers `gateway_running`, which is what tells the
- *   screen whether the scheduler process is alive, and the only one that
- *   reports jobs across every profile in one round trip.
- * - **Pause and resume** are WS `cron.manage` too. Both surfaces can do it;
- *   picking one and staying there means one code path to reason about, and the
- *   WS one is the surface the list already trusts.
- * - **Everything else** is HTTP on the same origin, because it has no WS
- *   equivalent: the full prompt (`GET`), edits (`PUT {updates}`), deletion,
- *   `trigger`, the run history, and the delivery targets.
- *
- * Creation is WS `cron.manage {action:'add'}` rather than `POST /api/cron/jobs`
- * — the same reason as pause/resume: it is the surface whose answer already
- * carries the refreshed job list.
+ * - The **list** is HTTP `GET /api/cron/jobs?profile=all`. That is the only
+ *   call that answers for every profile: `cron.manage` is a `_scoped_rpc`, so
+ *   it binds HERMES_HOME to the ONE profile in its params and answers from that
+ *   profile's cron store alone (`tui_gateway/methods_tools.py::_profile_scoped_rpc`).
+ *   A WS list without a `profile` therefore reports the launch profile's jobs
+ *   and nothing else — which is why a cron owned by a bot profile used to be
+ *   invisible here while the dashboard, which uses this route, listed it.
+ *   Every row comes back tagged with its `profile` (`_annotate_cron_job`), and
+ *   the route always lists disabled jobs, so the Paused section still fills.
+ * - One WS `cron.manage {action:'list'}` rides along for **`gateway_running`**
+ *   alone — the flag that says whether the scheduler process is alive, which no
+ *   HTTP route reports. Its jobs are discarded and its failure is swallowed: a
+ *   list that renders without knowing the scheduler's state beats no list.
+ * - **Pause, resume and creation** are WS `cron.manage`, each carrying the
+ *   job's `profile` so the scope lands on the right store. Unlike the HTTP
+ *   routes it does not search for the owner, so a missing `profile` is not a
+ *   slow path but a wrong one: the job is simply "not found".
+ * - **Everything else** is HTTP, because it has no WS equivalent: the full
+ *   prompt (`GET`), edits (`PUT {updates}`), deletion, `trigger`, the run
+ *   history, and the delivery targets.
  *
  * Mutations do not patch the store optimistically. Every one of them makes the
  * gateway broadcast `cron.changed`, and the debounced refetch that follows is
  * the truth — including `next_run_at`, which only the server can compute.
  */
-import type { CronJobRow } from '@hermes/shared/gateway-contract'
 import type { GatewayHttp } from '@hermie/gateway-client'
 import type { TranscriptRow } from '@hermie/transcript'
 
@@ -63,6 +68,8 @@ export interface CronJobInput {
   schedule: string
   deliver: string
   repeat?: number
+  /** Whose cron store to create the job in. Absent means the launch profile. */
+  profile?: string | null
 }
 
 export class CronController {
@@ -130,12 +137,15 @@ export class CronController {
     this.store.getState().setLoading(true)
 
     try {
-      const result = await this.gateway.request('cron.manage', { action: 'list', include_disabled: true })
-      const rows: CronJobRow[] = result?.jobs ?? []
-      const jobs = rows.map(cronJobFromRow)
-      // `gateway_running` is only meaningful when the call itself succeeded;
-      // an absent flag stays unknown rather than becoming "not running".
-      const running = typeof result?.gateway_running === 'boolean' ? result.gateway_running : null
+      // The two halves are independent, and only the HTTP one may fail the
+      // read: the scheduler flag is a decoration on a list, not a reason to
+      // have none.
+      const [body, running] = await Promise.all([
+        this.get<unknown>('/api/cron/jobs?profile=all'),
+        this.loadGatewayRunning()
+      ])
+
+      const jobs = listRows(body).map(cronJobFromRow)
 
       this.store.getState().setJobs(jobs, running)
 
@@ -146,6 +156,24 @@ export class CronController {
       throw error
     } finally {
       this.store.getState().setLoading(false)
+    }
+  }
+
+  /**
+   * `gateway_running`, the one thing only `cron.manage` says.
+   *
+   * `include_disabled` is still forwarded: the flag rides on the job list, and
+   * `_action_list` attaches it only when the list came back non-empty, so a
+   * gateway whose every job is paused would otherwise never report it.
+   */
+  private async loadGatewayRunning(): Promise<boolean | null> {
+    try {
+      const result = await this.gateway.request('cron.manage', { action: 'list', include_disabled: true })
+
+      // An absent flag stays unknown rather than becoming "not running".
+      return typeof result?.gateway_running === 'boolean' ? result.gateway_running : null
+    } catch {
+      return null
     }
   }
 
@@ -217,7 +245,7 @@ export class CronController {
       })
 
       if (result?.success === false) {
-        throw new Error(result.error ?? `The gateway refused to ${action} this routine.`)
+        throw new Error(result.error ?? `The gateway refused to ${action} this cron.`)
       }
     })
   }
@@ -236,11 +264,14 @@ export class CronController {
       schedule: input.schedule,
       prompt: input.prompt,
       deliver: input.deliver,
-      ...(input.repeat === undefined ? {} : { repeat: input.repeat })
+      ...(input.repeat === undefined ? {} : { repeat: input.repeat }),
+      // The scope decides which cron store the job is written to, so this is
+      // the whole of "create it for that bot"; there is no owner field.
+      ...(input.profile ? { profile: input.profile } : {})
     })
 
     if (result?.success === false) {
-      throw new Error(result.error ?? 'The gateway refused the routine.')
+      throw new Error(result.error ?? 'The gateway refused the cron.')
     }
 
     await this.refresh()
@@ -298,8 +329,10 @@ export class CronController {
   private jobPath(job: Pick<CronJob, 'id' | 'profile'>, suffix = '', extra: Record<string, string> = {}): string {
     const query = new URLSearchParams(extra)
 
-    // A profile-scoped job lives in that profile's cron store; without the
-    // parameter the gateway looks in the default one and answers 404.
+    // Without it these routes fall back to `_find_cron_job_profile`, which
+    // walks every profile's store and takes the first id that matches — so
+    // omitting it is not just a wasted search but a coin toss between two
+    // profiles that named a job the same thing.
     if (job.profile) {
       query.set('profile', job.profile)
     }
@@ -337,6 +370,19 @@ export class CronController {
 const LOCAL_TARGET: CronDeliveryTarget = { id: 'local', name: 'Local (save only)', homeTargetSet: true }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
+
+/**
+ * The rows out of a list response.
+ *
+ * `hermes serve` answers `GET /api/cron/jobs` with a bare array; a `{jobs: …}`
+ * envelope is what every other cron route uses and what the WS half sends, so
+ * both are read rather than one being declared correct.
+ */
+function listRows(body: unknown): Record<string, unknown>[] {
+  const rows = Array.isArray(body) ? body : isRecord(body) && Array.isArray(body.jobs) ? body.jobs : []
+
+  return rows.filter(isRecord)
+}
 
 /**
  * The job out of a detail/update response.

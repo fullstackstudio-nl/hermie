@@ -1,6 +1,7 @@
+import { type AuthEventRecorder, type AuthTimelineSink, NULL_AUTH_TIMELINE } from './auth-timeline'
 import { type FetchLike, parseJsonObject, requestText } from './fetch-json'
 import { apiUrl, normalizeHeaders } from './url'
-import { GatewayError } from './types'
+import { GatewayError, type GatewayErrorKind, isGatewayError } from './types'
 
 /** Refresh this long before the access token actually expires. */
 export const REFRESH_SKEW_SECONDS = 60
@@ -25,6 +26,8 @@ export interface NativeAuthOptions {
   extraHeaders?: Record<string, string>
   fetchImpl?: FetchLike
   timeoutMs?: number
+  /** Where a sign-in that cannot be refreshed is recorded. */
+  timeline?: AuthEventRecorder
 }
 
 function toTokenSet(body: Record<string, unknown>, url: string): TokenSet {
@@ -81,13 +84,40 @@ export async function exchangeCode(
     })
   }
 
-  return toTokenSet(parseJsonObject(response.text, url, 'protocol'), url)
+  const tokens = toTokenSet(parseJsonObject(response.text, url, 'protocol'), url)
+
+  if (!tokens.refreshToken) {
+    // The gateway answered with an access token and nothing to rotate it with.
+    // That is not an error — the sign-in worked and the session is live — but
+    // it has an expiry date the owner has not been told about, and the reason
+    // is a scope on the provider's client registration rather than anything
+    // here. See `AuthEventName['signin.no_refresh']`.
+    ;(options.timeline ?? NULL_AUTH_TIMELINE).record({ event: 'signin.no_refresh', kind: 'auth' })
+  }
+
+  return tokens
 }
 
 /**
- * Rotate a refresh token. A 401 means every provider rejected it and the user
- * has to sign in again; a 503 means the identity provider is unreachable and
- * the same refresh token is still worth retrying later.
+ * The only statuses that mean "this grant is finished, sign in again".
+ *
+ * Everything else a refresh can answer with is a statement about the moment, not
+ * about the grant, and the difference decides whether the user keeps their
+ * session: a definitive rejection reaches `TokenCoordinator.clear()` and deletes
+ * the refresh token, which cannot be undone by retrying.
+ *
+ * This set used to be "401, or anything else that is not ok and not 5xx", which
+ * swept up 408 and 429 — a request timeout and a rate limiter, neither of which
+ * has an opinion about the refresh token. A gateway behind a proxy that
+ * throttled a burst of refreshes signed the user out and threw away a token that
+ * was still good.
+ */
+const DEFINITIVE_REFRESH_STATUSES = new Set([400, 401, 403])
+
+/**
+ * Rotate a refresh token. A 400/401/403 means the grant is finished and the user
+ * has to sign in again; a 503 means the identity provider is unreachable and the
+ * same refresh token is still worth retrying later.
  */
 export async function refreshTokens(
   baseUrl: string,
@@ -108,8 +138,8 @@ export async function refreshTokens(
     timeoutMs: options.timeoutMs
   })
 
-  if (response.status === 401) {
-    throw new GatewayError('auth', 'Your session has expired. Sign in again.', { status: 401 })
+  if (DEFINITIVE_REFRESH_STATUSES.has(response.status)) {
+    throw new GatewayError('auth', 'Your session has expired. Sign in again.', { status: response.status })
   }
 
   if (response.status === 503) {
@@ -118,14 +148,17 @@ export async function refreshTokens(
     })
   }
 
-  if (response.status >= 500) {
-    throw new GatewayError('server', `The gateway answered HTTP ${response.status} while refreshing.`, {
-      status: response.status
-    })
+  // A gateway too old to have the endpoint is a configuration story, not an
+  // expired session: saying `auth` here would sign the user out of a gateway
+  // that never had a refresh route to begin with.
+  if (response.status === 404) {
+    throw new GatewayError('protocol', 'This gateway has no /auth/native/refresh endpoint (HTTP 404).', { status: 404 })
   }
 
   if (!response.ok) {
-    throw new GatewayError('auth', `The refresh failed with HTTP ${response.status}.`, { status: response.status })
+    throw new GatewayError('server', `The gateway answered HTTP ${response.status} while refreshing.`, {
+      status: response.status
+    })
   }
 
   return toTokenSet(parseJsonObject(response.text, url, 'protocol'), url)
@@ -138,6 +171,22 @@ export function tokenNeedsRefresh(tokens: TokenSet, nowSeconds: number, skew = R
   }
 
   return tokens.expiresAt - nowSeconds < skew
+}
+
+/**
+ * The classification of a failure, and nothing else from it.
+ *
+ * A timeline entry must be safe to paste into an issue, so the message never
+ * travels — only the `kind` and the HTTP status a `GatewayError` already carries.
+ * Something thrown by the platform's secret store has neither, and stays
+ * anonymous rather than being guessed at.
+ */
+function kindOf(error: unknown): { kind?: GatewayErrorKind; status?: number } {
+  if (!isGatewayError(error)) {
+    return {}
+  }
+
+  return { kind: error.kind, ...(error.status === undefined ? {} : { status: error.status }) }
 }
 
 /** Thrown when a sign-in or sign-out landed while a refresh was in flight. */
@@ -155,6 +204,8 @@ export interface TokenCoordinatorOptions {
   skewSeconds?: number
   /** A refresh failure that means "sign in again" rather than "try later". */
   isAuthRejection?: (error: unknown) => boolean
+  /** Where the rotation record goes, so a later sign-out can be read back. */
+  timeline?: AuthTimelineSink
 }
 
 export interface AccessTokenOptions {
@@ -175,15 +226,18 @@ export interface AccessTokenOptions {
  * into single fields.
  */
 export class TokenCoordinator {
-  private readonly options: Required<Omit<TokenCoordinatorOptions, 'store' | 'refresh'>> &
+  // `timeline` is excluded: it has its own field, defaulted to the no-op ring.
+  private readonly options: Required<Omit<TokenCoordinatorOptions, 'store' | 'refresh' | 'timeline'>> &
     Pick<TokenCoordinatorOptions, 'store' | 'refresh'>
   private refreshFlight: Promise<string | null> | null = null
   private authEpoch = 0
   /** Memo of the stored set; the secret store is slow and asked on every request. */
   private cached: TokenSet | null | undefined
   private loadFlight: Promise<TokenSet | null> | null = null
+  private readonly timeline: AuthTimelineSink
 
   constructor(options: TokenCoordinatorOptions) {
+    this.timeline = options.timeline ?? NULL_AUTH_TIMELINE
     this.options = {
       store: options.store,
       refresh: options.refresh,
@@ -207,16 +261,38 @@ export class TokenCoordinator {
       // contents of the store back over the token that just replaced them.
       const flightEpoch = this.authEpoch
 
-      this.loadFlight = this.options.store.load().then(loaded => {
-        if (this.authEpoch !== flightEpoch) {
-          return this.cached ?? null
+      const flight = this.options.store.load().then(
+        loaded => {
+          if (this.authEpoch !== flightEpoch) {
+            return this.cached ?? null
+          }
+
+          this.cached = loaded
+
+          if (this.loadFlight === flight) {
+            this.loadFlight = null
+          }
+
+          return loaded
+        },
+        (error: unknown) => {
+          // A keychain read can fail transiently — an item that is
+          // `WhenUnlocked` and a process that asked a moment too early. Leaving
+          // the rejected promise memoised here made one unlucky read permanent:
+          // every later caller got the SAME rejection, so the coordinator could
+          // never produce a token again and the dial loop reconnected forever
+          // against a store that had been readable all along.
+          if (this.loadFlight === flight) {
+            this.loadFlight = null
+          }
+
+          this.timeline.record({ event: 'token.read_failed', ...kindOf(error) })
+
+          throw error
         }
+      )
 
-        this.cached = loaded
-        this.loadFlight = null
-
-        return loaded
-      })
+      this.loadFlight = flight
     }
 
     return this.loadFlight
@@ -248,10 +324,19 @@ export class TokenCoordinator {
       !(options.forceRefresh && rejectedCurrent) &&
       !tokenNeedsRefresh(tokens, this.options.nowSeconds(), this.options.skewSeconds)
     ) {
+      // The remaining lifetime as THIS device's clock reads it. A reading far
+      // from the lifetime the gateway issues is the only visible fingerprint of
+      // clock drift, which is otherwise indistinguishable from an expired token.
+      this.timeline.record({
+        event: 'token.served',
+        ...(tokens.expiresAt ? { expiresIn: tokens.expiresAt - this.options.nowSeconds() } : {})
+      })
+
       return tokens.accessToken
     }
 
     if (!tokens.refreshToken) {
+      this.timeline.record({ event: 'token.cleared', reason: 'no_refresh_token' })
       await this.clear()
 
       return null
@@ -302,12 +387,16 @@ export class TokenCoordinator {
     const flight = (async (): Promise<string | null> => {
       let rotated: TokenSet
 
+      this.timeline.record({ event: 'refresh.start' })
+
       try {
         rotated = await this.options.refresh(tokens)
       } catch (error) {
         assertCurrent()
+        this.timeline.record({ event: 'refresh.failed', ...kindOf(error) })
 
         if (this.options.isAuthRejection(error)) {
+          this.timeline.record({ event: 'token.cleared', reason: 'refresh_rejected' })
           await this.clear()
 
           return null
@@ -317,8 +406,25 @@ export class TokenCoordinator {
       }
 
       assertCurrent()
+      this.timeline.record({
+        event: 'refresh.ok',
+        ...(rotated.expiresAt ? { expiresIn: rotated.expiresAt - this.options.nowSeconds() } : {})
+      })
       this.cached = rotated
-      await this.options.store.save(rotated)
+
+      try {
+        await this.options.store.save(rotated)
+        this.timeline.record({ event: 'token.write_ok' })
+      } catch (error) {
+        // Rotation is destructive at the server: the refresh token just spent is
+        // dead the moment the gateway answers. Rejecting here would throw away a
+        // token set that works — breaking the session NOW on top of the next
+        // launch being signed out anyway, because the store still holds the dead
+        // pair. So the rotated set is served from memory and the failed write is
+        // recorded, which is the only way the next sign-out can be traced back
+        // to this moment.
+        this.timeline.record({ event: 'token.write_failed', ...kindOf(error) })
+      }
 
       return rotated.accessToken
     })()

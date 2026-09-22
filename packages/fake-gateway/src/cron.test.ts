@@ -160,12 +160,91 @@ describe('cron.manage over the socket', () => {
       unknown
     >
 
-    expect(resumed).toMatchObject({ enabled: true, state: 'active' })
+    // `scheduled`, which is the word `cron/jobs.py::_job_state` produces. There
+    // is no `active` state on a real gateway.
+    expect(resumed).toMatchObject({ enabled: true, state: 'scheduled' })
     expect(resumed.next_run_at).toBeTypeOf('string')
   })
 
   it('reports a job it does not have rather than inventing one', async () => {
     expect(await call('cron.manage', { action: 'pause', name: 'job-nope' })).toMatchObject({ success: false })
+  })
+})
+
+/**
+ * The half of the contract that made a real cron invisible in Hermie.
+ *
+ * `cron.manage` is a `_scoped_rpc`: it binds HERMES_HOME to its `profile` param
+ * and reads ONE profile's `cron/jobs.json`. The REST list is the only surface
+ * that walks every profile, and the only one that says which store a row came
+ * out of. A client that lists over the socket therefore cannot see a cron that
+ * belongs to a bot, and cannot mutate one if it somehow learned the id.
+ */
+describe('profile scope', () => {
+  it('hides a profile-owned cron from an unscoped socket list', async () => {
+    const jobs = (await call('cron.manage', { action: 'list', include_disabled: true })).jobs as Record<
+      string,
+      unknown
+    >[]
+
+    expect(jobs.map(job => job.job_id)).not.toContain('job-inbox-scan')
+    // Not a filter on the row: the rows it does answer carry no owner at all.
+    expect(jobs[0]).not.toHaveProperty('profile')
+  })
+
+  it("answers that profile's store when the socket call is scoped", async () => {
+    const result = await call('cron.manage', { action: 'list', include_disabled: true, profile: 'researcher' })
+    const jobs = result.jobs as Record<string, unknown>[]
+
+    expect(result.scoped).toBe('researcher')
+    expect(jobs.map(job => job.job_id)).toEqual(['job-inbox-scan'])
+  })
+
+  it('lists every profile over REST, each row tagged with its own', async () => {
+    const rows = (await rest('/api/cron/jobs')) as Record<string, unknown>[]
+    const owners = new Map(rows.map(row => [row.id, row.profile]))
+
+    expect(owners.get('job-inbox-scan')).toBe('researcher')
+    expect(owners.get('job-heartbeat')).toBe('default')
+    expect(rows).toHaveLength(4)
+  })
+
+  it('narrows the REST list to one profile when asked', async () => {
+    const rows = (await rest('/api/cron/jobs?profile=researcher')) as Record<string, unknown>[]
+
+    expect(rows.map(row => row.id)).toEqual(['job-inbox-scan'])
+  })
+
+  it("refuses to mutate a profile-owned cron from the launch profile's scope", async () => {
+    expect(await call('cron.manage', { action: 'pause', name: 'job-inbox-scan' })).toMatchObject({ success: false })
+
+    const paused = await call('cron.manage', { action: 'pause', name: 'job-inbox-scan', profile: 'researcher' })
+
+    expect(paused.success).toBe(true)
+    expect(paused.job).toMatchObject({ enabled: false, state: 'paused' })
+  })
+
+  it('creates into the scope it was given, not into the launch profile', async () => {
+    await call('cron.manage', {
+      action: 'add',
+      name: 'Scoped sweep',
+      schedule: 'every 6h',
+      prompt: 'Sweep.',
+      deliver: 'local',
+      profile: 'writer'
+    })
+
+    const rows = (await rest('/api/cron/jobs')) as Record<string, unknown>[]
+    const created = rows.find(row => row.name === 'Scoped sweep')
+
+    expect(created?.profile).toBe('writer')
+
+    const unscoped = (await call('cron.manage', { action: 'list', include_disabled: true })).jobs as Record<
+      string,
+      unknown
+    >[]
+
+    expect(unscoped.map(job => job.name)).not.toContain('Scoped sweep')
   })
 })
 

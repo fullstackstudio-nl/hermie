@@ -10,14 +10,28 @@
  * an override follows the default as the default moves; an override pins that
  * chat until it is reset. Both are persisted through the `KeyValueStore`.
  *
- * The appearance preference rides along here rather than in its own store: it
- * is the same blob on disk, read at the same moment, and a second store would
- * mean a second first-paint flash.
+ * The appearance preference lives in this store and in a key of its own. One
+ * store, because a second one would mean a second first-paint flash; two keys,
+ * because everything else here belongs to a gateway account and light-or-dark
+ * belongs to the device. Both are read in the same pass, so the flash the
+ * single blob was avoiding is still avoided.
  */
 import type { Verbosity } from '@hermie/transcript'
 import { create } from 'zustand'
 
+import type { GatewayNamespace } from '../gateway/namespace'
 import { keyValueStore } from '../platform/key-value-store'
+import { asNameOrder, DEFAULT_NAME_ORDER, type NameOrder } from './bot-names'
+import { asTextSize, DEFAULT_TEXT_SIZE, type TextSize } from './text-size'
+import {
+  DEFAULT_THEME_CHOICE,
+  isThemePresetName,
+  THEME_PRESETS,
+  type ThemeChoice,
+  type ThemePresetName,
+  type UserTheme,
+  type UserThemeFace
+} from '../ui/themes'
 
 /** `system` follows the OS; the other two pin the app regardless of it. */
 export type Appearance = 'system' | 'light' | 'dark'
@@ -30,25 +44,144 @@ export interface ChatViewSettings {
   showThinking: boolean
 }
 
-/** The plan's defaults: Normal, bot-to-bot traffic visible, thinking folded away. */
+/** The defaults: Quiet, bot-to-bot traffic visible, thinking folded away. Quiet is what a
+ * messenger looks like; the tool cards are one tap away in the chat options. */
 export const DEFAULT_CHAT_VIEW: ChatViewSettings = {
-  level: 'normal',
+  level: 'quiet',
   showBotToBot: true,
   showThinking: false
 }
 
+/**
+ * The per-account half, keyed by gateway.
+ *
+ * Everything under it either follows the account through ADR-0016's
+ * `hermie-app:<user_id>` — the defaults, the name order, the theme — or is
+ * keyed by bot name, which is a gateway's own namespace. `perChat` is the one
+ * that decides it: two gateways can both have a `researcher`, and one of them
+ * pinning that chat to Verbose must not turn the other one verbose too.
+ */
 export const CHAT_VIEW_KEY = 'hermie.chat.view'
+
+/**
+ * Light or dark, on this device, whatever gateway is live.
+ *
+ * The one field pulled OUT of the blob above, because it is the one that is not
+ * about an account at all: it is about the eyes in front of the screen and the
+ * room they are in. A reader whose phone went light because they switched to
+ * their work gateway would have found a bug, not a feature.
+ */
+export const APPEARANCE_KEY = 'hermie.appearance'
+
+interface PersistedAppearance {
+  appearance?: Appearance
+}
 
 interface PersistedChatView {
   defaults: ChatViewSettings
   perChat: Record<string, Partial<ChatViewSettings>>
-  appearance?: Appearance
+  botNameOrder?: NameOrder
+  themeChoice?: ThemeChoice
+  userThemes?: UserTheme[]
+  textSize?: TextSize
+  /** What Part 2 wrote before a theme was a theme. Read, never written. */
+  wallpaper?: string
 }
 
 const APPEARANCES: readonly Appearance[] = ['system', 'light', 'dark']
 
 const asAppearance = (value: unknown): Appearance | undefined =>
   typeof value === 'string' && (APPEARANCES as readonly string[]).includes(value) ? (value as Appearance) : undefined
+
+/**
+ * What a wallpaper name from an older build becomes.
+ *
+ * `warm` had no successor and falls back to Blue. `slate` becomes Graphite, which
+ * is the same composition it was: a matte floor whose panels sit a step above it,
+ * neutral now rather than grey-blue. Anything unrecognised is ignored, which
+ * leaves the default.
+ */
+const RETIRED_WALLPAPERS: Record<string, ThemePresetName> = {
+  blue: 'blue',
+  warm: 'blue',
+  graphite: 'graphite',
+  slate: 'graphite'
+}
+
+const asFace = (value: unknown): UserThemeFace | undefined => {
+  if (!value || typeof value !== 'object') {
+    return undefined
+  }
+
+  const raw = value as Record<string, unknown>
+  const hex = (input: unknown): string | undefined =>
+    typeof input === 'string' && /^#[0-9a-f]{6}$/iu.test(input) ? input : undefined
+
+  const face: UserThemeFace = {
+    ...(hex(raw.background) ? { background: hex(raw.background) as string } : {}),
+    ...(hex(raw.accentFill) ? { accentFill: hex(raw.accentFill) as string } : {}),
+    ...(hex(raw.accentBubble) ? { accentBubble: hex(raw.accentBubble) as string } : {})
+  }
+
+  return Object.keys(face).length ? face : undefined
+}
+
+/** Read the reader's own themes defensively: they arrive from disk AND from a gateway. */
+export function asUserThemes(value: unknown): UserTheme[] {
+  const out: UserTheme[] = []
+  const seen = new Set<string>()
+
+  for (const entry of Array.isArray(value) ? value : []) {
+    if (!entry || typeof entry !== 'object') {
+      continue
+    }
+
+    const raw = entry as Record<string, unknown>
+    const id = typeof raw.id === 'string' ? raw.id : ''
+
+    // An id is how a choice points at a theme, so a row without one — or a
+    // duplicate, which would make the pointer ambiguous — is not a theme.
+    if (!id || seen.has(id) || !isThemePresetName(raw.base)) {
+      continue
+    }
+
+    seen.add(id)
+
+    const light = asFace(raw.light)
+    const dark = asFace(raw.dark)
+
+    out.push({
+      id,
+      name: typeof raw.name === 'string' ? raw.name : '',
+      base: raw.base,
+      ...(light ? { light } : {}),
+      ...(dark ? { dark } : {})
+    })
+  }
+
+  return out
+}
+
+/** Read a stored theme choice, folding the retired wallpaper names into it. */
+export function asThemeChoice(value: unknown, legacyWallpaper?: unknown): ThemeChoice | undefined {
+  if (value && typeof value === 'object') {
+    const raw = value as Record<string, unknown>
+
+    if (raw.kind === 'preset' && isThemePresetName(raw.name)) {
+      return { kind: 'preset', name: raw.name }
+    }
+
+    if (raw.kind === 'user' && typeof raw.id === 'string' && raw.id) {
+      return { kind: 'user', id: raw.id }
+    }
+  }
+
+  if (typeof legacyWallpaper === 'string' && RETIRED_WALLPAPERS[legacyWallpaper]) {
+    return { kind: 'preset', name: RETIRED_WALLPAPERS[legacyWallpaper] as ThemePresetName }
+  }
+
+  return undefined
+}
 
 const VERBOSITY: readonly Verbosity[] = ['quiet', 'normal', 'verbose']
 
@@ -75,85 +208,313 @@ export interface SettingsState {
   defaults: ChatViewSettings
   perChat: Record<string, Partial<ChatViewSettings>>
   appearance: Appearance
+  /**
+   * Which of a bot's two names is the large one. See `store/bot-names.ts`.
+   *
+   * App-wide rather than per chat, and deliberately so: it is a statement about
+   * how this reader thinks about their bots, and a list where four rows lead
+   * with a handle and two with a label is a list that has to be read twice.
+   */
+  botNameOrder: NameOrder
+  /** Which theme the glass floats over: a preset, or one of the reader's own. */
+  themeChoice: ThemeChoice
+  /** Themes the reader made. App-wide, and ADR-0016's `hermie-app` carries them. */
+  userThemes: UserTheme[]
+  /**
+   * How big the words in a transcript are (`store/text-size.ts`).
+   *
+   * One setting for the whole account rather than one per chat, and the same
+   * argument `botNameOrder` makes: it is a statement about this reader's eyes,
+   * and eyes do not change between conversations. It is reachable from two
+   * places — Settings › Appearance and the chat's own popover — because the
+   * moment a reader notices they want it is while they are reading, and a
+   * setting they have to go and look for is one they turn up once and never
+   * adjust again.
+   */
+  textSize: TextSize
   /** False until the first disk read finishes; screens paint the defaults meanwhile. */
   loaded: boolean
-  hydrate: () => Promise<void>
+  /**
+   * The same, for the appearance alone.
+   *
+   * Its own flag because its read happens at a different moment and above a
+   * different provider: `ThemeProvider` sits over the whole app, including the
+   * lock and the wizard, and has no gateway to key anything by. One flag for
+   * both would leave it either waiting for a gateway that may never be
+   * configured or re-reading on every render.
+   */
+  appearanceLoaded: boolean
+  /** The gateway the per-account half belongs to; null before the first read. */
+  namespace: GatewayNamespace | null
+  hydrate: (ns: GatewayNamespace) => Promise<void>
+  /** Read the device-level appearance. No gateway needed; see `appearanceLoaded`. */
+  hydrateAppearance: () => Promise<void>
   setDefaults: (patch: Partial<ChatViewSettings>) => void
   setChatView: (botName: string, patch: Partial<ChatViewSettings>) => void
   resetChatView: (botName: string) => void
   setAppearance: (appearance: Appearance) => void
+  setBotNameOrder: (order: NameOrder) => void
+  setTextSize: (size: TextSize) => void
+  setThemeChoice: (choice: ThemeChoice) => void
+  /** Copy a preset into a theme of the reader's own, and return its id. */
+  createUserTheme: (base: ThemePresetName, name: string) => string
+  renameUserTheme: (id: string, name: string) => void
+  /** Patch one scheme's face. A colour of `null` goes back to following the preset. */
+  editUserTheme: (id: string, scheme: 'light' | 'dark', patch: Record<string, string | null>) => void
+  deleteUserTheme: (id: string) => void
+  /**
+   * Replace the app-wide half wholesale, with the gateway's copy.
+   *
+   * ADR-0016's reconcile hands that copy straight in. It is written to DISK like
+   * any other change — the device's own store is what the UI paints from, and a
+   * theme that only ever lived in memory was a theme the next launch showed the
+   * old one of, offline for as long as the socket stayed down. What it is
+   * deliberately not is a write back to the GATEWAY: the bridge is deaf while
+   * this runs, so the arriving value is not read back as a local change and sent
+   * home again.
+   */
+  applyAppSettings: (patch: {
+    defaults?: ChatViewSettings
+    botNameOrder?: NameOrder
+    themeChoice?: ThemeChoice
+    userThemes?: UserTheme[]
+    textSize?: TextSize
+  }) => void
   reset: () => void
 }
 
 let writeQueue: Promise<void> = Promise.resolve()
 
 /** Serialise the writes: two toggles flipped in the same tick must not race. */
-function persist(state: PersistedChatView): void {
+function persist(ns: GatewayNamespace, state: PersistedChatView): void {
   writeQueue = writeQueue
-    .then(() => keyValueStore.setJson(CHAT_VIEW_KEY, state))
+    .then(() => keyValueStore.setJson(ns.key(CHAT_VIEW_KEY), state))
     .catch(() => {
       // A preference that failed to persist is a preference that resets on the
       // next launch, which is not worth surfacing as an error.
     })
 }
 
-export const useSettingsStore = create<SettingsState>((set, get) => ({
-  defaults: DEFAULT_CHAT_VIEW,
-  perChat: {},
-  appearance: DEFAULT_APPEARANCE,
-  loaded: false,
-
-  async hydrate() {
-    const stored = await keyValueStore.getJson<PersistedChatView>(CHAT_VIEW_KEY)
-    const perChat: Record<string, Partial<ChatViewSettings>> = {}
-
-    for (const [bot, patch] of Object.entries(stored?.perChat ?? {})) {
-      const parsed = asPatch(patch)
-
-      if (Object.keys(parsed).length) {
-        perChat[bot] = parsed
-      }
-    }
-
-    set({
-      defaults: { ...DEFAULT_CHAT_VIEW, ...asPatch(stored?.defaults) },
-      perChat,
-      appearance: asAppearance(stored?.appearance) ?? DEFAULT_APPEARANCE,
-      loaded: true
+function persistAppearance(appearance: Appearance): void {
+  writeQueue = writeQueue
+    .then(() => keyValueStore.setJson(APPEARANCE_KEY, { appearance }))
+    .catch(() => {
+      // As above.
     })
-  },
+}
 
-  setDefaults(patch) {
-    const defaults = { ...get().defaults, ...patch }
+/**
+ * A user theme's id, unique enough for a set of themes one person made.
+ *
+ * It has to survive travelling to a second device through `hermie-app`, so it is
+ * a value rather than an index: two phones both appending a theme would otherwise
+ * both call it number three.
+ */
+let themeCounter = 0
 
-    set({ defaults })
-    persist({ defaults, perChat: get().perChat, appearance: get().appearance })
-  },
+function newThemeId(): string {
+  themeCounter += 1
 
-  setChatView(botName, patch) {
-    const perChat = { ...get().perChat, [botName]: { ...get().perChat[botName], ...patch } }
+  return `t${Date.now().toString(36)}${themeCounter.toString(36)}`
+}
 
-    set({ perChat })
-    persist({ defaults: get().defaults, perChat, appearance: get().appearance })
-  },
+export const useSettingsStore = create<SettingsState>((set, get) => {
+  /** Write whatever is in the store now; every setter calls this after its `set`. */
+  const save = (): void => {
+    const { namespace: ns, defaults, perChat, botNameOrder, themeChoice, userThemes, textSize } = get()
 
-  resetChatView(botName) {
-    const perChat = { ...get().perChat }
-
-    delete perChat[botName]
-    set({ perChat })
-    persist({ defaults: get().defaults, perChat, appearance: get().appearance })
-  },
-
-  setAppearance(appearance) {
-    set({ appearance })
-    persist({ defaults: get().defaults, perChat: get().perChat, appearance })
-  },
-
-  reset() {
-    set({ defaults: DEFAULT_CHAT_VIEW, perChat: {}, appearance: DEFAULT_APPEARANCE, loaded: false })
+    // Nothing before a gateway is known. These are somebody's settings ON a
+    // gateway, and a blob under a key nobody owns is one the next launch will
+    // not find. The appearance is the exception and is not here at all: it has
+    // a device-level key of its own and `persistAppearance` writes it.
+    if (ns) {
+      persist(ns, { defaults, perChat, botNameOrder, themeChoice, userThemes, textSize })
+    }
   }
-}))
+
+  const writeThemes = (userThemes: UserTheme[]): void => {
+    set({ userThemes })
+    save()
+  }
+
+  return {
+    defaults: DEFAULT_CHAT_VIEW,
+    perChat: {},
+    appearance: DEFAULT_APPEARANCE,
+    botNameOrder: DEFAULT_NAME_ORDER,
+    themeChoice: DEFAULT_THEME_CHOICE,
+    userThemes: [],
+    textSize: DEFAULT_TEXT_SIZE,
+    loaded: false,
+    appearanceLoaded: false,
+    namespace: null,
+
+    async hydrateAppearance() {
+      const stored = await keyValueStore.getJson<PersistedAppearance>(APPEARANCE_KEY)
+
+      set({ appearance: asAppearance(stored?.appearance) ?? DEFAULT_APPEARANCE, appearanceLoaded: true })
+    },
+
+    async hydrate(ns) {
+      const stored = await keyValueStore.getJson<PersistedChatView>(ns.key(CHAT_VIEW_KEY))
+      const perChat: Record<string, Partial<ChatViewSettings>> = {}
+
+      for (const [bot, patch] of Object.entries(stored?.perChat ?? {})) {
+        const parsed = asPatch(patch)
+
+        if (Object.keys(parsed).length) {
+          perChat[bot] = parsed
+        }
+      }
+
+      set({
+        namespace: ns,
+        defaults: { ...DEFAULT_CHAT_VIEW, ...asPatch(stored?.defaults) },
+        perChat,
+        botNameOrder: asNameOrder(stored?.botNameOrder) ?? DEFAULT_NAME_ORDER,
+        themeChoice: asThemeChoice(stored?.themeChoice, stored?.wallpaper) ?? DEFAULT_THEME_CHOICE,
+        userThemes: asUserThemes(stored?.userThemes),
+        textSize: asTextSize(stored?.textSize) ?? DEFAULT_TEXT_SIZE,
+        loaded: true
+      })
+    },
+
+    setDefaults(patch) {
+      set({ defaults: { ...get().defaults, ...patch } })
+      save()
+    },
+
+    setChatView(botName, patch) {
+      set({ perChat: { ...get().perChat, [botName]: { ...get().perChat[botName], ...patch } } })
+      save()
+    },
+
+    resetChatView(botName) {
+      const perChat = { ...get().perChat }
+
+      delete perChat[botName]
+      set({ perChat })
+      save()
+    },
+
+    setAppearance(appearance) {
+      set({ appearance })
+      // Its own key, and therefore its own write: it is the one preference here
+      // that does not belong to a gateway.
+      persistAppearance(appearance)
+    },
+
+    setBotNameOrder(botNameOrder) {
+      set({ botNameOrder })
+      save()
+    },
+
+    setTextSize(textSize) {
+      set({ textSize })
+      save()
+    },
+
+    setThemeChoice(themeChoice) {
+      set({ themeChoice })
+      save()
+    },
+
+    createUserTheme(base, name) {
+      const id = newThemeId()
+      const preset = THEME_PRESETS[base]
+
+      // The new theme starts as a COPY of the preset's two backgrounds rather
+      // than as an empty shell, so the editor has something to show and an edit
+      // to one face cannot look like it moved the other.
+      writeThemes([
+        ...get().userThemes,
+        {
+          id,
+          name,
+          base,
+          light: { background: preset.light.background },
+          dark: { background: preset.dark.background }
+        }
+      ])
+
+      return id
+    },
+
+    renameUserTheme(id, name) {
+      writeThemes(get().userThemes.map(theme => (theme.id === id ? { ...theme, name } : theme)))
+    },
+
+    editUserTheme(id, scheme, patch) {
+      writeThemes(
+        get().userThemes.map(theme => {
+          if (theme.id !== id) {
+            return theme
+          }
+
+          const face: Record<string, string> = { ...(theme[scheme] ?? {}) }
+
+          for (const [key, value] of Object.entries(patch)) {
+            if (value === null) {
+              delete face[key]
+            } else {
+              face[key] = value
+            }
+          }
+
+          return { ...theme, [scheme]: face as UserThemeFace }
+        })
+      )
+    },
+
+    deleteUserTheme(id) {
+      const userThemes = get().userThemes.filter(theme => theme.id !== id)
+      const choice = get().themeChoice
+
+      // Deleting the theme that is ON must leave a window that can still be read,
+      // so the choice falls back to the base it was built from rather than to a
+      // pointer at nothing. `resolveThemeFace` would survive the dangling id on
+      // its own; this is so the picker agrees with what is on screen.
+      const removed = get().userThemes.find(theme => theme.id === id)
+
+      set({
+        userThemes,
+        ...(choice.kind === 'user' && choice.id === id
+          ? { themeChoice: { kind: 'preset' as const, name: removed?.base ?? 'blue' } }
+          : {})
+      })
+      save()
+    },
+
+    applyAppSettings(patch) {
+      set({
+        ...(patch.defaults ? { defaults: patch.defaults } : {}),
+        ...(patch.botNameOrder ? { botNameOrder: patch.botNameOrder } : {}),
+        ...(patch.themeChoice ? { themeChoice: patch.themeChoice } : {}),
+        ...(patch.userThemes ? { userThemes: patch.userThemes } : {}),
+        // Absent is not wrong: a section written before this field leaves the
+        // reader on their own size rather than being read as "they chose
+        // Default".
+        ...(patch.textSize ? { textSize: patch.textSize } : {})
+      })
+      save()
+    },
+
+    reset() {
+      set({
+        defaults: DEFAULT_CHAT_VIEW,
+        perChat: {},
+        appearance: DEFAULT_APPEARANCE,
+        botNameOrder: DEFAULT_NAME_ORDER,
+        themeChoice: DEFAULT_THEME_CHOICE,
+        userThemes: [],
+        textSize: DEFAULT_TEXT_SIZE,
+        loaded: false,
+        appearanceLoaded: false,
+        namespace: null
+      })
+    }
+  }
+})
 
 /** True when this chat pins its own view rather than following the default. */
 export function hasChatViewOverride(state: SettingsState, botName: string): boolean {

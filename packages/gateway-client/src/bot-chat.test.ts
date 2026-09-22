@@ -14,15 +14,18 @@ import {
   applyServerRequest,
   answerRequest,
   beginLocalTurn,
+  beginSteer,
   type ChatState,
   confirmSubmit,
   createChatState,
+  dropSteer,
   reconcile,
   reconcileTail,
   rowsToItems,
   type TranscriptEvent,
   type TranscriptItem,
   type TranscriptRow,
+  type UserItem,
   visibleItems
 } from '@hermie/transcript'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -48,6 +51,8 @@ interface ChatHarness {
   connection: GatewayConnection
   /** The live transcript, as the store would hold it. */
   state: () => ChatState
+  /** Put a reducer's result back, the way the store's `patch` does. */
+  apply: (next: ChatState) => void
   runtimeSessionId: string
   /** `approval` / `clarify` requests the gateway asked, with their reply handle. */
   answered: string[]
@@ -59,6 +64,22 @@ interface ChatHarness {
   respondApproval: (requestId: string, choice: string) => void
   restRows: (limit: number) => Promise<TranscriptRow[]>
   waitFor: (predicate: (state: ChatState) => boolean, label: string) => Promise<void>
+  /** The session's working directory — the only place an upload can legally land. */
+  cwd?: string
+  /** Paint, submit and settle a turn, in the order the controller's `send` does. */
+  submit: (text: string, attachments?: string[]) => Promise<void>
+  /** The `sessions.changed` sweep: fold the REST tail into the live transcript. */
+  sweepTail: (limit?: number) => Promise<void>
+  /** Reopening the chat: throw the transcript away and project it from the rows. */
+  rehydrate: (limit?: number) => Promise<void>
+  /**
+   * Pull the gateway out from under the live session and let the app recover.
+   *
+   * The process that comes back on the same port has rebuilt every session, so
+   * the stored id the client holds is gone and the transcript it holds can be
+   * LONGER than the one the gateway now has. That asymmetry is what this is for.
+   */
+  restart: () => Promise<void>
 }
 
 async function openBotChat(profile: string, options: FakeGatewayOptions = {}): Promise<ChatHarness> {
@@ -89,6 +110,7 @@ async function openBotChat(profile: string, options: FakeGatewayOptions = {}): P
   const storedId = row.canonical_session.id
   const resolvedId = row.canonical_session.resolved_id || storedId
 
+  let resolved = resolvedId
   let state = createChatState(profile, storedId, resolvedId)
   const apply = (next: ChatState) => {
     state = next
@@ -105,7 +127,7 @@ async function openBotChat(profile: string, options: FakeGatewayOptions = {}): P
 
   assertDesktopContract(resume.info)
 
-  const runtimeSessionId = resume.session_id
+  let runtimeSessionId = resume.session_id
 
   expect(runtimeSessionId).not.toBe(storedId)
 
@@ -183,9 +205,12 @@ async function openBotChat(profile: string, options: FakeGatewayOptions = {}): P
   apply({ ...state, lastSeq: Math.max(state.lastSeq, since.latest_seq), epoch: since.epoch })
 
   const restRows = async (limit: number): Promise<TranscriptRow[]> => {
-    const response = await fetch(`${gateway.url}/api/sessions/${resolvedId}/messages?limit=${limit}&order=latest`, {
-      headers: { 'X-Hermes-Session-Token': 'demo' }
-    })
+    const response = await fetch(
+      `${live[live.length - 1]!.gateway.url}/api/sessions/${resolved}/messages?limit=${limit}&order=latest`,
+      {
+        headers: { 'X-Hermes-Session-Token': 'demo' }
+      }
+    )
     const body = (await response.json()) as { messages?: TranscriptRow[] }
 
     return body.messages ?? []
@@ -209,7 +234,10 @@ async function openBotChat(profile: string, options: FakeGatewayOptions = {}): P
     gateway,
     connection,
     state: () => state,
-    runtimeSessionId,
+    apply,
+    get runtimeSessionId() {
+      return runtimeSessionId
+    },
     answered,
     deliveries,
     storedSessionId: storedId,
@@ -223,7 +251,80 @@ async function openBotChat(profile: string, options: FakeGatewayOptions = {}): P
       replies.delete(requestId)
     },
     restRows,
-    waitFor
+    waitFor,
+    ...(typeof resume.info?.cwd === 'string' ? { cwd: resume.info.cwd } : {}),
+    async submit(text, attachments) {
+      apply(beginLocalTurn(state, text, attachments))
+
+      const result = await connection.request('prompt.submit', {
+        session_id: runtimeSessionId,
+        profile,
+        text
+      })
+
+      apply(confirmSubmit(state, { status: result?.status ?? null }))
+    },
+    async sweepTail(limit = 30) {
+      apply(reconcileTail(state, rowsToItems(await restRows(limit), 'rest')))
+    },
+    async rehydrate(limit = 30) {
+      apply(reconcile(state, rowsToItems(await restRows(limit), 'rest')))
+    },
+    async restart() {
+      const port = live[live.length - 1]!.gateway.port
+
+      await live[live.length - 1]!.gateway.close()
+
+      const dead = Date.now() + 5000
+
+      while (Date.now() < dead && connection.status === 'ready') {
+        await new Promise(resolve => setTimeout(resolve, 10))
+      }
+
+      live[live.length - 1]!.gateway = await startFakeGateway({
+        auth: 'token',
+        token: 'demo',
+        streamDelayMs: 1,
+        port,
+        ...options
+      })
+      await waitForStatus(connection, 'ready', 15_000)
+
+      // What the app does when the socket comes back and the session it held is
+      // gone: re-read the roster, resume the rebuilt canonical chat, and project
+      // its rows onto the transcript that is still on screen.
+      const again = await connection.request('profiles.list', { include_sessions: true })
+      const canonical = (again.profiles ?? []).find(entry => entry.name === profile)?.canonical_session
+
+      if (!canonical) {
+        throw new Error(`${profile} lost its canonical Bot Chat across the restart`)
+      }
+
+      resolved = canonical.resolved_id || canonical.id
+
+      const resumed = await connection.request('session.resume', {
+        session_id: canonical.id,
+        profile,
+        omit_messages: true,
+        source: 'hermie',
+        cols: 96
+      })
+
+      runtimeSessionId = resumed.session_id
+
+      const rows = await connection.request('session.history', { session_id: runtimeSessionId, profile })
+
+      apply(reconcile(state, rowsToItems((rows.messages ?? []) as TranscriptRow[], 'rpc')))
+
+      // A different process did the numbering, so every seq held describes a
+      // different sequence: adopt the watermark rather than replaying onto it.
+      const events = await connection.request('session.events.since', {
+        session_id: runtimeSessionId,
+        last_seen: 0
+      })
+
+      apply({ ...state, lastSeq: events.latest_seq, epoch: events.epoch })
+    }
   }
 }
 
@@ -245,6 +346,10 @@ const itemsOf = (state: ChatState): TranscriptItem[] =>
   state.order.map(id => state.items[id]).filter((item): item is TranscriptItem => Boolean(item))
 
 const kindsOf = (state: ChatState): string[] => itemsOf(state).map(item => item.kind)
+
+/** The human's own bubbles — what a duplicated send shows up as two of. */
+const outgoing = (state: ChatState): UserItem[] =>
+  itemsOf(state).filter((item): item is UserItem => item.kind === 'user')
 
 describe('a Bot Chat end to end', () => {
   it('hydrates the canonical chat with its tool row and its bot-to-bot exchange', async () => {
@@ -325,6 +430,95 @@ describe('a Bot Chat end to end', () => {
       answer: 'once'
     })
   }, 20_000)
+
+  /**
+   * Build 176: Steer emptied the queue strip and put nothing anywhere.
+   *
+   * The RPC was never the problem, so what these three drive is the BUBBLE,
+   * over a real socket against a gateway that really answers `session.steer` —
+   * including the case the client cannot detect on its own: whether accepting a
+   * steer leaves a row behind.
+   */
+  describe('steering a parked message into the running turn', () => {
+    const steers = (state: ChatState): UserItem[] => outgoing(state).filter(item => item.displayKind === 'steer')
+
+    it('paints one bubble, and the persisted row adopts it rather than doubling it', async () => {
+      const chat = await openBotChat('researcher')
+
+      await chat.submit('take your time')
+      await chat.waitFor(state => state.turn.active, 'the turn to be running')
+
+      // What `steerQueued` does: paint, then ask.
+      chat.apply(beginSteer(chat.state(), 'use the cached copy'))
+
+      const result = await chat.connection.request('session.steer', {
+        session_id: chat.runtimeSessionId,
+        profile: 'researcher',
+        text: 'use the cached copy'
+      })
+
+      expect(result.status).toBe('queued')
+      expect(steers(chat.state())).toHaveLength(1)
+
+      // This gateway DOES write a `display_kind: "steer"` row. The sweep must
+      // pair it with the bubble already up, or the correction shows up twice.
+      await chat.waitFor(state => !state.turn.active, 'the turn to finish')
+      await chat.sweepTail()
+
+      const paired = steers(chat.state())
+
+      expect(paired).toHaveLength(1)
+      expect(paired[0]?.rowId).toBeGreaterThan(0)
+      expect(outgoing(chat.state()).filter(item => item.text === 'use the cached copy')).toHaveLength(1)
+    }, 20_000)
+
+    it('keeps the bubble when the gateway persists no row for a steer', async () => {
+      // The other gateway, and the reason the bubble is painted locally at all:
+      // with nothing persisted, this item is the only record the reader gets.
+      const chat = await openBotChat('researcher', { steerPersistsRow: false })
+
+      await chat.submit('take your time')
+      await chat.waitFor(state => state.turn.active, 'the turn to be running')
+
+      chat.apply(beginSteer(chat.state(), 'use the cached copy'))
+
+      expect(
+        (
+          await chat.connection.request('session.steer', {
+            session_id: chat.runtimeSessionId,
+            profile: 'researcher',
+            text: 'use the cached copy'
+          })
+        ).status
+      ).toBe('queued')
+
+      await chat.waitFor(state => !state.turn.active, 'the turn to finish')
+      await chat.sweepTail()
+
+      expect(steers(chat.state())).toHaveLength(1)
+    }, 20_000)
+
+    it('refuses a steer with no turn to fold it into, and the bubble comes off', async () => {
+      const chat = await openBotChat('researcher')
+
+      expect(chat.state().turn.active).toBe(false)
+
+      chat.apply(beginSteer(chat.state(), 'too late'))
+
+      const result = await chat.connection.request('session.steer', {
+        session_id: chat.runtimeSessionId,
+        profile: 'researcher',
+        text: 'too late'
+      })
+
+      expect(result.status).toBe('rejected')
+
+      chat.apply(dropSteer(chat.state(), 'too late'))
+
+      expect(steers(chat.state())).toEqual([])
+      expect(outgoing(chat.state()).some(item => item.text === 'too late')).toBe(false)
+    }, 20_000)
+  })
 
   it('shows a delegation as subagent activity, one failed child included', async () => {
     // The fan-out is deliberately slow in normal use (a delegation nobody can
@@ -475,8 +669,11 @@ describe('a Bot Chat end to end', () => {
     })
 
     expect(catalog.pairs?.length).toBeGreaterThan(0)
-    expect(completions.items?.map(item => item.text)).toEqual(['/model'])
-    expect(executed.output).toContain('/status')
+    // No leading slash on `text`: that lives on `display`, and `replace_from`
+    // keeps the one already typed. Pinned in `upstream-shapes.test.ts`.
+    expect(completions.items?.map(item => item.text)).toEqual(['model'])
+    expect(completions.replace_from).toBe(1)
+    expect(executed.output).toContain('Hermes TUI Status')
   }, 20_000)
 
   it('scopes a chat option to the session and reports the new session info', async () => {
@@ -626,4 +823,99 @@ describe('a Bot Chat end to end', () => {
     expect(attached.attached).toBe(true)
     expect(chat.gateway.state.attachedImages).toHaveLength(1)
   }, 20_000)
+
+  it('paints one bubble for a file sent with no words, at every stage', async () => {
+    const chat = await openBotChat('researcher')
+
+    // The upload has to land under the session's own cwd or the `@file:`
+    // reference is refused as outside the allowed workspace.
+    expect(chat.cwd, 'the session reported no working directory').toBeTruthy()
+
+    const path = `${chat.cwd}/uploads/hermie/2026-09-20/8setj4h3-ui.xml`
+    const form = new FormData()
+
+    form.append('path', path)
+    form.append('overwrite', 'true')
+    form.append('file', new Blob(['<ui/>']), 'ui.xml')
+
+    const upload = await fetch(`${chat.gateway.url}/api/files/upload-stream`, {
+      method: 'POST',
+      headers: { 'X-Hermes-Session-Token': 'demo' },
+      body: form
+    })
+
+    expect(upload.status).toBe(200)
+
+    // No words at all: the reference IS the prompt. That is the send that came
+    // back as two bubbles, because the projection of it holds no text to pair on.
+    const reference = `@file:${path}`
+
+    // Only the bubbles carrying this file: the canonical chat opens with fixture
+    // history, and counting every outgoing bubble would count those too.
+    const carryingTheFile = (state: ChatState): UserItem[] =>
+      outgoing(state).filter(item => item.attachments?.some(ref => ref.endsWith('8setj4h3-ui.xml')))
+
+    await chat.submit(reference, [reference])
+
+    expect(carryingTheFile(chat.state())).toHaveLength(1)
+
+    await chat.waitFor(state => !state.turn.active, 'the reply to finish')
+    await chat.sweepTail()
+
+    expect(carryingTheFile(chat.state())).toHaveLength(1)
+    expect(carryingTheFile(chat.state())[0]?.rowId).toBeGreaterThan(0)
+    // The chip survives the pairing: the row's directive is the durable one.
+    expect(carryingTheFile(chat.state())[0]?.attachments).toEqual([reference])
+
+    await chat.rehydrate()
+
+    expect(carryingTheFile(chat.state())).toHaveLength(1)
+    // And the file really did reach the agent, which is the other half of the
+    // claim: one bubble showing an upload nothing read would be no better.
+    expect(itemsOf(chat.state()).some(item => item.kind === 'assistant' && item.text.includes('ui.xml'))).toBe(true)
+  }, 20_000)
+
+  /**
+   * Pulling the gateway out from under a live session.
+   *
+   * The round that found this had the app open against the fake gateway, killed
+   * it, and sent twice: React reported `Encountered two children with the same
+   * key … .$o=29000` and the same bubble appeared twice. `o:9000` is a
+   * transcript item id, minted from a counter `rebuild` used to re-derive from
+   * the transcript's LENGTH — and the session that comes back is SHORTER than
+   * the one on screen, so the counter walked back onto an id still in use.
+   */
+  it("keeps every row's id its own when the gateway is restarted under it", async () => {
+    const chat = await openBotChat('researcher')
+
+    await chat.submit('before the restart')
+    await chat.waitFor(state => !state.turn.active, 'the first reply to finish')
+    await chat.sweepTail()
+
+    const held = chat.state().order.length
+
+    await chat.restart()
+
+    // The whole point of the case: the rebuilt session has fewer rows than the
+    // client is holding, which is what used to walk the counter backwards.
+    expect(chat.state().order.length).toBeLessThan(held)
+
+    // Two sends, exactly as reported. The gateway that came back does not know
+    // this session's old id, so nothing pairs them away.
+    await chat.submit('first after the restart')
+    await chat.submit('second after the restart')
+
+    // Neither reached the rebuilt session, so both are still unpersisted when
+    // the reader comes back to the chat and it re-reads its rows. That sweep is
+    // what used to hand the next send an id one of these two was already using.
+    await chat.rehydrate()
+    await chat.submit('third after the restart')
+
+    const state = chat.state()
+
+    expect(new Set(state.order).size, `duplicate ids: ${state.order.join(' ')}`).toBe(state.order.length)
+    expect(outgoing(state).filter(item => item.text === 'first after the restart')).toHaveLength(1)
+    expect(outgoing(state).filter(item => item.text === 'second after the restart')).toHaveLength(1)
+    expect(outgoing(state).filter(item => item.text === 'third after the restart')).toHaveLength(1)
+  }, 30_000)
 })

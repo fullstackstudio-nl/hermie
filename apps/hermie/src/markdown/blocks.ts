@@ -23,7 +23,7 @@
  * Any doubt — no prefix match, or a reconstruction that does not equal the
  * input — falls back to the full lex, i.e. exactly the uncached behaviour.
  */
-import { marked } from 'marked'
+import { marked } from './marked-compat'
 
 const EXACT_CACHE_MAX = 64
 const exactCache = new Map<string, string[]>()

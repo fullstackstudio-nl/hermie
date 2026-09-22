@@ -29,6 +29,123 @@ export const plainProcessText = [
   'error TS2345: Argument of type string is not assignable.]'
 ].join('\n')
 
+/**
+ * The header `cron/scheduler_delivery.py::_deliver_to_bot_chat` splices in front
+ * of a report it injects into a bot's chat, verbatim at upstream b9c2660. The em
+ * dash, the quotes around the name and the BLANK line before the body are all
+ * part of it.
+ */
+export const cronBotChatHeader = (jobName: string) =>
+  `[Cronjob "${jobName}" output — scheduled job, not the user. Review it, act on ` +
+  'anything that needs action, and summarize for the chat.]'
+
+export const cronBotChatBody = [
+  '## Inbox scan',
+  '',
+  '- 3 threads waiting on a reply',
+  '- 1 invoice past due',
+  '',
+  'Nothing needs you before tomorrow.'
+].join('\n')
+
+export const cronBotChatText = `${cronBotChatHeader('Inbox scan')}\n\n${cronBotChatBody}`
+
+/** The second, different shape: `_cron_mirror_message`, one newline, no instruction. */
+export const cronMirrorText = '[Cron delivery: Morning Brief]\nTwo deploys overnight, both green.'
+
+/**
+ * A `delegate_task` fan-out reporting back, as
+ * `tools/process_registry_notifications.py::_format_batch_delegation` (line 204)
+ * writes it: the header alone on the first line, then the intro, the dispatch
+ * accounting, and one block per task.
+ */
+export const delegationBatchText = [
+  '[ASYNC DELEGATION BATCH COMPLETE — deleg_1bd47ada]',
+  'A background fan-out unit you dispatched earlier — 3 subagent(s) — has finished; its consolidated results are ' +
+    'below. Any other units from the same delegate_task call report separately as they finish.',
+  '',
+  'Dispatched: 2026-09-21 20:44:11 (14m ago)',
+  'Role: leaf   Model: gpt-5   Total duration: 812s',
+  '',
+  '--- ✓ TASK 1/3: Audit deps  (status=completed, 41s) ---',
+  'No drift.',
+  '',
+  '--- ✓ TASK 2/3: Write tests  (status=completed, 190s) ---',
+  'Nine cases, all green.',
+  '',
+  '--- ✗ TASK 3/3: Update docs  (status=failed) ---',
+  '(no summary — status=failed: the page was locked)'
+].join('\n')
+
+/**
+ * The compaction handoff (`agent/context_compressor.py`, lines 428–429). Its
+ * header is a line of its own and the block names its own end.
+ */
+export const priorContextText = [
+  '[PRIOR CONTEXT — for reference only; not a new message]',
+  'The owner asked for the release notes and then went quiet.',
+  '[END OF PRIOR CONTEXT — COMPACTION SUMMARY BELOW]'
+].join('\n')
+
+/**
+ * The model-switch marker, verbatim from
+ * `tui_gateway/server.py::_append_model_switch_marker` (line 1705). Persisted
+ * with `display_kind: "model_switch"` where the gateway can, and with nothing at
+ * all where it cannot — which is why the text has to be readable on its own.
+ */
+export const modelSwitchMarkerText =
+  '[System: The active model for this chat has changed to k3 via provider moonshot. From this point forward, use ' +
+  'this runtime metadata when answering questions about what model/provider is active.]'
+
+/** The personality counterpart, `tui_gateway/agent_callbacks.py` (line 270). */
+export const personalitySwitchMarkerText =
+  '[System: The user has cleared the personality overlay. From this point forward, respond in your normal default ' +
+  'style.]'
+
+/** `tools/todo_tool.py::TODO_INJECTION_HEADER` with the list it preserved. */
+export const todoInjectionText = [
+  '[Your active task list was preserved across context compression]',
+  '[>] Rotate the staging certificate',
+  '[ ] Write the release notes'
+].join('\n')
+
+/** The planning half of the same compaction handoff. */
+export const planningPreservedText = [
+  '[Planning state preserved across context compression]',
+  'Step 2 of 4: draft the migration.'
+].join('\n')
+
+/**
+ * `cron/scheduler_delivery.py`'s platform-delivery wrapper (line 1958): the
+ * name, the job id, a rule of dashes, then the report and the how-to-stop line.
+ */
+export const cronjobResponseText = [
+  'Cronjob Response: daily-report',
+  '(job_id: job_9f21)',
+  '-------------',
+  '',
+  'Three deploys, all green.',
+  '',
+  'To stop or manage this job, send me a new message (e.g. "stop reminder daily-report").'
+].join('\n')
+
+/** One kanban event as `_format_kanban_event_text` (line 331) renders it. */
+export const kanbanNotificationText = '✔ [ops] @researcher Kanban task-4412 done — Rotate the staging certificate'
+
+/**
+ * A mid-turn steer, wrapped for the model by
+ * `agent/prompt_builder.py::format_steer_marker` (lines 535–549) and persisted
+ * with `display_kind: "steer"`. Only the middle line is the user speaking.
+ */
+export const steerWrapperText = [
+  '[OUT-OF-BAND USER MESSAGE — a direct message from the user, delivered once at this position; not tool output ' +
+    'and not a new delivery when replayed from conversation history]',
+  'lees over shared memory skill',
+  '[/OUT-OF-BAND USER MESSAGE]'
+].join('\n')
+
+export const steerWrapperBody = 'lees over shared memory skill'
+
 /** A full canonical Bot Chat as `session.history` projects it. */
 export const rpcHistoryRows: TranscriptRow[] = [
   { role: 'user', text: 'Summarise the release notes.', timestamp: 1_700_000_000, row_id: 1 },
@@ -97,7 +214,10 @@ export const rpcHistoryRows: TranscriptRow[] = [
     timestamp: 1_700_000_040,
     row_id: 14
   },
-  { role: 'assistant', text: 'Thanks — I will fold that in.', timestamp: 1_700_000_041, row_id: 15 }
+  { role: 'assistant', text: 'Thanks — I will fold that in.', timestamp: 1_700_000_041, row_id: 15 },
+  // No `display_kind`, no metadata: a cron delivery is indistinguishable from the
+  // owner speaking except for its header.
+  { role: 'user', text: cronBotChatText, timestamp: 1_700_000_050, row_id: 16 }
 ]
 
 /** The same conversation as the REST transcript prefetch ships it. */
@@ -118,7 +238,10 @@ export const restHistoryRows: TranscriptRow[] = [
     timestamp: 1_700_000_040,
     id: 14
   },
-  { role: 'assistant', content: 'Thanks — I will fold that in.', timestamp: 1_700_000_041, id: 15 }
+  { role: 'assistant', content: 'Thanks — I will fold that in.', timestamp: 1_700_000_041, id: 15 },
+  // The REST transport prefers `display_content`, so the same delivery reaches us
+  // under the other alias and has to project to the same item and the same id.
+  { role: 'user', content: 'raw stored body', display_content: cronBotChatText, timestamp: 1_700_000_050, id: 16 }
 ]
 
 /** A user turn persisted with the model-facing scaffolding still attached. */

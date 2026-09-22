@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
 import { GatewayError } from './types'
-import { apiUrl, isBlockedHeaderName, normalizeBaseUrl, normalizeHeader, normalizeHeaders, wsUrlFor } from './url'
+import {
+  apiUrl,
+  hasExplicitScheme,
+  isBlockedHeaderName,
+  normalizeBaseUrl,
+  normalizeHeader,
+  normalizeHeaders,
+  wsUrlFor
+} from './url'
 
 describe('normalizeBaseUrl', () => {
   it('assumes https when the user types no scheme', () => {
@@ -28,6 +36,17 @@ describe('normalizeBaseUrl', () => {
 
   it('refuses an empty address', () => {
     expect(() => normalizeBaseUrl('   ')).toThrow(/Enter a gateway address/)
+  })
+})
+
+describe('hasExplicitScheme', () => {
+  it('tells an address the user gave a scheme from one that was coerced', () => {
+    expect(hasExplicitScheme('https://example.test')).toBe(true)
+    expect(hasExplicitScheme('  http://example.test  ')).toBe(true)
+    expect(hasExplicitScheme('HTTP://example.test')).toBe(true)
+    expect(hasExplicitScheme('example.test')).toBe(false)
+    // A port is not a scheme, however much a colon looks like one.
+    expect(hasExplicitScheme('example.test:9119')).toBe(false)
   })
 })
 

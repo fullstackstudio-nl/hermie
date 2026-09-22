@@ -4,18 +4,22 @@ import { WebSocket as NodeWebSocket } from 'ws'
 
 import {
   assertDesktopContract,
+  defaultBackoffDelayMs,
   FIRST_SESSION_TIMEOUT_MS,
   GatewayConnection,
   OFFLINE_GRACE_MS,
   PROMPT_SUBMIT_TIMEOUT_MS,
+  PROTOCOL_LADDER_FLOOR,
+  RECONNECT_CAP_MS,
   DEFAULT_RPC_TIMEOUT_MS,
   rpcTimeoutMs
 } from './connection'
-import { NativePkceCredentials, SessionTokenCredentials } from './credentials'
+import { type CredentialProvider, NativePkceCredentials, SessionTokenCredentials } from './credentials'
 import { exchangeCode, TokenCoordinator, type TokenSet, type TokenStore } from './native-auth'
 import { buildAuthorizeUrl, createPkce, parseLoopbackRedirect, REDIRECT_URI } from './pkce'
 import { DialPlanSocketFactory, type WebSocketConstructorLike } from './socket-factory'
-import type { ConnectionStatus } from './types'
+import { type ConnectionStatus, GatewayError } from './types'
+import { wsUrlFor } from './url'
 
 const SocketImpl = NodeWebSocket as unknown as WebSocketConstructorLike
 
@@ -80,6 +84,15 @@ interface Harness {
   connection: GatewayConnection
   statuses: ConnectionStatus[]
   waitFor: (status: ConnectionStatus, timeoutMs?: number) => Promise<void>
+  /**
+   * Wait for something the gateway counted rather than for a status.
+   *
+   * `waitFor('ready')` returns instantly when the connection is already ready,
+   * which makes it useless for "drop the socket and let it come back": the
+   * assertion runs before the redial has even started. A counter only moves when
+   * the work actually happened.
+   */
+  waitUntil: (label: string, reached: () => boolean, timeoutMs?: number) => Promise<void>
 }
 
 async function harness(options: {
@@ -153,7 +166,24 @@ async function harness(options: {
     )
   }
 
-  return { gateway, connection, statuses, waitFor }
+  const waitUntil = async (label: string, reached: () => boolean, timeoutMs = 5000) => {
+    const deadline = Date.now() + timeoutMs
+
+    while (Date.now() < deadline) {
+      if (reached()) {
+        return
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 5))
+    }
+
+    throw new Error(
+      `Timed out waiting for ${label}; the connection is "${connection.status}" ` +
+        `(seen: ${statuses.join(' → ')}; last error: ${connection.lastError?.message ?? 'none'})`
+    )
+  }
+
+  return { gateway, connection, statuses, waitFor, waitUntil }
 }
 
 const settle = (ms = 60) => new Promise(resolve => setTimeout(resolve, ms))
@@ -198,7 +228,20 @@ describe('GatewayConnection against the fake gateway', () => {
     expect(gateway.state.connections).toBe(2)
   })
 
-  it('recovers from a 4401 by refreshing once and redialling', async () => {
+  /**
+   * A 4401 is the gateway refusing the TICKET, and upstream verifies no access
+   * token at all on the upgrade path: `web_server_chat.py::_ws_auth_reason` looks
+   * only at `?internal=`, the ticket subprotocol, `?ticket=` and the legacy
+   * `?token=`, because the HTTP auth middleware does not run for WebSocket
+   * routes. So a 4401 means the ticket was expired (30 s TTL), already consumed,
+   * or unknown because the process-local ticket store was reset — never that the
+   * bearer token is bad. On `/api/ws` it does not even carry a close reason.
+   *
+   * Hermie used to answer it by forcing a refresh-token rotation, which
+   * diagnosed the one thing a 4401 cannot mean, and spent a rotation to do it.
+   * A fresh ticket fixes all three real causes for one HTTP round trip.
+   */
+  it('answers a 4401 with a fresh ticket, not a token rotation', async () => {
     const { connection, gateway, statuses, waitFor } = await harness({ auth: 'native' })
 
     gateway.state.rejectNextUpgrades = 1
@@ -207,26 +250,97 @@ describe('GatewayConnection against the fake gateway', () => {
     await waitFor('ready')
 
     expect(gateway.state.rejectedUpgrades).toBe(1)
-    expect(gateway.state.refreshCalls).toBe(1)
-    expect(statuses).not.toContain('needs_signin')
     expect(gateway.state.ticketsMinted).toBe(2)
+    expect(gateway.state.refreshCalls).toBe(0)
+    expect(statuses).not.toContain('needs_signin')
   })
 
-  it('stops at needs_signin after a second 4401 in a row', async () => {
+  /**
+   * A second refusal of a ticket minted seconds earlier is no longer a ticket
+   * story, so the credential the mint authenticated with becomes the suspect and
+   * the rotation happens then — one dial later than before, and only once the
+   * cheap explanation has been ruled out.
+   */
+  it('escalates to a rotation only when a freshly minted ticket is refused too', async () => {
     const { connection, gateway, waitFor } = await harness({ auth: 'native' })
 
     gateway.state.rejectNextUpgrades = 2
 
     connection.start()
+    await waitFor('ready')
+
+    expect(gateway.state.rejectedUpgrades).toBe(2)
+    expect(gateway.state.refreshCalls).toBe(1)
+    expect(connection.status).toBe('ready')
+  })
+
+  it('stops at needs_signin once a rotated credential is refused as well', async () => {
+    const { connection, gateway, waitFor } = await harness({ auth: 'native' })
+
+    gateway.state.rejectNextUpgrades = 3
+
+    connection.start()
     await waitFor('needs_signin')
 
     expect(connection.lastError?.kind).toBe('auth')
-    expect(gateway.state.rejectedUpgrades).toBe(2)
+    expect(gateway.state.rejectedUpgrades).toBe(3)
+    expect(gateway.state.refreshCalls).toBe(1)
 
     // Terminal: no further dials.
     await settle(150)
-    expect(gateway.state.rejectedUpgrades).toBe(2)
+    expect(gateway.state.rejectedUpgrades).toBe(3)
     expect(connection.status).toBe('needs_signin')
+  })
+
+  /**
+   * The tally is called "consecutive" and has to mean it.
+   *
+   * It was only ever reset by a dial that reached `ready`, so two auth failures
+   * with an ordinary outage between them counted as "twice in a row" however long
+   * the gap was — and the second one signed the user out with the message that
+   * the gateway had rejected the credentials twice, which it had not. A laptop
+   * that roams between networks collects exactly this shape.
+   */
+  it('does not count auth failures either side of an outage as consecutive', async () => {
+    const { connection, gateway, statuses, waitFor, waitUntil } = await harness({ auth: 'native' })
+
+    // Two ticket refusals far enough apart to have an ordinary outage between
+    // them: the first is absorbed by a fresh ticket, then a dial fails at the
+    // mint for a reason that is nobody's credential, and only then does the
+    // second refusal arrive.
+    gateway.state.rejectNextUpgrades = 2
+    connection.start()
+    await waitFor('ready')
+    expect(gateway.state.refreshCalls).toBe(1)
+
+    gateway.state.failNextTicketMints = 1
+    gateway.state.rejectNextUpgrades = 2
+    gateway.dropSockets()
+
+    await waitUntil('the mint to fail', () => gateway.state.ticketMintsFailed === 1)
+    await waitUntil('the connection to come back', () => connection.status === 'ready')
+
+    expect(statuses).not.toContain('needs_signin')
+  })
+
+  /**
+   * Rotation is destructive at the identity provider, so a spent refresh token
+   * must never go out twice: a provider with reuse detection answers a replay by
+   * revoking the whole session, which is a sign-out the client causes itself.
+   */
+  it('never presents a refresh token it has already rotated away', async () => {
+    const { connection, gateway, waitFor, waitUntil } = await harness({ auth: 'native' })
+
+    gateway.state.rejectNextUpgrades = 2
+    connection.start()
+    await waitFor('ready')
+
+    gateway.state.rejectNextUpgrades = 2
+    gateway.dropSockets()
+    await waitUntil('a second rotation', () => gateway.state.refreshCalls === 2)
+    await waitUntil('the connection to come back', () => connection.status === 'ready')
+
+    expect(gateway.state.refreshReuseAttempts).toBe(0)
   })
 
   it('treats a 4403 as a configuration problem and does not loop', async () => {
@@ -316,26 +430,114 @@ describe('GatewayConnection against the fake gateway', () => {
     expect(gateway.state.connections).toBe(2)
   })
 
-  it('goes offline without dialling and comes back when the network does', async () => {
-    const { connection, gateway, waitFor } = await harness({ auth: 'token' })
+  it('says offline when the device does, and keeps dialling anyway', async () => {
+    const { connection, gateway, statuses, waitFor, waitUntil } = await harness({
+      auth: 'token',
+      offlineGraceMs: 10
+    })
+
+    connection.start()
+    await waitFor('ready')
+
+    // The report is wrong — this gateway is reachable — which is the whole
+    // reason it is not allowed to stop the loop.
+    connection.setOnline(false)
+    await waitUntil('the socket to be rebuilt', () => gateway.state.connections === 2)
+    await waitFor('ready')
+
+    // Said out loud on the way past, so a reader is told which of the two it is.
+    expect(statuses).toContain('offline')
+  })
+
+  /**
+   * The state the owner could only leave by relaunching the app: a tailnet
+   * interface goes away, the connectivity API reports "no network", and then
+   * never reports anything again because the Wi-Fi it is watching never moved.
+   *
+   * Every dial in this test would have succeeded. None of them used to happen.
+   */
+  it('recovers from a connectivity report that never comes back', async () => {
+    const { connection, gateway, waitFor, waitUntil } = await harness({ auth: 'token', offlineGraceMs: 10 })
+
+    connection.start()
+    await waitFor('ready')
+
+    const socketsBefore = gateway.state.connections
+    connection.setOnline(false)
+
+    await waitUntil('a dial the report was supposed to have stopped', () => gateway.state.connections > socketsBefore)
+    await waitFor('ready')
+
+    expect(await connection.request('profiles.list', {})).toBeTruthy()
+  })
+
+  /**
+   * The second unrecoverable one, and the more dangerous of the two because the
+   * header kept saying the connection was up.
+   *
+   * Offline arrives while the socket is live, so the grace starts. The socket
+   * then dies for real — and the close was thrown away, because the radio was
+   * believed to be down. Online arrives inside the grace, the flap rule says
+   * "the socket never came down, nothing to redial", and the connection sits on
+   * `ready` over a dead socket until the process is killed.
+   */
+  it('redials when the socket dies inside the offline grace and the report flaps back', async () => {
+    const { connection, gateway, waitFor, waitUntil } = await harness({ auth: 'token', offlineGraceMs: 400 })
 
     connection.start()
     await waitFor('ready')
 
     connection.setOnline(false)
-    await waitFor('offline')
-    await settle(150)
-    expect(gateway.state.connections).toBe(1)
-
+    await settle(20)
+    gateway.dropSockets()
+    await settle(60)
     connection.setOnline(true)
+
+    await waitUntil('the redial', () => gateway.state.connections > 1)
     await waitFor('ready')
-    expect(gateway.state.connections).toBe(2)
+    // Not the status: it stayed `ready` throughout, which is precisely why it
+    // proves nothing here. A round trip is what the dead socket actually costs.
+    expect(await connection.request('profiles.list', {})).toBeTruthy()
+  })
+
+  it('retryNow() skips the pending backoff, and leaves a stopped connection stopped', async () => {
+    const delays: number[] = []
+    const { connection, gateway, waitFor, waitUntil } = await harness({
+      auth: 'token',
+      backoffDelayMs: attempt => {
+        delays.push(attempt)
+
+        return 30_000
+      }
+    })
+
+    connection.start()
+    await waitFor('ready')
+
+    const port = gateway.port
+    const token = gateway.state.token
+    await gateway.close()
+    await waitFor('reconnecting')
+    expect(delays.length).toBe(1)
+
+    // Half a minute of backoff is pending; "Try now" must not wait it out.
+    const restarted = await startFakeGateway({ auth: 'token', port, token })
+    live.push({ gateway: restarted })
+    connection.retryNow()
+    await waitUntil('the redial to land', () => connection.status === 'ready', 3000)
+
+    connection.stop()
+    connection.retryNow()
+    await settle(60)
+    expect(connection.status).toBe('disconnected')
   })
 
   it('keeps a terminal status when the app goes to the background', async () => {
     const { connection, gateway, waitFor } = await harness({ auth: 'native' })
 
-    gateway.state.rejectNextUpgrades = 2
+    // Three: a fresh ticket for the first refusal, a rotation for the second, and
+    // the third is what concludes the credential is genuinely not accepted.
+    gateway.state.rejectNextUpgrades = 3
 
     connection.start()
     await waitFor('needs_signin')
@@ -541,6 +743,106 @@ describe('the offline grace period', () => {
   })
 })
 
+/**
+ * How far up the ladder a failure starts, and how far down a wait may fall.
+ *
+ * The reported defect was 18 dials in 24 seconds against an address that was
+ * answering — a proxy in front of an unrelated site, refusing the ticket mint
+ * with a 405. Two things made that possible: full jitter, which draws a wait
+ * uniformly from zero, and a ladder that begins at 300 ms whatever it is that
+ * failed. No gateway or socket is needed to pin either, so neither is used:
+ * a credential provider that throws is the whole of the dial.
+ */
+describe('the reconnect ladder', () => {
+  /** A connection whose every dial fails with `error`, reporting the rung used. */
+  function ladder(error: GatewayError): { connection: GatewayConnection; rungs: number[] } {
+    const rungs: number[] = []
+    const credentials: CredentialProvider = {
+      mode: 'session_token',
+      async httpAuthHeaders() {
+        return {}
+      },
+      async dialPlan() {
+        throw error
+      },
+      async onRejected() {
+        return 'reauth'
+      },
+      async signOut() {
+        // Nothing is held.
+      }
+    }
+
+    const connection = new GatewayConnection({
+      config: { baseUrl: 'http://gateway.invalid', authMode: 'session_token' },
+      credentials,
+      socketFactory: new DialPlanSocketFactory(SocketImpl),
+      backoffDelayMs: attempt => {
+        rungs.push(attempt)
+
+        // Long enough that the timer never fires inside the test: what is
+        // under test is which rung was asked for, not the waiting.
+        return 60_000
+      }
+    })
+
+    return { connection, rungs }
+  }
+
+  const firstRung = async (error: GatewayError): Promise<number> => {
+    const { connection, rungs } = ladder(error)
+
+    try {
+      connection.start()
+
+      const deadline = Date.now() + 2000
+
+      while (rungs.length === 0 && Date.now() < deadline) {
+        await settle(10)
+      }
+
+      expect(rungs.length).toBeGreaterThan(0)
+
+      return rungs[0] as number
+    } finally {
+      connection.stop()
+    }
+  }
+
+  it('starts an answer that is not a gateway part-way up, because a 405 will not change in 300 ms', async () => {
+    expect(
+      await firstRung(new GatewayError('protocol', 'The address answered HTTP 405, but not as a Hermes gateway.'))
+    ).toBe(PROTOCOL_LADDER_FLOOR)
+  })
+
+  it('keeps the fast first retries for a failure to reach anything at all', async () => {
+    // The flaps that really do heal in a second. Making these wait would pay
+    // for the fix above with the case that already worked.
+    expect(await firstRung(new GatewayError('network', 'Could not reach the gateway.'))).toBe(0)
+  })
+
+  it('never waits anywhere near zero, whatever the jitter draws', () => {
+    // Full jitter — the vendored default — is a uniform draw from [0, ceiling),
+    // so a ladder that had climbed to 2.4 s still redialled 40 ms later.
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const ceiling = Math.min(RECONNECT_CAP_MS, 300 * 2 ** attempt)
+
+      for (let draw = 0; draw < 200; draw += 1) {
+        const delay = defaultBackoffDelayMs(attempt)
+
+        expect(delay).toBeGreaterThanOrEqual(ceiling / 2)
+        expect(delay).toBeLessThanOrEqual(ceiling)
+      }
+    }
+  })
+
+  it('still spreads the draws out, so a fleet does not redial in lockstep', () => {
+    const draws = new Set(Array.from({ length: 200 }, () => defaultBackoffDelayMs(5)))
+
+    expect(draws.size).toBeGreaterThan(100)
+  })
+})
+
 describe('rpcTimeoutMs', () => {
   it('gives a prompt half an hour', () => {
     expect(rpcTimeoutMs('prompt.submit', true)).toBe(PROMPT_SUBMIT_TIMEOUT_MS)
@@ -557,6 +859,47 @@ describe('rpcTimeoutMs', () => {
   })
 })
 
+/**
+ * The fake gateway only ever speaks plain http, so every test above is already
+ * a cleartext test. This one says so on purpose: a gateway on a tailnet is
+ * reached over `http://` and `ws://`, and the whole sign-in round trip has to
+ * survive that. What it pins is that nothing in the flow — the authorize URL,
+ * the loopback redirect, the code exchange, the ticket or the dial — upgrades a
+ * scheme behind the caller's back.
+ */
+describe('a gateway served in the clear', () => {
+  it('signs in with PKCE and dials over http/ws, forcing no scheme anywhere', async () => {
+    const { connection, gateway, waitFor } = await harness({ auth: 'native' })
+
+    expect(gateway.url.startsWith('http://')).toBe(true)
+    expect(wsUrlFor(gateway.url).startsWith('ws://')).toBe(true)
+    expect(buildAuthorizeUrl(gateway.url, { challenge: 'c', state: 's' }).startsWith('http://')).toBe(true)
+    // The redirect the web view intercepts is loopback http by RFC 8252, on
+    // every gateway, whatever the gateway's own scheme is.
+    expect(REDIRECT_URI.startsWith('http://127.0.0.1')).toBe(true)
+
+    connection.start()
+    await waitFor('ready')
+
+    expect(gateway.state.ticketsConsumed).toBe(1)
+
+    const profiles = await connection.request('profiles.list', { include_sessions: true })
+    expect(profiles.profiles?.map(profile => profile.name)).toEqual(['researcher', 'writer'])
+  })
+
+  it('refreshes its tokens over http as well', async () => {
+    const { connection, gateway, waitFor } = await harness({ auth: 'native' })
+
+    // Two refusals in a row: one is a stale ticket and only re-mints.
+    gateway.state.rejectNextUpgrades = 2
+
+    connection.start()
+    await waitFor('ready')
+
+    expect(gateway.state.refreshCalls).toBe(1)
+  })
+})
+
 describe('assertDesktopContract', () => {
   it('accepts contract 7 and above, as a number or a string', () => {
     expect(assertDesktopContract({ desktop_contract: 7 })).toBe(7)
@@ -570,5 +913,26 @@ describe('assertDesktopContract', () => {
   it('refuses a gateway that reports no contract at all', () => {
     expect(() => assertDesktopContract({})).toThrow(/does not report a desktop contract/)
     expect(() => assertDesktopContract(null)).toThrow(/does not report a desktop contract/)
+  })
+
+  // A bot that has never spoken has a live session without a stored row, and
+  // Hermes ≤ 0.21.3 resumes it as `{model, lazy: true, profile_name}` with no
+  // contract at all. That is a new bot, not an old gateway.
+  it('lets a lazy resume through on the contract this gateway reported before', () => {
+    expect(assertDesktopContract({ lazy: true, model: 'x' }, 7)).toBe(7)
+    expect(assertDesktopContract({ lazy: true, model: 'x' }, 9)).toBe(9)
+  })
+
+  it('lets a lazy resume through on trust when nothing is known yet', () => {
+    expect(assertDesktopContract({ lazy: true, model: 'x' })).toBeNull()
+    expect(assertDesktopContract({ lazy: true, model: 'x' }, null)).toBeNull()
+  })
+
+  it('still refuses a lazy resume when the contract seen before was too old', () => {
+    expect(() => assertDesktopContract({ lazy: true, model: 'x' }, 6)).toThrow(/needs at least 7/)
+  })
+
+  it('does not let `lazy` excuse a resume that carries an old contract', () => {
+    expect(() => assertDesktopContract({ lazy: true, desktop_contract: 5 }, 7)).toThrow(/desktop contract 5/)
   })
 })

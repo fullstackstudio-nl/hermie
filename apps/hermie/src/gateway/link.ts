@@ -35,6 +35,20 @@ export interface ChatGateway {
 export interface RestMessagesOptions {
   limit: number
   order: 'latest' | 'oldest'
+  /**
+   * How many rows to skip, counted from the end `order` names.
+   *
+   * With `order: 'latest'` that is the NEWEST end, which is what makes older
+   * history reachable: `offset` is how many rows are already held, and the page
+   * that comes back is the one before them. Measured against a real gateway on
+   * 2026-09-21 — `?limit=2&order=latest&offset=2` on a six-row session answers
+   * rows three and four — because the route is not vendored here and the fake
+   * used to parse this parameter, echo it and ignore it.
+   *
+   * Rows come back OLDEST FIRST whichever end was counted from, so a page never
+   * has to be reversed.
+   */
+  offset?: number
 }
 
 interface RestMessagesResponse {
@@ -51,7 +65,11 @@ export function chatGatewayFor(connection: GatewayConnection): ChatGateway {
     onRequest: handler => connection.onRequest(handler),
     onStatus: handler => connection.onStatus(handler),
     async fetchMessages(resolvedSessionId, options) {
-      const path = `/api/sessions/${encodeURIComponent(resolvedSessionId)}/messages?limit=${options.limit}&order=${options.order}`
+      // `offset` is left off entirely when it is zero: it defaults to zero, and a
+      // URL that says so is a URL that reads as though somebody paged to the
+      // start on purpose.
+      const skip = options.offset ? `&offset=${options.offset}` : ''
+      const path = `/api/sessions/${encodeURIComponent(resolvedSessionId)}/messages?limit=${options.limit}&order=${options.order}${skip}`
 
       try {
         const body = await connection.http.get<RestMessagesResponse>(path)

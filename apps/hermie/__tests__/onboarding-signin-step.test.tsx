@@ -6,6 +6,10 @@ import { emptyDraft, type OnboardingDraft } from '../src/features/onboarding'
 import { SignInStep } from '../src/features/onboarding/steps/SignInStep'
 import { renderScreen } from './support/render'
 
+// The step records `signin.no_refresh` on the app's auth ring, which belongs to
+// the gateway provider. Nothing else here needs the connection.
+jest.mock('../src/gateway/GatewayProvider', () => ({ useGateway: () => ({ recordAuth: jest.fn() }) }))
+
 const GATED: ProbeResult = {
   version: '2026.9.14',
   authRequired: true,
@@ -58,7 +62,11 @@ describe('the sign-in step', () => {
 
     const field = screen.getByTestId('session-token')
     expect(field.props.secureTextEntry).toBe(true)
-    expect(screen.getByText('Paste the session token printed by `hermes serve`.')).toBeTruthy()
+    // The help line names a command, so the command is drawn as a chip and the
+    // backticks are not on screen — which is exactly where they were before.
+    expect(screen.getByText(/Paste the session token printed by\s+hermes serve\s*\./)).toBeTruthy()
+    expect(screen.getByText('\u00a0hermes serve\u00a0')).toBeTruthy()
+    expect(screen.queryByText(/`/)).toBeNull()
     expect(screen.queryByText(/^Sign in with/)).toBeNull()
 
     fireEvent.changeText(field, 'session-token-value')

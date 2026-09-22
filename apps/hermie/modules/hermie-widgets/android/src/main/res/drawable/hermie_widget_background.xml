@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The widget's own surface: one flat colour and one radius, which is the whole of
+  the Liquid Glass direction that survives into a launcher. Android gives a
+  widget no blur and nothing behind it to be glass against, so this is the same
+  `e1` rung every other no-blur surface in the app falls back to.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+  <solid android:color="@color/hermie_widget_surface" />
+  <corners android:radius="20dp" />
+</shape>

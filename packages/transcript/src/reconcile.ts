@@ -4,15 +4,18 @@
  *
  * Stable ids are the point. A UI keyed on `item.id` must not remount every row
  * when a re-hydration lands, so a fresh item adopts the id of the current item
- * it matches: durable `rowId` first, then `tool_id`, then normalised text.
+ * it matches: durable `rowId` first, then `tool_id`, then what the item says and
+ * carries (`itemMatchKey`).
  *
  * Ported from `apps/desktop/src/lib/chat-messages/reconciliation.ts`.
  */
-import { normalizedItemText } from './rows-to-items'
+import { isInjectedNotice } from './injected'
+import { isMatchable, itemMatchKey } from './rows-to-items'
 import {
   type AssistantItem,
   type BotDmOutItem,
   type ChatState,
+  freeItemId,
   type NoticeItem,
   SEQ_STEP,
   type SubagentGroupItem,
@@ -29,10 +32,98 @@ const toolKeyOf = (item: TranscriptItem): string | undefined =>
       ? item.toolId
       : undefined
 
-const textKeyOf = (item: TranscriptItem): string => `${item.kind}\n${normalizedItemText(item)}`
+/**
+ * The last-resort pairing key: the kind, the text, and the attachments.
+ *
+ * The attachments are in it because a send can have no text to pair on at all —
+ * a turn whose whole body was a `@file:` reference projects to the empty string,
+ * and the file is then the only thing identifying it.
+ */
+const matchKeyOf = (item: TranscriptItem): string => `${item.kind}\n${itemMatchKey(item)}`
 
 /** Items the backend never persists, so a re-hydration can never re-supply them. */
 const isEphemeral = (item: TranscriptItem): boolean => item.kind === 'approval' || item.kind === 'clarify'
+
+/**
+ * A request the reader has already settled.
+ *
+ * It is the difference between a question and a record of one, and the two
+ * belong in different places. An OPEN request is being asked NOW: it stands at
+ * the tail whatever timestamp it carries, because that is where the reader is
+ * looking and where the turn is waiting. An ANSWERED or CANCELLED one is a line
+ * in the transcript like any other, and its place is the moment it happened.
+ *
+ * Which is the whole of the owner's report. A card answered yesterday is cached
+ * (`cache.ts` keeps everything but an open request), painted on a cold open, and
+ * then survives the history re-hydration as an item history can never re-supply
+ * — and was appended BEHIND every row that hydration brought back, including
+ * this morning's. `layoutRows` stamps a date wherever the day changes between
+ * neighbours, so the reader got `TODAY`, yesterday's card, and `TODAY` again.
+ */
+const isSettledRequest = (item: TranscriptItem): boolean =>
+  (item.kind === 'approval' || item.kind === 'clarify') && item.state !== 'open'
+
+/**
+ * Put items that carry their own moment back into it, rather than at the end.
+ *
+ * Only for the handful of items a re-hydration keeps without being able to place
+ * them: they have no row id, so `inRowOrder` has nothing to sort them by, and
+ * the timestamp they were created with is the only thing that says where they
+ * belong. Each one goes in front of the first item that is strictly NEWER than
+ * it; an item carrying no timestamp of its own is passed over, because its
+ * position is the one its neighbours gave it. Nothing newer than the whole list
+ * moves at all, which is the ordinary live case — a card answered a moment ago
+ * still lands at the tail, exactly as it did before.
+ *
+ * Deliberately not a sort of the transcript. A streaming bubble, an interim note
+ * and an optimistic submit each have ordering rules of their own that a
+ * timestamp does not know about, and re-sorting the whole list by `ts` would
+ * overrule every one of them.
+ */
+function placeByTimestamp(list: readonly TranscriptItem[], floating: readonly TranscriptItem[]): TranscriptItem[] {
+  const placed = [...list]
+
+  for (const item of floating) {
+    const ts = item.ts
+
+    if (ts === undefined) {
+      placed.push(item)
+
+      continue
+    }
+
+    const newer = placed.findIndex(other => other.ts !== undefined && other.ts > ts)
+
+    placed.splice(newer < 0 ? placed.length : newer, 0, item)
+  }
+
+  return placed
+}
+
+/**
+ * A row that opens a turn, and therefore names the author a foreign
+ * `message.start` placeholder is standing in for.
+ *
+ * A cron delivery counts: the scheduler's report runs on the `user` role and
+ * starts a turn nobody local submitted, so it is exactly what such a placeholder
+ * is waiting for. `mergeWithLive` needs no cron case of its own — the stream
+ * learns nothing about a delivery that the persisted row does not also carry, so
+ * the default "fresh wins, id is kept" merge is already correct.
+ *
+ * A gateway-injected notice counts for the same reason: a fan-out's report or a
+ * background process's completion is written on the `user` role and the gateway
+ * runs a turn on it. Without this the placeholder had nothing to become and
+ * stayed on screen as an empty bubble beside the card.
+ *
+ * A STEER does not count, although it is a `user` row. It is handed to the turn
+ * already running and starts none of its own, so letting it fill a placeholder
+ * would draw a mid-turn correction as the prompt of somebody else's turn.
+ */
+const isAuthoredRow = (item: TranscriptItem): boolean =>
+  (item.kind === 'user' && item.displayKind !== 'steer') ||
+  item.kind === 'bot_dm_in' ||
+  item.kind === 'cron_delivery' ||
+  isInjectedNotice(item)
 
 /** Merge live knowledge onto a hydrated row: history is thinner than the stream. */
 function mergeWithLive(fresh: TranscriptItem, current: TranscriptItem): TranscriptItem {
@@ -70,6 +161,10 @@ function mergeWithLive(fresh: TranscriptItem, current: TranscriptItem): Transcri
     }
 
     carried.reply = carried.reply ?? current.reply
+    // A tool row carries no timestamp, so the moment the dispatch went out is
+    // known only to the stream that watched it leave. Losing it on the merge
+    // would take the row's date stamp with it.
+    carried.ts = carried.ts ?? current.ts
 
     return merged
   }
@@ -114,6 +209,34 @@ function mergeWithLive(fresh: TranscriptItem, current: TranscriptItem): Transcri
   return merged
 }
 
+/**
+ * Put a merged list back into the gateway's own row order.
+ *
+ * `reconcileTail` splices rows it has never seen in front of the live tail,
+ * which is right whenever they were written after everything on screen — and
+ * wrong the moment they were not. A teammate's delivery or a cron turn written
+ * while the user was still typing carries a LOWER row id than the message they
+ * then sent, so arrival order shows the two the wrong way round, and the ids
+ * that say so only arrive with the tail.
+ *
+ * Row ids are the order the gateway holds, so a persisted item sorts by its own.
+ * An item with no row id yet sorts with the newest row above it, which keeps a
+ * streaming bubble under the prompt it answers and keeps a row genuinely newer
+ * than the whole live tail behind that tail, exactly as the splice intended.
+ */
+function inRowOrder(list: readonly TranscriptItem[]): TranscriptItem[] {
+  let newestAbove = -1
+  const keyed = list.map((item, index) => {
+    const key = item.rowId ?? newestAbove
+
+    newestAbove = Math.max(newestAbove, item.rowId ?? -1)
+
+    return { item, key, index }
+  })
+
+  return keyed.sort((a, b) => a.key - b.key || a.index - b.index).map(entry => entry.item)
+}
+
 function rebuild(state: ChatState, list: readonly TranscriptItem[]): ChatState {
   const next: ChatState = {
     ...state,
@@ -129,7 +252,17 @@ function rebuild(state: ChatState, list: readonly TranscriptItem[]): ChatState {
   }
 
   list.forEach((item, index) => {
-    const placed = { ...item, seq: index * SEQ_STEP }
+    /*
+      The id is re-checked here rather than assumed.
+
+      A persisted item's id is its gateway ROW NUMBER, and a gateway that
+      restarts under a live session numbers the rebuilt one from 1 again. So a
+      freshly projected `r:4` and a live `r:4` kept from the tail are two
+      different rows wearing one id, and this loop is the single funnel both
+      reconcilers push `order` through. The earlier of the two keeps the id a
+      list is keyed on; only the later is renamed.
+    */
+    const placed = { ...item, id: freeItemId(next.items, item.id), seq: index * SEQ_STEP }
 
     next.items[placed.id] = placed
     next.order.push(placed.id)
@@ -161,7 +294,27 @@ function rebuild(state: ChatState, list: readonly TranscriptItem[]): ChatState {
     }
   })
 
-  next.turn.nextSeq = list.length * SEQ_STEP
+  /*
+    `nextSeq` is a HIGH-WATER MARK, not a position.
+
+    It was `list.length * SEQ_STEP`, which reads the counter off the transcript's
+    current length — and a re-hydration is free to make the transcript SHORTER.
+    Pull the gateway out from under a live session and the rebuilt one comes back
+    with fewer rows than the client holds, so this line moved the counter
+    BACKWARDS, onto seq values already spent on ids that are still in the list.
+    The next send then minted an id the transcript already had: `order` is a
+    list, so it grew a second entry pointing at the same item, which is React's
+    "two children with the same key" and, on screen, the same user bubble twice.
+
+    Seven seeded rows, a transcript that loses one on the rebuild, and sends the
+    dead gateway never persisted is the arrangement that was reported, and it
+    lands on `o:9000` exactly.
+
+    The only thing the counter owes the order is to sit ABOVE every seq in the
+    list, and `list.length * SEQ_STEP` still does that — so taking the larger of
+    the two costs nothing and takes the collision away.
+  */
+  next.turn.nextSeq = Math.max(state.turn.nextSeq, list.length * SEQ_STEP)
   next.turn.assistantId = next.turn.assistantId && next.items[next.turn.assistantId] ? next.turn.assistantId : undefined
 
   return next
@@ -175,7 +328,7 @@ function rebuild(state: ChatState, list: readonly TranscriptItem[]): ChatState {
 export function reconcile(state: ChatState, freshItems: readonly TranscriptItem[]): ChatState {
   const byRowId = new Map<number, string>()
   const byToolKey = new Map<string, string>()
-  const byText = new Map<string, string[]>()
+  const byMatchKey = new Map<string, string[]>()
 
   for (const id of state.order) {
     const item = state.items[id]
@@ -194,10 +347,10 @@ export function reconcile(state: ChatState, freshItems: readonly TranscriptItem[
       byToolKey.set(toolKey, id)
     }
 
-    const textKey = textKeyOf(item)
+    if (isMatchable(item)) {
+      const key = matchKeyOf(item)
 
-    if (normalizedItemText(item)) {
-      byText.set(textKey, [...(byText.get(textKey) ?? []), id])
+      byMatchKey.set(key, [...(byMatchKey.get(key) ?? []), id])
     }
   }
 
@@ -214,7 +367,7 @@ export function reconcile(state: ChatState, freshItems: readonly TranscriptItem[
     }
 
     if (!matchId || used.has(matchId)) {
-      matchId = byText.get(textKeyOf(fresh))?.find(id => !used.has(id))
+      matchId = isMatchable(fresh) ? byMatchKey.get(matchKeyOf(fresh))?.find(id => !used.has(id)) : undefined
     }
 
     const current = matchId && !used.has(matchId) ? state.items[matchId] : undefined
@@ -231,6 +384,8 @@ export function reconcile(state: ChatState, freshItems: readonly TranscriptItem[
 
   const lastUsedIndex = state.order.reduce((last, id, index) => (used.has(id) ? index : last), -1)
   const kept: TranscriptItem[] = []
+  /** Kept, but with a moment of their own to be put back into — see `placeByTimestamp`. */
+  const settled: TranscriptItem[] = []
 
   state.order.forEach((id, index) => {
     const item = state.items[id]
@@ -239,16 +394,79 @@ export function reconcile(state: ChatState, freshItems: readonly TranscriptItem[
       return
     }
 
-    if (isEphemeral(item) || (item.origin !== 'history' && index > lastUsedIndex)) {
-      kept.push(item)
+    if (!isEphemeral(item) && !(item.origin !== 'history' && index > lastUsedIndex)) {
+      return
     }
+
+    if (isSettledRequest(item) && item.ts !== undefined) {
+      settled.push(item)
+
+      return
+    }
+
+    kept.push(item)
   })
 
-  const next = rebuild(state, [...merged, ...kept])
+  const next = rebuild(state, placeByTimestamp([...merged, ...kept], settled))
 
   next.hydration = 'live'
 
   return next
+}
+
+/**
+ * Put a page of OLDER rows in front of the transcript.
+ *
+ * This is the other direction from `reconcile`, and it is a different operation
+ * rather than the same one with a longer list. `reconcile` is a re-hydration: it
+ * is handed what the server says the transcript IS, matches it against what is
+ * on screen and keeps the live tail. Handing it a page that only covers rows
+ * 400–600 would be telling it the conversation is those rows, and everything
+ * newer that is not "live" would be dropped on the floor.
+ *
+ * So a page arrives as what it is: rows strictly older than everything held,
+ * placed at the front, with nothing in the existing list touched. The only
+ * merging it does is a refusal — a row whose `rowId` is already in the list is
+ * dropped rather than added twice, which is what makes a page that overlaps the
+ * one before it harmless. Overlap is not hypothetical: the offset a page is
+ * fetched at counts rows, and a turn that lands between two pages shifts every
+ * older row by one.
+ *
+ * Ordering is the server's. The route answers oldest-first whichever end it
+ * counted from — measured against a real gateway, 2026-09-21 — so the page is
+ * already in the order it belongs in.
+ *
+ * Nothing about hydration changes. A transcript that was `live` is still live
+ * with more of itself loaded, and one that was `stale` did not become fresh
+ * because its far end grew.
+ */
+export function prependHistory(state: ChatState, olderItems: readonly TranscriptItem[]): ChatState {
+  const known = new Set<number>()
+
+  for (const id of state.order) {
+    const rowId = state.items[id]?.rowId
+
+    if (rowId !== undefined) {
+      known.add(rowId)
+    }
+  }
+
+  const older = olderItems.filter(item => item.rowId === undefined || !known.has(item.rowId))
+
+  if (!older.length) {
+    return state
+  }
+
+  const current = state.order.map(id => state.items[id]).filter((item): item is TranscriptItem => Boolean(item))
+
+  /*
+    `rebuild` frees a colliding id rather than letting `order` hold it twice, and
+    that guard is load-bearing here rather than theoretical. A REST row with no
+    `id` falls back to a POSITIONAL item id (`user:0`), and position is per page,
+    so two pages can both produce `user:0`. Every row this route returns has an
+    id in practice; the fallback is what happens when one does not.
+  */
+  return rebuild(state, [...older, ...current])
 }
 
 /**
@@ -266,26 +484,30 @@ export function reconcileTail(state: ChatState, tailItems: readonly TranscriptIt
   let placeholderCursor = 0
 
   /**
-   * The live tail, indexed by text.
+   * The live tail, indexed by what each item says and carries.
    *
    * A turn we sent ourselves exists twice for a moment: as the optimistic
    * bubble and the streamed reply the reducer built (no `rowId`, because
    * nothing persisted them yet), and as the rows the gateway wrote. There is no
-   * id in common — `prompt.submit` does not answer with one — so text is the
+   * id in common — `prompt.submit` does not answer with one — so this key is the
    * only thing that can pair them, exactly as `reconcile` already does for a
    * full re-hydration. Without it the next `sessions.changed` sweep appends the
    * persisted copies and every sent message shows up twice.
+   *
+   * Indexing on TEXT alone was that bug's second half: a send carrying only a
+   * file has no text, so the bubble was never a candidate and the row landed
+   * beside it.
    */
-  const liveByText = new Map<string, string[]>()
+  const liveByMatchKey = new Map<string, string[]>()
 
   for (const item of list) {
-    if (item.rowId !== undefined || !normalizedItemText(item)) {
+    if (item.rowId !== undefined || !isMatchable(item)) {
       continue
     }
 
-    const key = textKeyOf(item)
+    const key = matchKeyOf(item)
 
-    liveByText.set(key, [...(liveByText.get(key) ?? []), item.id])
+    liveByMatchKey.set(key, [...(liveByMatchKey.get(key) ?? []), item.id])
   }
 
   const pairedLive = new Set<string>()
@@ -319,14 +541,16 @@ export function reconcileTail(state: ChatState, tailItems: readonly TranscriptIt
       continue
     }
 
-    const liveId = liveByText.get(textKeyOf(fresh))?.find(id => !pairedLive.has(id))
+    const liveId = isMatchable(fresh)
+      ? liveByMatchKey.get(matchKeyOf(fresh))?.find(id => !pairedLive.has(id))
+      : undefined
     const liveMatch = liveId ? byId.get(liveId) : undefined
 
     if (liveMatch) {
       pairedLive.add(liveMatch.id)
       byId.set(liveMatch.id, mergeWithLive(fresh, liveMatch))
 
-      if (fresh.kind === 'user' || fresh.kind === 'bot_dm_in') {
+      if (isAuthoredRow(fresh)) {
         pairedAuthoredRow = true
       }
 
@@ -345,7 +569,7 @@ export function reconcileTail(state: ChatState, tailItems: readonly TranscriptIt
       continue
     }
 
-    if ((fresh.kind === 'user' || fresh.kind === 'bot_dm_in') && placeholderCursor < placeholders.length) {
+    if (isAuthoredRow(fresh) && placeholderCursor < placeholders.length) {
       const placeholderId = placeholders[placeholderCursor]
 
       placeholderCursor += 1
@@ -398,7 +622,7 @@ export function reconcileTail(state: ChatState, tailItems: readonly TranscriptIt
     }
   }
 
-  const next = rebuild(state, merged)
+  const next = rebuild(state, inRowOrder(merged))
 
   next.turn = { ...next.turn, foreignReconcilePending: stillPending ? true : undefined }
 

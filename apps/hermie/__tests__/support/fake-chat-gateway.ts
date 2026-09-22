@@ -19,7 +19,15 @@ export class FakeChatGateway implements ChatGateway {
   readonly calls: RecordedCall[] = []
   readonly responders = new Map<string, Responder>()
   restMessages: unknown[] | null = []
-  readonly restCalls: { sessionId: string; limit: number; order: string }[] = []
+  /**
+   * The whole conversation, oldest first, for a test about PAGING.
+   *
+   * When it is set it wins over `restMessages`, and this object answers the
+   * route rather than replaying one canned list — which is the only way a test
+   * can tell a second page from the same page fetched twice.
+   */
+  restPages: unknown[] | null = null
+  readonly restCalls: { sessionId: string; limit: number; order: string; offset?: number }[] = []
   /** Requests answered with a JSON-RPC error, the way the channel declines one. */
   readonly declined: { id: string; method: string; code: number; message: string }[] = []
 
@@ -39,6 +47,19 @@ export class FakeChatGateway implements ChatGateway {
   /** The params of the most recent call to `method`, if there was one. */
   lastCall(method: string): Record<string, unknown> | undefined {
     return [...this.calls].reverse().find(call => call.method === method)?.params
+  }
+
+  /**
+   * Every call to `method`, oldest first.
+   *
+   * `lastCall` answers "what did it end up asking for" and `methodOrder`
+   * answers "in what order did the methods go out". Neither can answer "which
+   * session did the FIRST of the two renames address", which is the whole
+   * question for a swap that has to happen in a particular order and roll back
+   * when it cannot.
+   */
+  callsOf(method: string): Record<string, unknown>[] {
+    return this.calls.filter(call => call.method === method).map(call => call.params)
   }
 
   methodOrder(): string[] {
@@ -109,7 +130,25 @@ export class FakeChatGateway implements ChatGateway {
   }
 
   fetchMessages: ChatGateway['fetchMessages'] = async (sessionId, options) => {
-    this.restCalls.push({ sessionId, limit: options.limit, order: options.order })
+    this.restCalls.push({
+      sessionId,
+      limit: options.limit,
+      order: options.order,
+      ...(options.offset === undefined ? {} : { offset: options.offset })
+    })
+
+    if (this.restPages) {
+      /*
+        A paging fake, with the same arithmetic the real route was measured to
+        use: `offset` skips from the end `order` names, and the page comes back
+        oldest first either way. An offset past the end answers an empty list
+        rather than an error.
+      */
+      const offset = options.offset ?? 0
+      const end = Math.max(0, this.restPages.length - offset)
+
+      return this.restPages.slice(Math.max(0, end - options.limit), end) as never
+    }
 
     return this.restMessages as never
   }

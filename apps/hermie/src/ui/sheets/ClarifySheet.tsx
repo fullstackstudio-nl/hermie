@@ -9,7 +9,7 @@
  * Choices and free text coexist on purpose: the model offers options, and the
  * answer the user actually has is often neither of them.
  */
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Pressable, View } from 'react-native'
 
 import { chatStrings } from '../../chat-ui/strings'
@@ -61,6 +61,25 @@ export function ClarifySheet({ visible, item, onLock, onSubmit, onSkip, onClose,
   const [index, setIndex] = useState(0)
   const [answers, setAnswers] = useState<Record<string, string>>(() => ({ ...item.answers }))
 
+  /**
+   * One way out per question.
+   *
+   * Submit and Later both close the sheet on the tap now, and a closing sheet
+   * slides rather than vanishing — so both buttons are still under the finger
+   * while it goes. This is the only thing between that and two `clarify.respond`
+   * calls for one question.
+   */
+  const left = useRef(false)
+
+  const leave = (go: () => void) => {
+    if (left.current) {
+      return
+    }
+
+    left.current = true
+    go()
+  }
+
   const question = item.questions[Math.min(index, item.questions.length - 1)]
   const batch = item.questions.length > 1
   const locked = useMemo(() => new Set(item.locked), [item.locked])
@@ -76,14 +95,13 @@ export function ClarifySheet({ visible, item, onLock, onSubmit, onSkip, onClose,
     return (
       <BottomSheet
         accessibilityLabel={chatStrings.clarify.title}
-        blocking
         onClosed={onClosed}
         onRequestClose={onClose}
         testID="clarify-sheet"
         visible={visible}
       >
         <SheetEyebrow>{chatStrings.clarify.eyebrow}</SheetEyebrow>
-        <Text variant="title">{chatStrings.clarify.title}</Text>
+        <Text variant="sheetTitle">{chatStrings.clarify.title}</Text>
         <Text color="textMuted" testID="clarify-resolution">
           {item.state === 'answered'
             ? chatStrings.clarify.outcome(Object.keys(item.answers).length, item.questions.length)
@@ -106,26 +124,56 @@ export function ClarifySheet({ visible, item, onLock, onSubmit, onSkip, onClose,
   return (
     <BottomSheet
       accessibilityLabel={chatStrings.clarify.title}
-      blocking
       onClosed={onClosed}
       onRequestClose={onClose}
       testID="clarify-sheet"
       visible={visible}
     >
-      <SheetEyebrow>{chatStrings.clarify.eyebrow}</SheetEyebrow>
+      {/*
+        The step count rides BESIDE the eyebrow rather than on a line of its own:
+        "A QUESTION FOR YOU" and "Question 2 of 3" are the same piece of
+        furniture, and stacking them pushed the question itself down a line for
+        no information.
+      */}
+      <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.sm }}>
+        <View style={{ flex: 1 }}>
+          <SheetEyebrow>{chatStrings.clarify.eyebrow}</SheetEyebrow>
+        </View>
+        {batch ? (
+          <Text color="textFaint" testID="clarify-step" variant="micro">
+            {chatStrings.clarify.step(index + 1, item.questions.length).toUpperCase()}
+          </Text>
+        ) : null}
+      </View>
 
-      {batch ? (
-        <Text color="textMuted" variant="caption" testID="clarify-step">
-          {chatStrings.clarify.step(index + 1, item.questions.length)}
-        </Text>
-      ) : null}
-
-      <Text variant="title" testID="clarify-question">
+      <Text variant="sheetTitle" testID="clarify-question">
         {question.question}
       </Text>
 
+      {/*
+        A locked answer is the one state in this sheet a reader can be surprised
+        by — the server will not take a second answer — so it says so in words
+        with the ok tint behind it, rather than only dimming the controls.
+      */}
+      {isLocked ? (
+        <View
+          style={{
+            alignSelf: 'flex-start',
+            backgroundColor: theme.okSoft,
+            borderRadius: theme.radii.pill,
+            paddingHorizontal: theme.space.md,
+            paddingVertical: 5
+          }}
+          testID="clarify-locked"
+        >
+          <Text color="okText" variant="micro">
+            {chatStrings.clarify.locked.toUpperCase()}
+          </Text>
+        </View>
+      ) : null}
+
       {question.multiSelect ? (
-        <Text color="textMuted" variant="caption">
+        <Text color="textFaint" variant="meta">
           {chatStrings.clarify.multiSelectHint}
         </Text>
       ) : null}
@@ -138,7 +186,8 @@ export function ClarifySheet({ visible, item, onLock, onSubmit, onSkip, onClose,
             return (
               <Pressable
                 accessibilityRole={question.multiSelect ? 'checkbox' : 'radio'}
-                accessibilityState={{ checked: selected, disabled: isLocked }}
+                aria-checked={selected}
+                aria-disabled={isLocked}
                 disabled={isLocked}
                 key={choice}
                 onPress={() => setValue(toggleValue(value, choice, question.multiSelect))}
@@ -147,19 +196,23 @@ export function ClarifySheet({ visible, item, onLock, onSubmit, onSkip, onClose,
                 <View
                   style={{
                     alignItems: 'center',
-                    backgroundColor: theme.colors.surface,
-                    borderColor: selected ? theme.colors.accent : theme.colors.border,
-                    borderRadius: theme.radii.lg,
-                    borderWidth: selected ? 2 : 1,
+                    // Unselected is the SUNK well every field in the kit uses, so
+                    // a choice reads as something to fill in; selected is the
+                    // chat's own accent wash. Both keep a 1pt edge, so picking
+                    // one never moves the row by the pixel a 2pt border costs.
+                    backgroundColor: selected ? theme.accent().soft : theme.tintSunk,
+                    borderColor: selected ? theme.colors.accentText : theme.hairlineSoft,
+                    borderRadius: theme.radii.inset,
+                    borderWidth: 1,
                     flexDirection: 'row',
                     gap: theme.space.sm,
                     minHeight: 48,
-                    opacity: isLocked ? 0.5 : 1,
-                    paddingHorizontal: theme.space.md,
+                    opacity: isLocked ? 0.55 : 1,
+                    paddingHorizontal: theme.space.lg,
                     paddingVertical: theme.space.sm
                   }}
                 >
-                  <Text color={selected ? 'accent' : 'textMuted'} style={{ fontSize: 16 }}>
+                  <Text color={selected ? 'accentText' : 'textFaint'} style={{ fontSize: 16 }}>
                     {question.multiSelect ? (selected ? '☑' : '☐') : selected ? '◉' : '○'}
                   </Text>
                   <Text style={{ flex: 1 }}>{choice}</Text>
@@ -180,7 +233,26 @@ export function ClarifySheet({ visible, item, onLock, onSubmit, onSkip, onClose,
         value={value}
       />
 
+      {/*
+        One primary, then the ways sideways. The previous order put "Lock answer"
+        above the thing that actually answers the question, so the sheet's first
+        button was its most obscure one.
+      */}
       <View style={{ gap: theme.space.sm }}>
+        {batch && !lastQuestion ? (
+          <Button
+            onPress={() => setIndex(current => current + 1)}
+            testID="clarify-next"
+            title={chatStrings.clarify.next}
+          />
+        ) : (
+          <Button
+            onPress={() => leave(() => onSubmit(answers))}
+            testID="clarify-submit"
+            title={chatStrings.clarify.submit}
+          />
+        )}
+
         {onLock && !isLocked ? (
           <Button
             disabled={!value.trim()}
@@ -191,32 +263,24 @@ export function ClarifySheet({ visible, item, onLock, onSubmit, onSkip, onClose,
           />
         ) : null}
 
-        {isLocked ? (
-          <Text color="success" variant="caption" testID="clarify-locked">
-            {chatStrings.clarify.locked}
-          </Text>
-        ) : null}
-
-        {batch && !lastQuestion ? (
+        <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.sm }}>
+          {batch && index > 0 ? (
+            <Button
+              onPress={() => setIndex(current => current - 1)}
+              style={{ flex: 1 }}
+              testID="clarify-previous"
+              title={chatStrings.clarify.previous}
+              variant="secondary"
+            />
+          ) : null}
           <Button
-            onPress={() => setIndex(current => current + 1)}
-            testID="clarify-next"
-            title={chatStrings.clarify.next}
-          />
-        ) : (
-          <Button onPress={() => onSubmit(answers)} testID="clarify-submit" title={chatStrings.clarify.submit} />
-        )}
-
-        {batch && index > 0 ? (
-          <Button
-            onPress={() => setIndex(current => current - 1)}
-            testID="clarify-previous"
-            title={chatStrings.clarify.previous}
+            onPress={() => leave(onSkip)}
+            style={{ flex: 1 }}
+            testID="clarify-skip"
+            title={chatStrings.clarify.later}
             variant="secondary"
           />
-        ) : null}
-
-        <Button onPress={onSkip} testID="clarify-skip" title={chatStrings.clarify.later} variant="secondary" />
+        </View>
       </View>
     </BottomSheet>
   )

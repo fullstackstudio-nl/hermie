@@ -1,4 +1,7 @@
 /** Small, dependency-free formatters shared by the chat components. */
+import { type ChatPreview, chatRowPreview } from '@hermie/transcript'
+
+import { plainTextPreview } from '../markdown/plain-text'
 
 /** `12:48`, in the device's locale-independent 24h-or-not default. */
 export function formatClock(unixSeconds: number | undefined): string {
@@ -44,6 +47,31 @@ export function formatDuration(seconds: number | undefined): string {
   return `${hours}h ${String(totalMinutes % 60).padStart(2, '0')}m`
 }
 
+/**
+ * `0:42`, `1:12`, `1:02:33` — a running clock, for the agents bar.
+ *
+ * Not `formatDuration`. The bar's number ticks every second in a fixed slot, and
+ * `1m 12s` changes WIDTH as it counts (`9s` → `10s` → `1m 00s`), which shoves
+ * the "Show" beside it left and right once a second — the one thing a bar the
+ * design board calls static must not do. A colon clock only ever grows, and only
+ * at a minute or an hour.
+ */
+export function formatElapsedClock(seconds: number | undefined): string {
+  if (seconds === undefined || Number.isNaN(seconds) || seconds < 0) {
+    return '0:00'
+  }
+
+  const whole = Math.floor(seconds)
+  const minutes = Math.floor(whole / 60)
+  const rest = String(whole % 60).padStart(2, '0')
+
+  if (minutes < 60) {
+    return `${minutes}:${rest}`
+  }
+
+  return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}:${rest}`
+}
+
 /** `1.2k`, `912` — token counts in a bubble footer. */
 export function formatCount(value: number | undefined): string {
   if (value === undefined || Number.isNaN(value)) {
@@ -61,11 +89,90 @@ export function formatCount(value: number | undefined): string {
   return `${Math.round(value / 100_000) / 10}M`
 }
 
+/**
+ * Does this reply get the READING treatment?
+ *
+ * §6.3 and §7.1: a long reply drops the frosted interior for the near-opaque
+ * `bubbleInRead` wash, looser leading and more generous padding. That is not a
+ * stylistic variant — it is the only way body-text contrast becomes a fixed
+ * number instead of a function of whatever wallpaper is behind the bubble, and a
+ * wall of text is exactly where that matters.
+ *
+ * The test is deliberately crude and cheap: it runs on every streaming flush. A
+ * fenced block or a table qualifies at any length, because both are wide machine
+ * text that has to sit on a known surface to be readable at all.
+ */
+export function needsReadingTreatment(text: string): boolean {
+  if (text.length >= 480) {
+    return true
+  }
+
+  if (text.includes('```')) {
+    return true
+  }
+
+  // A table's delimiter row is the one line whose shape is unambiguous.
+  return /^\s*\|?[\s:-]*-{2,}[\s:|-]*$/m.test(text)
+}
+
+/** `4 KB`, `1.2 MB`, `98.4 MB` — an attachment's size on a chip. */
+export function formatBytes(bytes: number | undefined): string {
+  if (!bytes || bytes < 0 || Number.isNaN(bytes)) {
+    return ''
+  }
+
+  if (bytes < 1024) {
+    return `${bytes} B`
+  }
+
+  const kilobytes = bytes / 1024
+
+  if (kilobytes < 1024) {
+    return `${Math.round(kilobytes)} KB`
+  }
+
+  const megabytes = kilobytes / 1024
+
+  return megabytes < 1024 ? `${Math.round(megabytes * 10) / 10} MB` : `${Math.round((megabytes / 1024) * 10) / 10} GB`
+}
+
+/**
+ * Ellipsise the HEAD of a file name and keep the tail.
+ *
+ * The extension is the most informative part of a file name, so it is the part
+ * that survives: `…-final-v4.xlsx` tells a reader more than `Q3-report-fin…`.
+ */
+export function middleTruncate(name: string, max = 28): string {
+  if (name.length <= max) {
+    return name
+  }
+
+  // Keep a couple of leading characters as well: a tail alone loses which of
+  // three similarly-named exports this is.
+  const head = Math.max(0, Math.floor((max - 1) / 3))
+  const tail = max - 1 - head
+
+  return `${name.slice(0, head)}…${name.slice(name.length - tail)}`
+}
+
 /** One line, whitespace collapsed, ellipsised. */
 export function clipInline(value: string, max = 80): string {
   const collapsed = value.replace(/\s+/g, ' ').trim()
 
   return collapsed.length > max ? `${collapsed.slice(0, max - 1)}…` : collapsed
+}
+
+/**
+ * One clipped line of a reply, with the markdown taken off.
+ *
+ * Every preview in the app is the raw text of a message, and a message from a
+ * model is markdown — the owner read `## Retry semantics: what actu…` off a chat
+ * row, where two hashes and a space bought nothing and the sentence was cut
+ * anyway. Anywhere a single line stands for a whole reply goes through here: the
+ * chat list row, an Activity row, and a bot-to-bot line and its quoted answer.
+ */
+export function previewLine(value: string, max = 80): string {
+  return clipInline(plainTextPreview(value), max)
 }
 
 /** The initial a generated avatar shows. */
@@ -139,15 +246,42 @@ export function formatListTime(unixSeconds: number | undefined, now = Date.now()
  * which starts `Message from 🤖 Writer (@writer): …`. Spelling that out in full
  * on a 40-character row buries the message itself, so it is folded to
  * `🤖 @writer: …` — the same shape the transcript's DM bubble uses.
+ *
+ * A raw string still goes through here, and it still reaches this app from the
+ * gateway unexamined, so the wrapper strip is HERE rather than only in the
+ * caller: whatever asks for a preview line gets one that is not scaffolding. The
+ * widget snapshot is the reason that matters — it shares this function and has
+ * no derivation of its own.
  */
 export function formatPreview(preview: string): string {
-  const match = preview.match(/^Message from\s+(?:🤖\s*)?([^(:]+?)(?:\s*\(@([^)]+)\))?\s*:\s*([\s\S]*)$/)
+  return formatChatPreview(chatRowPreview(undefined, preview))
+}
+
+/**
+ * The same line, from a preview the transcript derived.
+ *
+ * `chatRowPreview` decides WHAT to show — the last real message, or the
+ * gateway's string with any wrapper taken off — and this decides how it reads.
+ * The split is what lets one row prefer its own transcript while the widget,
+ * which has none, keeps working off the string.
+ */
+export function formatChatPreview(preview: ChatPreview | null): string {
+  if (!preview) {
+    return ''
+  }
+
+  if (preview.fromHandle) {
+    // The handle is ours, not the message's, so only the body is markdown.
+    return clipInline(`🤖 @${preview.fromHandle}: ${plainTextPreview(preview.text)}`)
+  }
+
+  const match = preview.text.match(/^Message from\s+(?:🤖\s*)?([^(:]+?)(?:\s*\(@([^)]+)\))?\s*:\s*([\s\S]*)$/)
 
   if (!match) {
-    return clipInline(preview)
+    return previewLine(preview.text)
   }
 
   const handle = (match[2] ?? match[1] ?? '').trim()
 
-  return clipInline(`🤖 @${handle}: ${match[3] ?? ''}`)
+  return clipInline(`🤖 @${handle}: ${plainTextPreview(match[3] ?? '')}`)
 }

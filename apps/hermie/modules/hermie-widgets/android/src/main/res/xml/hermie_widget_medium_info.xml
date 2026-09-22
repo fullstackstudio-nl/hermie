@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The counterpart of systemMedium: a 4x2 cell, up to three conversations. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+  android:description="@string/hermie_widget_medium_label"
+  android:initialLayout="@layout/hermie_widget_medium"
+  android:minWidth="250dp"
+  android:minHeight="110dp"
+  android:previewLayout="@layout/hermie_widget_medium"
+  android:resizeMode="horizontal"
+  android:targetCellWidth="4"
+  android:targetCellHeight="2"
+  android:updatePeriodMillis="0"
+  android:widgetCategory="home_screen" />

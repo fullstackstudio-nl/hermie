@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The dark twin. themes.ts BLUE_DARK rung e1, tokens.ts darkColors and darkPresence. -->
+<resources>
+  <color name="hermie_widget_surface">#1C2A45</color>
+  <color name="hermie_widget_text">#F3F6FB</color>
+  <color name="hermie_widget_muted">#C8D2E0</color>
+  <color name="hermie_widget_accent">#2C7BEA</color>
+  <color name="hermie_widget_online">#3ED374</color>
+  <color name="hermie_widget_working">#5AA4FF</color>
+  <color name="hermie_widget_needs_input">#FFB531</color>
+  <color name="hermie_widget_offline">#7E8798</color>
+</resources>

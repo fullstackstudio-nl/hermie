@@ -1,0 +1,9 @@
+{
+  "name": "hermie-mac",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Reports whether the iOS app is running on an Apple Silicon Mac",
+  "license": "MIT",
+  "author": "FullStack Studio",
+  "homepage": "https://hermie.dev"
+}

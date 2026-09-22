@@ -19,6 +19,36 @@ not run it, which matters operationally — a machine that only runs `serve` wil
 jobs but never execute them. Hermie reads the `gateway_running` flag from the cron API and shows a
 banner when it is false.
 
+## Hermie Web
+
+The process started by `npx @hermie/web` (`packages/hermie-web`): one small Node server, next to the
+gateway and on its own port — 9120 by default — that serves Hermie's browser build and proxies
+**one** gateway onto its own origin. It is not a third kind of gateway and it authenticates nobody;
+it exists because the gateway's browser session is an `HttpOnly` cookie, a cookie belongs to an
+origin, and the gateway refuses a WebSocket whose `Origin` is not its own. Being same-origin is what
+lets a page use that session honestly. The gateway it points at is fixed when the process starts.
+[docs/web.md](web.md) is the design and [ADR-0015](adr/0015-web-variant-on-its-own-port.md) the
+decision.
+
+## Designed for iPad
+
+How Hermie runs on a Mac: Apple offers an unmodified iPhone/iPad app on Apple Silicon Macs from the
+same App Store listing, and that is the Mac version — not a port, not a separate target, and not a
+Catalyst build. There is no macOS project in this repository; `npm run mac` builds the iOS scheme for
+the `platform=macOS,variant=Designed for iPad` destination and wraps the product so macOS will launch
+it. The one place the code knows the difference is `isiOSAppOnMac`, read through a local Expo module,
+because `Platform.isMacCatalyst` is compile-time and false here.
+[ADR-0011](adr/0011-mac-via-the-ipad-build.md) records what the native macOS target cost and why it
+was dropped.
+
+## Application identifier
+
+`dev.hermie.app` — `ios.bundleIdentifier` and `android.package` in `apps/hermie/app.config.ts`, and
+the keychain access group that follows from it. One string for both platforms, so there is one place
+to get it wrong instead of two. It is the container as far as the operating system is concerned: a
+build made under the previous identifier is a different app to the system and has to be signed in
+again once.
+
 ## Bot
 
 A Hermes **profile**, seen from the user's side. A profile carries its own system prompt, model

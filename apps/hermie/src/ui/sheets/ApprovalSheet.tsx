@@ -7,11 +7,20 @@
  *     Never a hard-coded set — the gateway decides what may be answered, and
  *     inventing an "Always allow" the server did not offer would send a choice
  *     it will reject.
- *  2. Only an explicit tap answers. The sheet is `blocking`, so the backdrop
- *     does nothing, and there is no gesture anywhere near it.
+ *  2. Only an explicit tap ANSWERS. The sheet can be dismissed — backdrop,
+ *     Escape, a drag down — and none of those is an answer: the question stays
+ *     open and comes back from its own row in the transcript.
  *  3. A 400 ms guard after mount. A sheet that appears under a finger already
  *     travelling toward the screen would otherwise answer a question the user
- *     never read.
+ *     never read. It guards the MOUNT only; a tap that gets through answers at
+ *     once and the sheet leaves on it — see `respond`, which is the guard
+ *     against the second tap.
+ *
+ * The sheet closes on the tap and the RPC travels on its own. It used to wait
+ * for the gateway to confirm and then sit for two seconds saying "Answered:
+ * Allow once", which is a sheet explaining to the reader what the reader just
+ * did. If the answer fails to land, the question is still open in the
+ * transcript with an `Answer` button on it and the error is on the banner.
  */
 import { useEffect, useRef, useState } from 'react'
 import { View } from 'react-native'
@@ -69,6 +78,25 @@ export function ApprovalSheet({
   const [armed, setArmed] = useState(tapGuardMs <= 0)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  /**
+   * One answer per question.
+   *
+   * The sheet SLIDES OUT rather than vanishing, so its buttons are still under
+   * the finger for the length of the animation — and now that the answer no
+   * longer waits for the gateway, a second tap is a second `approval.respond`
+   * for a request that has already been answered.
+   */
+  const answered = useRef(false)
+
+  const respond = (choice: string) => {
+    if (answered.current) {
+      return
+    }
+
+    answered.current = true
+    onRespond(choice)
+  }
+
   // `item.id` is in here on purpose. The sheet host keeps ONE approval sheet
   // mounted and swaps the request into it, so a second question can arrive
   // without `visible` ever going false — and a guard that only re-armed on
@@ -76,10 +104,15 @@ export function ApprovalSheet({
   // finger that just answered the previous one.
   useEffect(() => {
     if (!visible) {
+      // Deliberately NOT resetting `answered` here: a sheet going invisible is
+      // a sheet sliding out, usually because it was just answered, and its
+      // buttons are still under the finger for the length of that animation.
       setArmed(tapGuardMs <= 0)
 
       return
     }
+
+    answered.current = false
 
     if (tapGuardMs <= 0) {
       setArmed(true)
@@ -102,52 +135,55 @@ export function ApprovalSheet({
   return (
     <BottomSheet
       accessibilityLabel={chatStrings.approval.title}
-      // Still blocking once answered: the sheet then shows why it closed, and
-      // a stray backdrop tap should not race the reason off the screen.
-      blocking
       onClosed={onClosed}
       onRequestClose={onClose}
       testID="approval-sheet"
       visible={visible}
     >
+      {/*
+        §6.9's order, which is not the order this sheet had: lead line, then the
+        command, then the consequence. The description used to sit ABOVE the
+        well, so the reader met the sentence about the command before the
+        command, and the well — the one thing they have to read — was in the
+        middle of three paragraphs instead of being the object the sheet is about.
+      */}
       <SheetEyebrow>{chatStrings.approval.eyebrow(botHandle)}</SheetEyebrow>
-      <Text variant="title">{chatStrings.approval.title}</Text>
+      <Text variant="sheetTitle">{chatStrings.approval.title}</Text>
 
-      {item.description ? (
-        <Text color="textMuted" style={{ fontSize: 16, lineHeight: 22 }}>
-          {item.description}
-        </Text>
-      ) : null}
+      <Text color="textMuted" testID="approval-lead" variant="preview">
+        {chatStrings.approval.lead(botHandle, workingDirectory)}
+      </Text>
 
       <View
         style={{
-          backgroundColor: theme.colors.surfaceRaised,
-          borderRadius: theme.radii.lg,
-          padding: theme.space.md
+          backgroundColor: theme.tintSunk,
+          borderColor: theme.hairlineSoft,
+          borderRadius: theme.radii.inset,
+          borderWidth: 1,
+          paddingHorizontal: theme.space.lg,
+          paddingVertical: theme.space.md
         }}
       >
         <Text
           selectable
-          style={{ color: theme.colors.text, fontFamily: MONOSPACE, fontSize: 13, lineHeight: 19 }}
+          style={{ color: theme.colors.text, fontFamily: MONOSPACE, fontSize: 15, lineHeight: 22 }}
           testID="approval-command"
         >
           {item.command}
         </Text>
       </View>
 
-      <View style={{ gap: 2 }}>
-        <Text style={{ fontSize: 13, fontWeight: '600' }}>{chatStrings.approval.runsOn}</Text>
-        {item.toolName ? (
-          <Text color="textMuted" variant="caption" testID="approval-tool-name">
-            {item.toolName}
-          </Text>
-        ) : null}
-        {workingDirectory ? (
-          <Text color="textMuted" variant="caption">
-            {workingDirectory}
-          </Text>
-        ) : null}
-      </View>
+      {item.description ? (
+        <Text color="textMuted" variant="preview">
+          {item.description}
+        </Text>
+      ) : null}
+
+      {item.toolName ? (
+        <Text color="textFaint" testID="approval-tool-name" variant="meta">
+          {`${chatStrings.approval.runsOn} · ${item.toolName}`}
+        </Text>
+      ) : null}
 
       {open ? (
         <View style={{ gap: theme.space.sm }}>
@@ -155,7 +191,7 @@ export function ApprovalSheet({
             <Button
               disabled={!armed}
               key={choice}
-              onPress={() => onRespond(choice)}
+              onPress={() => respond(choice)}
               testID={`approval-choice-${choice}`}
               title={choiceLabel(choice)}
               variant={choiceVariant(choice)}
@@ -163,7 +199,7 @@ export function ApprovalSheet({
           ))}
 
           {item.choices.includes('always') ? (
-            <Text color="textMuted" variant="caption">
+            <Text color="textFaint" variant="meta">
               {chatStrings.approval.fine}
             </Text>
           ) : null}

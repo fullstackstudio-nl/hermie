@@ -11,6 +11,25 @@ export type KeyValueStore = {
   delete(key: string): Promise<void>
   getJson<T>(key: string): Promise<T | null>
   setJson(key: string, value: unknown): Promise<void>
+  /**
+   * Every key this store currently holds.
+   *
+   * The one read that is not about a key somebody already knows the name of,
+   * and it exists for exactly one caller: the sweep in `gateway/registry.ts`
+   * that takes out configurations no gateway entry claims. Orphans cannot be
+   * found any other way — their ids were minted at random and then lost with
+   * the write that should have recorded them.
+   */
+  keys(): Promise<string[]>
+  /**
+   * Delete several keys in one go.
+   *
+   * Beside `delete` rather than instead of it because AsyncStorage's own
+   * `multiRemove` is one transaction: a sweep of forty orphans that went key by
+   * key would be forty writes of the manifest, and a launch interrupted halfway
+   * through would leave half of them behind.
+   */
+  deleteMany(keys: readonly string[]): Promise<void>
 }
 
 export const keyValueStore: KeyValueStore = {
@@ -38,5 +57,15 @@ export const keyValueStore: KeyValueStore = {
   },
   async setJson(key, value) {
     await AsyncStorage.setItem(key, JSON.stringify(value))
+  },
+  async keys() {
+    return [...(await AsyncStorage.getAllKeys())]
+  },
+  async deleteMany(keys) {
+    if (keys.length === 0) {
+      return
+    }
+
+    await AsyncStorage.multiRemove([...keys])
   }
 }

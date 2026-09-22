@@ -11,14 +11,21 @@ coverage/
 apps/hermie/ios/
 apps/hermie/android/
 
-# macOS native project: sources and Podfile.lock are committed, build products are not
-apps/hermie/macos/Pods/
-apps/hermie/macos/build/
-apps/hermie/macos/*.xcworkspace/xcuserdata/
-apps/hermie/macos/*.xcodeproj/xcuserdata/
-apps/hermie/macos/*.xcodeproj/project.xcworkspace/xcuserdata/
-apps/hermie/macos/.xcode.env.local
+# Gradle's output for the local Expo modules, whose `android/` IS committed —
+# so unlike the generated project above, only the build directories go.
+apps/hermie/modules/*/android/build/
+apps/hermie/modules/*/android/.gradle/
+apps/hermie/modules/*/android/.cxx/
+
+# Xcode build products, including the wrapped Mac bundle `npm run mac` writes
 DerivedData/
+apps/hermie/build/
+
+# Screenshots from a simulator QA walk. Evidence for one round, not a fixture:
+# they are named after the device and the day, they go stale the moment a
+# surface changes, and a repository is not where a hundred PNGs of the same
+# app belong. The findings go in the round's report and in docs/.
+qa/
 
 # Logs and local state
 *.log
@@ -31,3 +38,7 @@ yarn-error.log*
 .DS_Store
 .idea/
 *.swp
+
+# Manual QA captures: simulator screenshots from a walk-through, kept out of the
+# tree because they are evidence for one round, not an asset the app builds from.
+qa/

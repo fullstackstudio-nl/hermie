@@ -1,5 +1,5 @@
 /**
- * Picking a file for the composer.
+ * Picking a photo for the composer.
  *
  * Two jobs, and the second is the one that matters: get bytes, then make them
  * small enough to send. A modern phone photo is 4032 px on its long edge and
@@ -8,25 +8,33 @@
  * to illustrate. 1568 px is the longest edge a vision model reads at full
  * resolution — past that the extra pixels cost bandwidth and buy nothing.
  *
- * macOS uses the file picker instead; see `attachments.macos.ts`.
+ * There used to be a second picker, and a third module holding what the two
+ * agreed on, because macOS had no photo library and no `expo-image-manipulator`.
+ * Since ADR-0011 the Mac is the iPad build, with both, so there is one picker
+ * and one file.
  */
 import * as ImageManipulator from 'expo-image-manipulator'
 import * as ImagePicker from 'expo-image-picker'
-import { Linking } from 'react-native'
+import { Image, Linking } from 'react-native'
 
 import { strings } from '../../i18n/strings'
-import { MAX_ATTACHMENT_EDGE, nextAttachmentId, type PickedAttachment } from './attachment-contract'
 
-export { MAX_ATTACHMENT_EDGE, type PickedAttachment }
+/** The longest edge an attachment is resized to before it is encoded. */
+export const MAX_ATTACHMENT_EDGE = 1568
 
-/** What the "+" button offers on this platform, so the screen can label it. */
-export const attachmentKind: 'photo' | 'file' = 'photo'
+export interface PickedAttachment {
+  id: string
+  filename: string
+  /** Raw base64, no `data:` prefix — `image.attach_bytes` takes it as-is. */
+  base64: string
+  /** Local URI, for the composer's thumbnail. */
+  uri?: string
+}
 
-/**
- * Whether this build has a picker behind it. Always true here; the macOS
- * variant computes it, because `expo-document-picker` has no macOS slice.
- */
-export const attachmentsSupported = true
+let counter = 0
+
+/** A stable id for one staged attachment, unique within a session. */
+const nextAttachmentId = (): string => `attachment-${Date.now().toString(36)}-${(counter += 1)}`
 
 function filenameFor(uri: string, given: string | null | undefined): string {
   if (given) {
@@ -125,4 +133,27 @@ export async function resizeToBase64(
     base64: result.base64 ?? '',
     uri: result.uri
   }
+}
+
+/**
+ * The pixel size of an image at `uri`, for a caller that has no asset object to
+ * read `width`/`height` off — a pasted image, native or web, is exactly that:
+ * the pasteboard hands back bytes and a URI, never dimensions.
+ *
+ * `Image.getSize` rather than a second image-decoding library, because React
+ * Native already ships one that works on every platform this app runs on,
+ * including the web build through React Native Web's own `ImageLoader`.
+ *
+ * Resolves to an empty object rather than rejecting: a size this function could
+ * not read is not a reason to refuse the paste, only a reason `resizeToBase64`
+ * skips the resize step and encodes the image at whatever size it already is.
+ */
+export function imageDimensions(uri: string): Promise<{ width?: number; height?: number }> {
+  return new Promise(resolve => {
+    Image.getSize(
+      uri,
+      (width, height) => resolve({ height, width }),
+      () => resolve({})
+    )
+  })
 }

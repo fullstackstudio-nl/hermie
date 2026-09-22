@@ -196,6 +196,45 @@ export function isBotDmDeliveryCommand(command: string): boolean {
 }
 
 /**
+ * Is this row the delivery runner handing a teammate's ANSWER back?
+ *
+ * The answer to a dispatch does not arrive as a message. It arrives as a
+ * background process reporting its exit — `[IMPORTANT: Background process <sid>
+ * completed …]`, with the command that ran and the reply in its output — on the
+ * `user` role, because the gateway runs a turn on it.
+ *
+ * So the row is bot-to-bot traffic wearing a process report's clothes, and
+ * recognising it is what keeps it out of the owner's bubble. It was not
+ * recognised on either of the two paths that see the text alone: a persisted row
+ * whose `display_kind` never arrived, and a resume's `inflight.user`. Both fell
+ * through every parser to the last one and painted the teammate's reply as a
+ * message the owner typed — headers, command line and all.
+ *
+ * True when ANY block is one of ours: a batch can mix a delivery with an
+ * unrelated process, and one delivery block is enough to make the row traffic
+ * the reader must not be shown as speech.
+ */
+export function isBotDmDeliveryReport(text: unknown): boolean {
+  if (typeof text !== 'string' || !text) {
+    return false
+  }
+
+  return parseProcessCompleteText(text).some(block => isBotDmDeliveryCommand(block.command))
+}
+
+/**
+ * Does this item stand for bot-to-bot traffic?
+ *
+ * The one predicate every surface asks, so "which kinds are bot-to-bot" is
+ * written once. Both directions, because the reader's rule is about the traffic
+ * and not about who started it: neither side of a conversation between two agents
+ * is the conversation the reader is in.
+ */
+export function isBotToBotItem(item: TranscriptItem): boolean {
+  return item.kind === 'bot_dm_in' || item.kind === 'bot_dm_out'
+}
+
+/**
  * Both delivery forms run `hermes -p <profile> chat …` for the recipient, so the
  * routing alias is recoverable from the command even when the legacy
  * `-q "Message from` marker is absent (the runner passes a query file instead).

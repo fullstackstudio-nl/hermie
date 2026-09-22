@@ -1,0 +1,9 @@
+{
+  "name": "hermie-scene",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Adopts the UIKit scene life cycle, which iOS 27 requires",
+  "license": "MIT",
+  "author": "FullStack Studio",
+  "homepage": "https://hermie.dev"
+}

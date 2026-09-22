@@ -9,8 +9,9 @@ import { View } from 'react-native'
 
 import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
-import type { ColorRole } from '../ui/tokens'
+import type { TextColorRole } from '../ui/tokens'
 import { Chip } from './primitives/Chip'
+import { useLedgerWidth } from './primitives/Bubble'
 import { clipInline, formatDuration } from './format'
 import { chatStrings } from './strings'
 import type { Presentation, Subagent, SubagentGroupItem, SubagentStatus } from './types'
@@ -38,14 +39,21 @@ export function statusGlyph(status: SubagentStatus): string {
   }
 }
 
-export function statusTone(status: SubagentStatus): ColorRole {
+/**
+ * The ink a subagent's status word is drawn in.
+ *
+ * Every arm is a FLOORED role. `ok` and `accent` are fills — a status dot, a send
+ * button — and two of these used to name one, which put a status word on a card
+ * at whatever ratio the swatch happened to land on. See `TextColorRole`.
+ */
+export function statusTone(status: SubagentStatus): TextColorRole {
   switch (status) {
     case 'completed':
-      return 'success'
+      return 'okText'
     case 'failed':
-      return 'danger'
+      return 'dangerText'
     case 'running':
-      return 'accent'
+      return 'accentText'
     default:
       return 'textMuted'
   }
@@ -58,6 +66,7 @@ export function SubagentGroupCard({
   onOpenTranscript
 }: SubagentGroupCardProps) {
   const theme = useTheme()
+  const maxWidth = useLedgerWidth()
 
   if (presentation === 'hidden-placeholder') {
     return null
@@ -75,11 +84,12 @@ export function SubagentGroupCard({
   return (
     <View
       style={{
-        backgroundColor: theme.colors.surfaceRaised,
+        backgroundColor: theme.elevation.e3c,
         borderRadius: theme.radii.xl,
         gap: theme.space.xs,
         marginRight: 26,
         marginVertical: theme.space.md,
+        maxWidth,
         padding: theme.space.md
       }}
       testID={`subagent-group-${item.id}`}
@@ -132,7 +142,7 @@ export function SubagentGroupCard({
               label={clipInline(child.goal, 28)}
               onPress={() => onOpenTranscript(child.id)}
               testID={`subagent-open-${child.id}`}
-              tone="accent"
+              tone="accentText"
             />
           ))}
         </View>

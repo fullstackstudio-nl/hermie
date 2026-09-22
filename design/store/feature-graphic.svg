@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 500" width="1024" height="500" role="img" aria-label="Hermie">
+  <!--
+    The Google Play feature graphic: the Hermie mark beside the wordmark, on the
+    icon's blue sky. 1024 x 500 is Play's fixed size, so this file is drawn at
+    exactly that and rasterised 1:1 — one user unit is one pixel.
+
+    scripts/generate-store-assets.mjs renders it to feature-graphic.png. That
+    renderer is the same one the icons use (scripts/lib/svg-raster.mjs) and it
+    understands a deliberately small subset of SVG: <rect> with a corner radius,
+    <path> with M/L/H/V/C/S/Q/T/Z, flat fills and two-stop linear gradients in
+    user space. It has no font engine and no transform, clip, mask or opacity —
+    hence the two habits below, which are what make this file readable.
+
+    ONE: a counter is CUT, not left empty. The hole in an `e`, the open side of
+    an `m`: each is a shape filled with #sky, drawn on top of the white letter.
+    The renderer evaluates a gradient in user space, so a #sky shape painted over
+    the #sky background lands on exactly the colour that was already underneath
+    it — pixel for pixel, not merely close.
+
+    TWO: every straight edge where two shapes meet or one cuts another sits on a
+    WHOLE number. At 1:1 that is a pixel boundary, so a join cannot leave the
+    half-covered row that would otherwise read as a hairline seam. Curved joins
+    are tangent instead: a shoulder springs from the point where its circle's
+    edge is already vertical.
+
+    That second habit is a promise about the raster this file exists to produce,
+    not about every viewer. Open it in a browser, which will draw it at whatever
+    fraction fits the window, and those same edges land mid-pixel: a faint line
+    can appear along one. feature-graphic.png is the artefact — rendered at 1:1,
+    with no such pixel anywhere in it — and it is what the listing uploads.
+
+    There is no text element anywhere here, and there cannot be. "Hermie" below
+    is drawn: a geometric sans built from circles, stadium stems and two radial
+    cuts, on the metrics named in the wordmark group.
+
+    Colours are the brand blues from design/tokens.md, the same two stops as
+    design/icon.svg, spread over 500 rather than 1024 rows.
+  -->
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="500" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2E8FE9" />
+      <stop offset="1" stop-color="#0055BC" />
+    </linearGradient>
+  </defs>
+
+  <rect id="backdrop" x="0" y="0" width="1024" height="500" fill="url(#sky)" />
+
+  <!--
+    The mark, straight from design/icon.svg at half scale and no other change:
+    every coordinate there is even, so x/2 - 20 and y/2 - 8 land on whole numbers
+    too. It fills 64..408 across and 100..401 down — 301 of the 500 rows, with
+    the 100-row margins Play's cropping wants.
+  -->
+  <g id="mark">
+    <!-- The tail is drawn first; the bubble covers where the two meet. -->
+    <path id="tail" d="M 192 320 C 190 358 159 387 91 401 C 124 368 133 342 132 314 Z" fill="#FFFFFF" />
+    <rect id="bubble" x="64" y="100" width="344" height="232" rx="70" fill="#FFFFFF" />
+    <rect id="stem-left" x="148" y="142" width="48" height="148" rx="12" fill="#006BDC" />
+    <rect id="stem-right" x="276" y="142" width="48" height="148" rx="12" fill="#006BDC" />
+    <path id="crossbar" d="M 148 209 C 206 209 261 190 324 175 L 324 211 C 261 226 206 253 148 253 Z" fill="#006BDC" />
+  </g>
+
+  <!--
+    The wordmark, 472..961 across, on one set of metrics:
+
+      baseline 305, cap height 110 (so caps start at 195), x-height 78 (227),
+      round shapes overshoot the two by 2, stems 22 in the cap and 20 in the
+      lowercase, shoulders are circles of outer radius 32 springing from y 259,
+      and the dot of the i is 22 across.
+
+    The cap block is centred on row 250, which is where the mark's centre is too.
+  -->
+  <g id="wordmark">
+    <!-- H: two stems and a crossbar that spans both of them rather than meeting them. -->
+    <rect x="472" y="195" width="22" height="110" fill="#FFFFFF" />
+    <rect x="538" y="195" width="22" height="110" fill="#FFFFFF" />
+    <rect x="472" y="239" width="88" height="22" fill="#FFFFFF" />
+
+    <!--
+      e: a ring, a bar across it, and the lower right cut away at 45 degrees.
+      The cut is radial — from the inner circle to the outer one along one
+      diameter — so the terminal is a clean 20 wide face rather than a notch. The
+      triangle reaches past the ring on its open side, which costs nothing: there
+      the colour it paints is the background's own.
+    -->
+    <rect x="573" y="225" width="82" height="82" rx="41" fill="#FFFFFF" />
+    <rect x="593" y="245" width="42" height="42" rx="21" fill="url(#sky)" />
+    <rect x="576" y="256" width="70" height="18" fill="#FFFFFF" />
+    <path d="M 622 274 L 656 274 L 656 308 Z" fill="url(#sky)" />
+
+    <!--
+      r: a stem, and a quarter of a ring from the stem's top corner round to
+      three o'clock. The circle's top is exactly the stem's top edge, so the two
+      meet tangentially; its own left half and lower half are cut away, and the
+      stem is painted last over what the cuts took from its column.
+    -->
+    <rect x="654" y="227" width="64" height="64" rx="32" fill="#FFFFFF" />
+    <rect x="674" y="247" width="24" height="24" rx="12" fill="url(#sky)" />
+    <rect x="654" y="259" width="64" height="32" fill="url(#sky)" />
+    <rect x="654" y="227" width="32" height="32" fill="url(#sky)" />
+    <rect x="666" y="227" width="20" height="78" fill="#FFFFFF" />
+
+    <!--
+      m: two of those rings, overlapping by a stem's width, cut off at the
+      springing line and stood on three stems. Each arch's outer edge is vertical
+      where the cut is, which is what lets a straight stem continue it.
+    -->
+    <rect x="729" y="227" width="64" height="64" rx="32" fill="#FFFFFF" />
+    <rect x="749" y="247" width="24" height="24" rx="12" fill="url(#sky)" />
+    <rect x="773" y="227" width="64" height="64" rx="32" fill="#FFFFFF" />
+    <rect x="793" y="247" width="24" height="24" rx="12" fill="url(#sky)" />
+    <rect x="729" y="259" width="108" height="32" fill="url(#sky)" />
+    <rect x="729" y="259" width="20" height="46" fill="#FFFFFF" />
+    <rect x="773" y="259" width="20" height="46" fill="#FFFFFF" />
+    <rect x="817" y="259" width="20" height="46" fill="#FFFFFF" />
+
+    <!-- i: stem and dot, on one centre line. -->
+    <rect x="848" y="227" width="20" height="78" fill="#FFFFFF" />
+    <rect x="847" y="189" width="22" height="22" rx="11" fill="#FFFFFF" />
+
+    <!-- e, again, 306 to the right of the first one. -->
+    <rect x="879" y="225" width="82" height="82" rx="41" fill="#FFFFFF" />
+    <rect x="899" y="245" width="42" height="42" rx="21" fill="url(#sky)" />
+    <rect x="882" y="256" width="70" height="18" fill="#FFFFFF" />
+    <path d="M 928 274 L 962 274 L 962 308 Z" fill="url(#sky)" />
+  </g>
+</svg>

@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  One conversation, in the views a RemoteViews is allowed to hold.
+
+  The avatar is an ImageView the provider fills with a bitmap it builds itself —
+  either the PNG out of the shared store or a circle with an initial drawn on it.
+  That is the Android answer to `HermieAvatar`: there is no way to clip an
+  ImageView to a circle or to stack a letter on a coloured shape from a
+  RemoteViews, so the compositing happens in Kotlin and what crosses the process
+  boundary is one finished bitmap.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+  android:layout_width="match_parent"
+  android:layout_height="match_parent"
+  android:background="@drawable/hermie_widget_background"
+  android:orientation="vertical"
+  android:padding="14dp">
+
+  <!--
+    Shown instead of the row when there is no snapshot: the app has not run since
+    the widget was added, or the file's version moved. The widget cannot tell
+    those apart, so it says the one thing true of both.
+  -->
+  <TextView
+    android:id="@+id/hermie_empty"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:gravity="center"
+    android:text="@string/hermie_widget_empty"
+    android:textColor="@color/hermie_widget_muted"
+    android:textSize="12sp"
+    android:visibility="gone" />
+
+  <RelativeLayout
+    android:id="@+id/hermie_head"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
+    <ImageView
+      android:id="@+id/hermie_avatar"
+      android:layout_width="38dp"
+      android:layout_height="38dp"
+      android:layout_alignParentStart="true"
+      android:contentDescription="@null" />
+
+    <ImageView
+      android:id="@+id/hermie_bead"
+      android:layout_width="12dp"
+      android:layout_height="12dp"
+      android:layout_alignBottom="@id/hermie_avatar"
+      android:layout_alignEnd="@id/hermie_avatar"
+      android:contentDescription="@null"
+      android:src="@drawable/hermie_widget_bead" />
+
+    <TextView
+      android:id="@+id/hermie_badge"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_alignParentEnd="true"
+      android:background="@drawable/hermie_widget_badge"
+      android:paddingStart="6dp"
+      android:paddingEnd="6dp"
+      android:paddingTop="1dp"
+      android:paddingBottom="1dp"
+      android:textColor="#FFFFFF"
+      android:textSize="11sp"
+      android:textStyle="bold"
+      android:visibility="gone" />
+  </RelativeLayout>
+
+  <TextView
+    android:id="@+id/hermie_name"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="6dp"
+    android:maxLines="1"
+    android:ellipsize="end"
+    android:textColor="@color/hermie_widget_text"
+    android:textSize="15sp"
+    android:textStyle="bold" />
+
+  <TextView
+    android:id="@+id/hermie_last_line"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="2dp"
+    android:maxLines="3"
+    android:ellipsize="end"
+    android:textColor="@color/hermie_widget_muted"
+    android:textSize="12sp" />
+</LinearLayout>

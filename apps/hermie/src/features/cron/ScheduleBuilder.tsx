@@ -7,8 +7,8 @@
  * while the draft does not build.
  *
  * There is no native date picker here on purpose. `@react-native-community/
- * datetimepicker` has no macOS target, and one of the four platforms losing the
- * editor is a worse trade than typing `09:00` into a field. The Once mode takes
+ * datetimepicker` is a second look and feel to keep in step with the tokens for
+ * something that reads fine as `09:00` typed into a field. The Once mode takes
  * text for the same reason.
  */
 import { useMemo } from 'react'
@@ -27,14 +27,22 @@ export interface ScheduleBuilderProps {
   showErrors?: boolean
 }
 
-const MODES: { value: ScheduleMode; label: string }[] = [
+/*
+ * Built on CALL rather than at import.
+ *
+ * A module-level literal would freeze whatever language was active when the
+ * bundle loaded, which on a cold start is always English — see
+ * `i18n/catalogue.ts`. The list is three entries and it is rebuilt per render;
+ * the alternative is a screen that keeps its old language until it is remounted.
+ */
+const modes = (): { value: ScheduleMode; label: string }[] => [
   { value: 'interval', label: cronStrings.schedule.modes.interval },
   { value: 'daily', label: cronStrings.schedule.modes.daily },
   { value: 'cron', label: cronStrings.schedule.modes.cron },
   { value: 'once', label: cronStrings.schedule.modes.once }
 ]
 
-const UNITS: { value: IntervalUnit; label: string }[] = [
+const units = (): { value: IntervalUnit; label: string }[] => [
   { value: 'minutes', label: cronStrings.schedule.units.minutes },
   { value: 'hours', label: cronStrings.schedule.units.hours },
   { value: 'days', label: cronStrings.schedule.units.days }
@@ -49,7 +57,7 @@ export function ScheduleBuilder({ draft, onChange, showErrors = false }: Schedul
     <View style={{ gap: theme.space.md }} testID="schedule-builder">
       <SegmentedRow
         label={cronStrings.schedule.mode}
-        options={MODES}
+        options={modes()}
         value={draft.mode}
         onChange={mode => patch({ mode })}
         testID="schedule-mode"
@@ -65,7 +73,7 @@ export function ScheduleBuilder({ draft, onChange, showErrors = false }: Schedul
             testID="schedule-interval-value"
           />
           <SegmentedRow
-            options={UNITS}
+            options={units()}
             value={draft.intervalUnit}
             onChange={intervalUnit => patch({ intervalUnit })}
             testID="schedule-interval-unit"
@@ -83,11 +91,11 @@ export function ScheduleBuilder({ draft, onChange, showErrors = false }: Schedul
             onChangeText={time => patch({ time })}
             testID="schedule-time"
           />
-          <Text color="textMuted" variant="caption">
+          <Text color="textMuted" variant="meta">
             {cronStrings.schedule.days}
           </Text>
           <WeekdayChips weekdays={draft.weekdays} onChange={weekdays => patch({ weekdays })} />
-          <Text color="textMuted" variant="caption">
+          <Text color="textMuted" variant="meta">
             {cronStrings.schedule.daysHint}
           </Text>
         </View>
@@ -104,7 +112,7 @@ export function ScheduleBuilder({ draft, onChange, showErrors = false }: Schedul
             onChangeText={cronExpression => patch({ cronExpression })}
             testID="schedule-cron"
           />
-          <Text color="textMuted" variant="caption">
+          <Text color="textMuted" variant="meta">
             {cronStrings.schedule.cronHint}
           </Text>
         </View>
@@ -121,18 +129,18 @@ export function ScheduleBuilder({ draft, onChange, showErrors = false }: Schedul
             onChangeText={onceValue => patch({ onceValue })}
             testID="schedule-once"
           />
-          <Text color="textMuted" variant="caption">
+          <Text color="textMuted" variant="meta">
             {cronStrings.schedule.onceHint}
           </Text>
         </View>
       ) : null}
 
       {result.ok ? (
-        <Text color="textMuted" variant="caption" testID="schedule-preview">
+        <Text color="textMuted" variant="meta" testID="schedule-preview">
           {cronStrings.editor.preview(result.schedule)}
         </Text>
       ) : showErrors ? (
-        <Text color="danger" variant="caption" testID="schedule-error">
+        <Text color="dangerText" variant="meta" testID="schedule-error">
           {result.error}
         </Text>
       ) : null}
@@ -152,12 +160,13 @@ function WeekdayChips({ weekdays, onChange }: { weekdays: number[]; onChange: (w
           <Pressable
             accessibilityRole="checkbox"
             accessibilityLabel={cronStrings.schedule.weekdayNames[day]}
-            accessibilityState={{ checked: selected }}
+            aria-checked={selected}
             key={cronStrings.schedule.weekdayNames[day]}
             onPress={() => onChange(selected ? weekdays.filter(value => value !== day) : [...weekdays, day])}
             style={{
               alignItems: 'center',
-              backgroundColor: selected ? theme.colors.bubbleBlue : theme.colors.surfaceRaised,
+              // The bubble, not the fill: the initial on it is `onAccent`.
+              backgroundColor: selected ? theme.accent().bubble : theme.elevation.e2,
               borderRadius: theme.radii.pill,
               flex: 1,
               justifyContent: 'center',
@@ -165,7 +174,7 @@ function WeekdayChips({ weekdays, onChange }: { weekdays: number[]; onChange: (w
             }}
             testID={`schedule-weekday-${day}`}
           >
-            <Text color={selected ? 'onAccent' : 'text'} variant="callout">
+            <Text color={selected ? 'onAccent' : 'text'} variant="preview">
               {initial}
             </Text>
           </Pressable>

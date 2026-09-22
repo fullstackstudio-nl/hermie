@@ -1,17 +1,48 @@
 import { describe, expect, it } from 'vitest'
 
-import { rowsToItems, stripUserText, type TranscriptRow } from './rows-to-items'
+import {
+  attachmentRefName,
+  attachmentsMatchKey,
+  normalizedItemText,
+  rowsToItems,
+  stripUserText,
+  type TranscriptRow
+} from './rows-to-items'
 import {
   attachedContextRow,
   codexSidecarRow,
+  cronBotChatBody,
+  cronBotChatHeader,
+  cronBotChatText,
+  cronMirrorText,
+  delegationBatchText,
   dmReplyProcessText,
+  kanbanNotificationText,
+  modelSwitchMarkerText,
   plainProcessText,
+  priorContextText,
   restHistoryRows,
-  rpcHistoryRows
+  rpcHistoryRows,
+  steerWrapperBody,
+  steerWrapperText
 } from './__fixtures__/rows'
-import type { AssistantItem, BotDmInItem, BotDmOutItem, NoticeItem, SubagentGroupItem, ToolItem } from './types'
+import type {
+  AssistantItem,
+  BotDmInItem,
+  BotDmOutItem,
+  CronDeliveryItem,
+  NoticeItem,
+  SubagentGroupItem,
+  ToolItem,
+  TranscriptItem,
+  UserItem
+} from './types'
 
 const kinds = (rows: TranscriptRow[]) => rowsToItems(rows, 'rpc').map(item => item.kind)
+
+/** The transcript no longer ends on a reply, so reach for it by kind. */
+const lastAssistant = (items: readonly TranscriptItem[]) =>
+  [...items].reverse().find((item): item is AssistantItem => item.kind === 'assistant')!
 
 describe('rowsToItems (rpc history)', () => {
   const items = rowsToItems(rpcHistoryRows, 'rpc')
@@ -33,7 +64,8 @@ describe('rowsToItems (rpc history)', () => {
       'subagent_group',
       'notice',
       'bot_dm_in',
-      'assistant'
+      'assistant',
+      'cron_delivery'
     ])
   })
 
@@ -117,7 +149,26 @@ describe('rowsToItems (rpc history)', () => {
     // We dispatched to @writer earlier in this exchange, so the reply answers us
     // and the next assistant turn addresses the human again.
     expect(inbound.answersOurDispatch).toBe(true)
-    expect((items.at(-1) as AssistantItem).replyToBotHandle).toBeUndefined()
+    expect(lastAssistant(items).replyToBotHandle).toBeUndefined()
+  })
+
+  it('reads an unmarked cron delivery as its own kind, not as the owner speaking', () => {
+    const cron = items.find(item => item.kind === 'cron_delivery') as CronDeliveryItem
+
+    expect(cron).toMatchObject({
+      id: 'r:16',
+      rowId: 16,
+      ts: 1_700_000_050,
+      jobName: 'Inbox scan',
+      shape: 'bot_chat',
+      origin: 'history'
+    })
+    expect(cron.body).toBe(cronBotChatBody)
+    // The header is gone from the body: the card draws the name, not the sentence.
+    expect(cron.body).not.toContain('scheduled job, not the user')
+    expect(cron.nameRedacted).toBeUndefined()
+    // And it is not a user turn, which is the whole bug.
+    expect(items.filter(item => item.kind === 'user' && item.text.includes('Cronjob'))).toHaveLength(0)
   })
 })
 
@@ -131,7 +182,7 @@ describe('rowsToItems (rest history)', () => {
 
   it('produces the same ids for the rows both transports carry', () => {
     const rpc = rowsToItems(
-      rpcHistoryRows.filter(row => [1, 2, 14, 15].includes(Number(row.row_id))),
+      rpcHistoryRows.filter(row => [1, 2, 14, 15, 16].includes(Number(row.row_id))),
       'rpc'
     )
 
@@ -140,10 +191,28 @@ describe('rowsToItems (rest history)', () => {
 
   it('flags the unsolicited inbound DM and its answering turn', () => {
     const inbound = items.find(item => item.kind === 'bot_dm_in') as BotDmInItem
-    const assistant = items.at(-1) as AssistantItem
 
     expect(inbound.answersOurDispatch).toBeUndefined()
-    expect(assistant.replyToBotHandle).toBe('writer')
+    expect(lastAssistant(items).replyToBotHandle).toBe('writer')
+  })
+
+  it('projects a cron delivery identically from either transport, id included', () => {
+    // One delivery, one row, each transport's own aliases for its fields. Same
+    // item and same id — `reconcile` pairs on both, so a REST/RPC switch mid-chat
+    // must not turn one card into two. `seq` is positional and is renumbered by
+    // `reconcile`, so the row stands alone here to keep it comparable.
+    const fromRpc = rowsToItems([{ role: 'user', text: cronBotChatText, timestamp: 1_700_000_050, row_id: 16 }], 'rpc')
+    const fromRest = rowsToItems(
+      [
+        { role: 'user', content: 'raw stored body', display_content: cronBotChatText, timestamp: 1_700_000_050, id: 16 }
+      ],
+      'rest'
+    )
+
+    expect(fromRest).toEqual(fromRpc)
+    expect(fromRest[0]?.id).toBe('r:16')
+    // And the same delivery inside the full fixture keeps that id.
+    expect(items.find(item => item.kind === 'cron_delivery')?.id).toBe('r:16')
   })
 })
 
@@ -157,6 +226,47 @@ describe('stripUserText', () => {
 
   it('leaves an ordinary message untouched', () => {
     expect(stripUserText('just a question')).toEqual({ text: 'just a question' })
+  })
+
+  it('reads a file-only prompt as no text and one reference', () => {
+    // The whole bug: this is what a send with an attachment and no words
+    // projects to on BOTH sides, so the reference is all there is to pair on.
+    expect(stripUserText('@file:/srv/work/uploads/hermie/2026-09-20/ab-ui.xml')).toEqual({
+      text: '',
+      attachments: ['@file:/srv/work/uploads/hermie/2026-09-20/ab-ui.xml']
+    })
+  })
+})
+
+describe('attachment references as a comparison key', () => {
+  it('reads the name out of a reference, quoted or not', () => {
+    expect(attachmentRefName('@file:/srv/work/uploads/hermie/2026-09-20/8setj4h3-ui.xml')).toBe('8setj4h3-ui.xml')
+    expect(attachmentRefName('@file:"/srv/work/my notes.txt"')).toBe('my notes.txt')
+    expect(attachmentRefName('@file:`/srv/work/my notes.txt`')).toBe('my notes.txt')
+    expect(attachmentRefName('@image:shot.png')).toBe('shot.png')
+  })
+
+  it('matches the same attachment described with and without its path', () => {
+    // An attached image is the asymmetric case: the client named it, the gateway
+    // chose where to put it, and only the name survives both.
+    expect(attachmentsMatchKey(['@image:shot.png'])).toBe(
+      attachmentsMatchKey(['@image:/srv/work/.hermes/images/shot.png'])
+    )
+  })
+
+  it('ignores the order two references were listed in', () => {
+    expect(attachmentsMatchKey(['@file:/a/one.txt', '@image:two.png'])).toBe(
+      attachmentsMatchKey(['@image:/srv/two.png', '@file:/a/one.txt'])
+    )
+  })
+
+  it('separates a picture from a document of the same name', () => {
+    expect(attachmentsMatchKey(['@image:diagram.png'])).not.toBe(attachmentsMatchKey(['@file:diagram.png']))
+  })
+
+  it('is empty for a turn that carries nothing, so text alone decides', () => {
+    expect(attachmentsMatchKey(undefined)).toBe('')
+    expect(attachmentsMatchKey([])).toBe('')
   })
 })
 
@@ -200,5 +310,220 @@ describe('rowsToItems edge cases', () => {
 
   it('ignores roles it does not model', () => {
     expect(kinds([{ role: 'developer', text: 'scaffolding' }])).toEqual([])
+  })
+})
+
+describe('cron deliveries in a transcript', () => {
+  it('projects the platform-mirror shape too', () => {
+    const items = rowsToItems([{ role: 'user', row_id: 5, text: cronMirrorText }], 'rpc')
+
+    expect(items[0]).toMatchObject({
+      kind: 'cron_delivery',
+      jobName: 'Morning Brief',
+      body: 'Two deploys overnight, both green.',
+      shape: 'mirror'
+    })
+  })
+
+  it('carries the redaction flag through to the item', () => {
+    const items = rowsToItems(
+      [{ role: 'user', row_id: 5, text: `${cronBotChatHeader('[REDACTED - redaction failed]')}\n\nscrubbed` }],
+      'rpc'
+    )
+
+    expect(items[0]).toMatchObject({ kind: 'cron_delivery', nameRedacted: true })
+  })
+
+  it('keeps a header the header arrived without a body yet', () => {
+    const items = rowsToItems([{ role: 'user', row_id: 5, text: cronBotChatHeader('Inbox scan') }], 'rpc')
+
+    // An empty body is still a delivery: the card says the job ran and said
+    // nothing, which is not the same as no row at all.
+    expect(items[0]).toMatchObject({ kind: 'cron_delivery', jobName: 'Inbox scan', body: '' })
+  })
+
+  it('leaves a quoted header a user turn', () => {
+    const items = rowsToItems([{ role: 'user', row_id: 5, text: `why does it say ${cronBotChatText}` }], 'rpc')
+
+    expect(items[0]?.kind).toBe('user')
+  })
+
+  it('leaves a header inside a fenced code block a user turn', () => {
+    const items = rowsToItems(
+      [{ role: 'user', row_id: 5, text: ['```', cronBotChatHeader('Inbox scan'), '```'].join('\n') }],
+      'rpc'
+    )
+
+    expect(items[0]?.kind).toBe('user')
+  })
+
+  it('leaves a genuine message that merely starts with a bracket a user turn', () => {
+    expect(kinds([{ role: 'user', row_id: 5, text: '[urgent] the build is red' }])).toEqual(['user'])
+  })
+
+  it('never fires on a row the gateway already labelled', () => {
+    // A `display_kind` is a real marker; the header is only a heuristic, so the
+    // marker wins and these stay what the gateway said they were.
+    const items = rowsToItems(
+      [
+        { role: 'user', row_id: 1, text: cronBotChatText, display_kind: 'steer' },
+        { role: 'user', row_id: 2, text: cronMirrorText, display_kind: 'skill_invocation' },
+        { role: 'user', row_id: 3, text: cronBotChatText, display_kind: 'internal_notification' },
+        { role: 'user', row_id: 4, text: cronBotChatText, display_kind: 'hidden' }
+      ],
+      'rpc'
+    )
+
+    expect(items.map(item => item.kind)).toEqual(['user', 'user', 'notice'])
+    expect((items[0] as UserItem).displayKind).toBe('steer')
+  })
+
+  it('never fires on a role that is not user', () => {
+    expect(kinds([{ role: 'system', text: cronBotChatText }])).toEqual(['user'])
+    expect(kinds([{ role: 'assistant', text: cronBotChatText }])).toEqual(['assistant'])
+  })
+
+  it('reconciles on a text key both transports agree about', () => {
+    const [rpc] = rowsToItems([{ role: 'user', text: cronBotChatText }], 'rpc') as [CronDeliveryItem]
+    const [rest] = rowsToItems([{ role: 'user', display_content: cronBotChatText }], 'rest') as [CronDeliveryItem]
+
+    expect(normalizedItemText(rpc)).toBe(normalizedItemText(rest))
+    expect(normalizedItemText(rpc)).toContain('Inbox scan')
+    expect(normalizedItemText(rpc)).toContain(cronBotChatBody.replace(/\s+/gu, ' ').trim())
+  })
+})
+
+/**
+ * The rows a gateway injects to start a turn, arriving without the
+ * `display_kind` that would have named them.
+ *
+ * Over REST the column is not in the payload at all, and an older gateway never
+ * wrote it — so the same row that is a card on one transport used to be the
+ * owner's own bubble on the other, signed by somebody who never typed it.
+ */
+describe('an injected row with no display_kind', () => {
+  const only = (text: string) => rowsToItems([{ role: 'user', row_id: 40, text }], 'rpc')[0] as NoticeItem
+
+  it('draws a fan-out report as a notice, not as the owner speaking', () => {
+    expect(only(delegationBatchText)).toMatchObject({
+      kind: 'notice',
+      noticeKind: 'async_delegation_complete',
+      title: 'ASYNC DELEGATION BATCH COMPLETE — deleg_1bd47ada',
+      body: delegationBatchText,
+      rowId: 40
+    })
+  })
+
+  it('closes the delegation group the report belongs to, exactly as the labelled row does', () => {
+    const items = rowsToItems(
+      [
+        { role: 'tool', name: 'delegate_task', tool_id: 'call_d1', args: { tasks: [{ goal: 'Audit deps' }] } },
+        { role: 'user', row_id: 41, text: delegationBatchText }
+      ],
+      'rpc'
+    )
+
+    expect(items[0]).toMatchObject({ kind: 'subagent_group', status: 'done', completion: delegationBatchText })
+  })
+
+  it('draws a background process, a compaction handoff and a kanban dispatch as notices', () => {
+    expect(only(plainProcessText).noticeKind).toBe('process_complete')
+    expect(only(priorContextText).noticeKind).toBe('internal_notification')
+    expect(only(kanbanNotificationText + '\ndetails').noticeKind).toBe('internal_notification')
+  })
+
+  it('pairs with the same row described by its display_kind, because both say the same thing', () => {
+    // The titles differ on purpose — the labelled row is titled by the gateway,
+    // this one by its own header — and reconciliation must pair them anyway.
+    const [labelled] = rowsToItems(
+      [{ role: 'user', row_id: 42, text: delegationBatchText, display_kind: 'async_delegation_complete' }],
+      'rpc'
+    ) as [NoticeItem]
+    const unlabelled = only(delegationBatchText)
+
+    expect(labelled.title).not.toBe(unlabelled.title)
+    expect(normalizedItemText(labelled)).toBe(normalizedItemText(unlabelled))
+  })
+
+  it('still leaves a message that merely opens with a bracket a user turn', () => {
+    expect(kinds([{ role: 'user', row_id: 43, text: '[ok] done' }])).toEqual(['user'])
+    expect(kinds([{ role: 'user', row_id: 44, text: '[1] first item\n[2] second item' }])).toEqual(['user'])
+  })
+})
+
+/**
+ * The wrapper a mid-turn steer is delivered in.
+ *
+ * `agent/prompt_builder.py::format_steer_marker` writes it, and every word of it
+ * is addressed to the model: whose words these are, and that a replay is not a
+ * new delivery. A chat loaded from history showed all three lines in the bubble.
+ */
+describe('a persisted steer row', () => {
+  const row = (extra: Partial<TranscriptRow> = {}) =>
+    rowsToItems(
+      [{ role: 'user', row_id: 50, text: steerWrapperText, display_kind: 'steer', ...extra }],
+      'rpc'
+    )[0] as UserItem
+
+  it('shows only the words the user typed', () => {
+    expect(row()).toMatchObject({ kind: 'user', text: steerWrapperBody, displayKind: 'steer' })
+  })
+
+  it('is a steer even on a gateway that did not label it', () => {
+    expect(row({ display_kind: null })).toMatchObject({ kind: 'user', text: steerWrapperBody, displayKind: 'steer' })
+  })
+
+  it('pairs with the optimistic bubble, which never saw the wrapper', () => {
+    const [persisted] = rowsToItems([{ role: 'user', row_id: 51, text: steerWrapperText }], 'rpc') as [UserItem]
+
+    expect(normalizedItemText(persisted)).toBe(steerWrapperBody)
+  })
+})
+
+describe('the [System: …] wrapper, on the history path', () => {
+  const unwrapped =
+    'The active model for this chat has changed to k3 via provider moonshot. From this point forward, use this ' +
+    'runtime metadata when answering questions about what model/provider is active.'
+
+  it('comes off a row the gateway labelled, whichever label it used', () => {
+    const rows: TranscriptRow[] = [
+      { role: 'user', text: modelSwitchMarkerText, display_kind: 'model_switch', row_id: 1 },
+      { role: 'user', text: modelSwitchMarkerText, display_kind: 'personality_switch', row_id: 2 },
+      { role: 'user', text: modelSwitchMarkerText, display_kind: 'auto_continue', row_id: 3 }
+    ]
+
+    for (const item of rowsToItems(rows, 'rpc')) {
+      expect((item as NoticeItem).body).toBe(unwrapped)
+    }
+  })
+
+  it('comes off a row nothing labelled, to exactly the same words', () => {
+    const [item] = rowsToItems([{ role: 'user', text: modelSwitchMarkerText, row_id: 9 }], 'rpc')
+
+    expect(item).toMatchObject({ kind: 'notice', noticeKind: 'system_note', body: unwrapped })
+  })
+
+  it('leaves the two descriptions of one row saying the same thing', () => {
+    /*
+      The whole reason the unwrap sits in one place. A labelled row keeps the
+      gateway's own title and an unlabelled one gets a title made from the
+      sentence, so the two disagree about what the row is CALLED — which
+      ADR-0018 allows. They must not disagree about what it SAYS: that is the
+      key the two are paired on, and a mismatch paints the row twice.
+    */
+    const [labelled] = rowsToItems(
+      [{ role: 'user', text: modelSwitchMarkerText, display_kind: 'model_switch', row_id: 1 }],
+      'rpc'
+    )
+    const [bare] = rowsToItems([{ role: 'user', text: modelSwitchMarkerText, row_id: 1 }], 'rpc')
+
+    expect((labelled as NoticeItem).title).not.toBe((bare as NoticeItem).title)
+    expect(normalizedItemText(labelled!)).toBe(normalizedItemText(bare!))
+  })
+
+  it('leaves a body that is not a system note alone', () => {
+    const [item] = rowsToItems([{ role: 'user', text: plainProcessText, row_id: 4 }], 'rpc')
+
+    expect((item as NoticeItem).body).toBe('error TS2345: Argument of type string is not assignable.')
   })
 })

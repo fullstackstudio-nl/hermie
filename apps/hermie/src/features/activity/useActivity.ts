@@ -12,15 +12,20 @@
  * cached — they are read from the gateway while the screen is on top and
  * forgotten when it is not.
  */
+import type { ConnectionStatus } from '@hermie/gateway-client'
 import { activityEntries, type ActivityEntry } from '@hermie/transcript'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { useGateway } from '../../gateway'
 import { useBotsStore } from '../../store/bots'
 import { useChatsStore } from '../../store/chats'
 import { useChatRuntime } from '../chats/ChatRuntime'
 
 /** `delegation.status` and `agents.list` cadence while the screen is visible. */
 export const ACTIVITY_COUNTER_POLL_MS = 10_000
+
+/** On its way to `ready`: worth waiting for, and worth a spinner rather than a verdict. */
+const DIALLING: readonly ConnectionStatus[] = ['probing', 'authenticating', 'connecting', 'reconnecting']
 
 export interface ActivityCounters {
   /** Bots with a session the gateway calls busy (`session.active_list`). */
@@ -44,6 +49,7 @@ export interface UseActivityResult {
 
 export function useActivity(): UseActivityResult {
   const runtime = useChatRuntime()
+  const { status } = useGateway()
   const chats = useChatsStore(state => state.chats)
   const running = useBotsStore(state => state.running)
   const bots = useBotsStore(state => state.bots)
@@ -84,11 +90,42 @@ export function useActivity(): UseActivityResult {
     }
   }, [])
 
-  // The background load: every bot without a live chat gets its recent tail, so
-  // the timeline is not limited to the conversations the user happened to open.
+  /**
+   * The background load: every bot without a live chat gets its recent tail, so
+   * the timeline is not limited to the conversations the user happened to open.
+   *
+   * It waits for the connection to be READY, and that wait is the whole fix.
+   * A `GatewayConnection` exists from the moment a gateway is configured, long
+   * before its socket is up, so this ran the instant the screen mounted; the
+   * roster read under it failed with "gateway not connected", `loadActivity`
+   * swallows a failed roster as "no bots", and the timeline settled on "your
+   * bots have not talked to each other yet" — for good, because nothing asked
+   * again. It was a race the screen lost on every launch that opened Activity
+   * first, and it is the same failure, for the same reason, that
+   * `ChatRuntimeProvider` already guards the roster against.
+   */
+  const wasReady = useRef(false)
+
   useEffect(() => {
+    if (status !== 'ready') {
+      wasReady.current = false
+
+      // A connection still dialling keeps the spinner; one that has stopped
+      // trying must not, or the notice saying so never gets to be seen.
+      if (!DIALLING.includes(status)) {
+        setLoading(false)
+      }
+
+      return
+    }
+
+    if (wasReady.current) {
+      return
+    }
+
+    wasReady.current = true
     void refresh()
-  }, [refresh])
+  }, [refresh, status])
 
   // `session.active_list` is already polled by the roster controller; this only
   // adds the two counters nothing else reads.

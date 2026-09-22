@@ -1,4 +1,4 @@
-import { isGatewayError } from '@hermie/gateway-client'
+import { classifyProbeFailure, isGatewayError, type NetworkKind, type ProbeVerdict } from '@hermie/gateway-client'
 
 import { strings } from '../i18n/strings'
 
@@ -28,23 +28,65 @@ function fallbackMessage(error: unknown): string {
   return strings.errors.unknown
 }
 
-/** The unauthenticated probe the address step runs while the user is typing. */
-export function describeProbeError(error: unknown, baseUrl: string): string {
+function privateNetworkSentence(verdict: ProbeVerdict): string {
+  return verdict.hint === 'private_network' ? strings.errors.privateNetworkOnly : ''
+}
+
+/**
+ * The unauthenticated probe the address step runs while the user is typing.
+ *
+ * `httpsWasPinned` is the one thing the resolver's error cannot carry: whether
+ * the reader typed `https://` themselves. It decides nothing about the failure
+ * and everything about the sentence — a scheme-less address has already been
+ * tried both ways by the time anything is thrown, and a pinned `https://` has
+ * not been tried in the clear at all.
+ */
+export function describeProbeError(
+  error: unknown,
+  baseUrl: string,
+  httpsWasPinned = false,
+  /**
+   * What the device says it is on, when it has been asked.
+   *
+   * The one thing neither the error nor the address can carry, and the thing
+   * that decides whether "could not reach it" is worth a second sentence: a
+   * tailnet name that will not resolve on mobile data is a tunnel that is down,
+   * and the same failure on Wi-Fi is just as likely to be a gateway that is off.
+   */
+  network: NetworkKind = 'unknown'
+): string {
   if (!isGatewayError(error)) {
     return fallbackMessage(error)
   }
 
   const host = hostOf(baseUrl)
+  /*
+    The extra sentences come from the classifier, not from `error.hint`.
+
+    `hint` is the gateway client's OWN wording, and it exists for a caller with
+    no string table — a script, a test, another client. This app has one, and a
+    screen that printed a sentence composed in a library would be a screen whose
+    voice cannot be read from `i18n/strings.ts`. So the app reads the codes and
+    writes its own; the two say the same thing and only one of them is edited
+    here.
+  */
+  const verdict = classifyProbeFailure(error, { address: baseUrl, network })
+  const withHints = (message: string): string =>
+    [message, verdict.landingPage ? strings.errors.landingPage : '', privateNetworkSentence(verdict)]
+      .filter(Boolean)
+      .join(' ')
 
   switch (error.kind) {
     case 'network':
-      return strings.errors.network(host)
+      return withHints(httpsWasPinned ? strings.errors.networkOverHttps(host) : strings.errors.network(host))
     case 'tls':
       return strings.errors.tls(host)
     case 'timeout':
       return strings.errors.timeout(host)
     case 'not_hermes':
-      return strings.errors.notHermes(host)
+      return withHints(strings.errors.notHermes(host))
+    case 'redirect':
+      return strings.errors.redirected(host, error.redirectedTo ?? strings.settings.unknown)
     case 'auth':
       return strings.errors.authProxy(error.status ?? 401)
     case 'server':
@@ -94,6 +136,8 @@ export function describeConnectionError(error: unknown, baseUrl: string): string
       return strings.errors.timeout(hostOf(baseUrl))
     case 'not_hermes':
       return strings.errors.notHermes(hostOf(baseUrl))
+    case 'redirect':
+      return strings.errors.redirected(hostOf(baseUrl), error.redirectedTo ?? strings.settings.unknown)
     case 'server':
       return strings.errors.server(error.status ?? 500)
     case 'incompatible':

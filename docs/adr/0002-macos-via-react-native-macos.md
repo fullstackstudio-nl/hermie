@@ -1,7 +1,12 @@
 # 0002. macOS through react-native-macos, in the same app package
 
-- Status: Accepted
+- Status: Superseded by [0011](0011-mac-via-the-ipad-build.md)
 - Date: 2026-09-18
+
+> Superseded on 2026-09-19. The Mac version is the iOS app running as "Designed for iPad" on Apple
+> Silicon, and the native macOS target is deleted. The text below is kept as written:
+> [0011](0011-mac-via-the-ipad-build.md) lists what a day of building on this decision actually cost,
+> and that list is only readable next to the reasoning it undid.
 
 ## Context
 

@@ -1,20 +1,22 @@
 /**
  * A text field for a value that should not sit on screen in plain sight — a
- * session token, a proxy header's value.
+ * session token, a proxy header's value — with a reveal control beside it.
  *
- * It exists because of one platform fact, documented in `docs/platform-notes.md`:
- * **on react-native-macos a `secureTextEntry` `TextInput` renders the dots but
- * never fires `onChangeText`.** The keystrokes arrive — the same field without
- * masking records them — so the draft stays empty, "Continue" stays disabled,
- * and onboarding cannot be finished on macOS at all. Masking is therefore off
- * on macOS, and the "Show token" toggle is offered everywhere so the choice is
- * the user's rather than the platform's.
+ * It was born as a workaround: on react-native-macos a `secureTextEntry`
+ * `TextInput` rendered the dots but never fired `onChangeText`, so masking had
+ * to be switched off there and the toggle was the replacement. That platform is
+ * gone (ADR-0011) and masking is on everywhere again, but the toggle stays: a
+ * token pasted into a field you cannot read is a token you cannot check, and
+ * whether it is on screen should be the reader's call rather than the form's.
  *
- * The toggle is a `Pressable`, not an icon button: macOS has no vector icon set
- * in this app, and a word is unambiguous in a form.
+ * Any new masked field goes through here. A bare `secureTextEntry` is a field
+ * with no way to check what landed in it.
+ *
+ * The toggle is a `Pressable` with a word in it, not an icon button: the app
+ * ships no vector icon set, and a word is unambiguous in a form.
  */
 import { forwardRef, useState } from 'react'
-import { Platform, Pressable, type TextInput, View } from 'react-native'
+import { Pressable, type TextInput, View } from 'react-native'
 
 import { useTheme } from '../theme'
 import { Text } from './Text'
@@ -27,33 +29,25 @@ export type SecretFieldProps = Omit<TextFieldProps, 'secureTextEntry'> & {
   concealLabel: string
 }
 
-/**
- * True when this platform can be trusted to mask and still report typing.
- * macOS cannot; see the note above.
- */
-export const SECURE_TEXT_ENTRY_SUPPORTED = Platform.OS !== 'macos'
-
 export const SecretField = forwardRef<TextInput, SecretFieldProps>(function SecretField(
   { revealLabel, concealLabel, ...rest },
   ref
 ) {
   const theme = useTheme()
-  const [revealed, setRevealed] = useState(!SECURE_TEXT_ENTRY_SUPPORTED)
-
-  const masked = SECURE_TEXT_ENTRY_SUPPORTED && !revealed
+  const [revealed, setRevealed] = useState(false)
 
   return (
     <View style={{ gap: theme.space.xs }}>
-      <TextField {...rest} ref={ref} secureTextEntry={masked} />
+      <TextField {...rest} ref={ref} secureTextEntry={!revealed} />
       <Pressable
         accessibilityRole="button"
-        accessibilityState={{ checked: revealed }}
+        aria-checked={revealed}
         hitSlop={8}
         onPress={() => setRevealed(current => !current)}
         style={({ pressed }) => ({ alignSelf: 'flex-start', opacity: pressed ? 0.6 : 1 })}
         testID={rest.testID ? `${rest.testID}-reveal` : 'secret-reveal'}
       >
-        <Text color="accent" variant="caption">
+        <Text color="accentText" variant="meta">
           {revealed ? concealLabel : revealLabel}
         </Text>
       </Pressable>

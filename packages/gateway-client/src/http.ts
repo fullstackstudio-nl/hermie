@@ -1,5 +1,6 @@
+import { type AuthTimelineSink, NULL_AUTH_TIMELINE } from './auth-timeline'
 import { bearerFrom, type CredentialProvider } from './credentials'
-import { type FetchLike, parseJsonObject, requestText } from './fetch-json'
+import { type FetchLike, parseJsonBody, requestText } from './fetch-json'
 import { apiUrl, normalizeHeaders } from './url'
 import { GatewayError } from './types'
 
@@ -12,6 +13,8 @@ export interface GatewayHttpOptions {
   extraHeaders?: Record<string, string>
   fetchImpl?: FetchLike
   defaultTimeoutMs?: number
+  /** Where a 401 on a REST call is recorded. */
+  timeline?: AuthTimelineSink
 }
 
 export interface RequestOptions {
@@ -60,6 +63,20 @@ export class GatewayHttp {
 
   put<T = unknown>(path: string, body?: unknown, options?: RequestOptions): Promise<T> {
     return this.send<T>('PUT', path, body, options)
+  }
+
+  /**
+   * `PATCH`, which the profile rename route is the first caller of.
+   *
+   * Hermes spells that one `PATCH /api/profiles/{name}` and not
+   * `POST …/rename`, so the verb has to exist here rather than being worked
+   * around at the call site: everything that makes this class worth using —
+   * the base URL, the extra headers, the credential provider and the single
+   * 401 retry — lives inside `send`, and a hand-rolled `fetch` beside it would
+   * have none of them.
+   */
+  patch<T = unknown>(path: string, body?: unknown, options?: RequestOptions): Promise<T> {
+    return this.send<T>('PATCH', path, body, options)
   }
 
   delete<T = unknown>(path: string, body?: unknown, options?: RequestOptions): Promise<T> {
@@ -111,6 +128,8 @@ export class GatewayHttp {
       return this.unwrap<T>(attempt, method, path)
     }
 
+    ;(this.options.timeline ?? NULL_AUTH_TIMELINE).record({ event: 'rest.unauthorized', kind: 'auth', status: 401 })
+
     const verdict = await this.options.credentials.onRejected(attempt.usedToken)
 
     if (verdict === 'reauth') {
@@ -137,6 +156,9 @@ export class GatewayHttp {
       method,
       headers: { ...this.extraHeaders, ...auth },
       ...(body === undefined ? {} : { body }),
+      ...(this.options.credentials.fetchCredentials === undefined
+        ? {}
+        : { credentials: this.options.credentials.fetchCredentials }),
       timeoutMs: options.timeoutMs ?? this.options.defaultTimeoutMs ?? DEFAULT_REST_TIMEOUT_MS,
       ...(options.signal ? { signal: options.signal } : {}),
       ...(this.options.fetchImpl ? { fetchImpl: this.options.fetchImpl } : {})
@@ -170,7 +192,8 @@ export class GatewayHttp {
 
     if (!response.ok) {
       throw new GatewayError('protocol', `${method} ${path} failed with HTTP ${response.status}.`, {
-        status: response.status
+        status: response.status,
+        ...(detailOf(response.text) === null ? {} : { hint: detailOf(response.text) as string })
       })
     }
 
@@ -178,6 +201,36 @@ export class GatewayHttp {
       return undefined as T
     }
 
-    return parseJsonObject(response.text, response.url, 'protocol') as T
+    // Object or array: a REST route may legitimately answer with either, and the
+    // caller's own reader decides which it wanted (see `parseJsonBody`).
+    return parseJsonBody(response.text, response.url, 'protocol') as T
+  }
+}
+
+/**
+ * A refusal's own sentence, out of a JSON error body.
+ *
+ * FastAPI puts the actionable half of a 4xx in `detail`, and until this existed
+ * it was thrown away: every caller got "failed with HTTP 409" and none of them
+ * could say WHY. Some of those sentences cannot be reconstructed by a client at
+ * all — the Kanban router's refusal names the parent cards that are blocking a
+ * move — so the body is the only place the information exists.
+ *
+ * It rides on `hint`, which already means "one extra sentence, when the
+ * classification alone is not enough to act on". Anything that is not a JSON
+ * object with a string `detail` yields `null` rather than a guess: an HTML
+ * error page from a proxy in the way is not a sentence worth showing anybody.
+ */
+function detailOf(text: string): string | null {
+  if (!text.trim().startsWith('{')) {
+    return null
+  }
+
+  try {
+    const detail = (JSON.parse(text) as { detail?: unknown }).detail
+
+    return typeof detail === 'string' && detail.trim() ? detail : null
+  } catch {
+    return null
   }
 }

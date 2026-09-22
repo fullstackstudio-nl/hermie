@@ -1,0 +1,221 @@
+<!doctype html>
+<!--
+  The document Hermie Web serves.
+
+  Expo's exporter reads this file when it exists and falls back to its own
+  template when it does not (`@expo/cli`'s `getTemplateIndexHtmlAsync`), so this
+  is the only place the browser build can say anything about the DOCUMENT rather
+  than about the app inside it. The exporter substitutes the two percent-wrapped
+  tokens below — the language and the title — from `app.config.ts`, appends the
+  bundle's script tag and the favicon link, and adds a description meta from
+  `web.description`.
+
+  Nothing else may spell those two tokens. The substitution is a plain
+  `String.replace` with a string pattern, which replaces the FIRST occurrence
+  and stops — so a token named in a comment is the one that gets replaced, and
+  the real one ships to the browser verbatim. That is not a hypothetical: it is
+  what this comment did on its first draft, and the page it produced had the
+  literal token in its title.
+
+  Everything added below the reset is here because a page cannot say it from
+  inside React:
+
+  - The manifest, the icons and the Apple meta tags, which is what makes the tab
+    installable and gives it a home-screen icon instead of a screenshot.
+  - `color-scheme`, which is what tells the user agent to draw its OWN widgets —
+    scrollbars, the text caret, a date picker — in the dark palette. Without it a
+    dark app gets a bright scrollbar track, and no amount of app-side styling
+    reaches it.
+  - A background on `html`/`body`. The bundle is a megabyte of JavaScript and the
+    first paint happens before any of it runs; with no background that gap is a
+    white flash, which on a dark theme is the most visible defect the app has.
+    The values are the default (blue) preset's, because the preset a visitor
+    pinned is not knowable before the app boots — `platform/status-bar.web.tsx`
+    corrects both this and `theme-color` from the live theme once it does.
+  - Scrollbars. macOS hides them until you scroll, which is why they were never
+    noticed here; every other platform draws them, and the default is a
+    light-grey slab that belongs to no theme.
+  - The focus ring, and the one kind of element that does not get one. Every
+    button, row, tab and link in the app is a real focusable element and was
+    getting the user agent's ring, in the SYSTEM accent rather than the theme's;
+    one rule here rings all of them, and it is `:focus-visible` rather than
+    `:focus` on purpose, because a ring on every mouse click is noise on a list
+    of chats. Inputs are then exempted: a text field has a caret, which says
+    where the keyboard is without a second mark around it.
+-->
+<html lang="%LANG_ISO_CODE%">
+  <head>
+    <meta charset="utf-8" />
+    <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover" />
+    <title>%WEB_TITLE%</title>
+
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- No `rel="icon"` here: the exporter appends one from `web.favicon`. -->
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+
+    <!--
+      Two values rather than one: the tab chrome should match the scheme the
+      visitor is actually in. A browser that does not understand `media` here
+      takes the first, which is the light one.
+    -->
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#EAF3FF" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#070F1D" />
+
+    <meta name="mobile-web-app-capable" content="yes" />
+    <!-- Still read by iOS, which has never adopted the unprefixed name above. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Hermie" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+    <!-- The transcript is a private conversation; it has no business in a search index. -->
+    <meta name="robots" content="noindex, nofollow" />
+
+    <!-- The `react-native-web` recommended style reset: https://necolas.github.io/react-native-web/docs/setup/#root-element -->
+    <style id="expo-reset">
+      /* These styles make the body full-height */
+      html,
+      body {
+        height: 100%;
+      }
+      /* These styles disable body scrolling if you are using <ScrollView> */
+      body {
+        overflow: hidden;
+      }
+      /* These styles make the root element full-height */
+      #root {
+        display: flex;
+        height: 100%;
+        flex: 1;
+      }
+    </style>
+
+    <style id="hermie-document">
+      :root {
+        color-scheme: light dark;
+        /* Both overwritten from the live theme by platform/status-bar.web.tsx. */
+        --hermie-background: #eaf3ff;
+        --hermie-focus: #0b57c4;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --hermie-background: #070f1d;
+          --hermie-focus: #b4d6ff;
+        }
+      }
+
+      html,
+      body {
+        background-color: var(--hermie-background);
+      }
+
+      /*
+        A heading is a heading and nothing else.
+
+        `accessibilityRole="header"` makes react-native-web render a real
+        `<h1>`…`<h6>`, which arrives with the user agent's own size, weight and
+        margins attached. RNW's reset covers `Text` but not the `View` a heading
+        can also be, so a date stamp's box inherited `font-size: 1.5em` from the
+        element it had just become. Nothing visible came of it — every string
+        inside states its own size — and that is exactly the kind of thing that
+        stays invisible until one of them does not.
+      */
+      h1,
+      h2,
+      h3,
+      h4,
+      h5,
+      h6 {
+        font: inherit;
+        margin: 0;
+      }
+
+      /*
+        The keyboard's own mark, at the theme's accent rather than the system's.
+
+        An OUTLINE, for the reason `ui/useFocusRing.ts` gives at length: every
+        control here already has a hairline, and thickening it on focus would
+        move the control's contents by a point and unmove them on blur. An
+        outline is painted outside the border box and takes part in no layout,
+        and a modern browser draws it around the element's own `border-radius`,
+        so a pill is ringed as a pill without this file knowing any radius.
+
+        The offset keeps it clear of that hairline so the two read as a ring with
+        a gap rather than as one thick smudge; both numbers match the ring the
+        fields draw, so the two indicators are the same indicator.
+      */
+      :focus-visible {
+        outline: 2px solid var(--hermie-focus);
+        outline-offset: 2px;
+      }
+
+      /*
+        …but not around anything you type into.
+
+        A form control is the one element that says what it is without being
+        ringed: it has a box, a caret blinking in it, and a keyboard aimed at
+        it. The ring on the composer added a second, louder announcement of
+        something the caret had already said, on the element a reader is looking
+        at for most of the time they spend in this app — and on the web build it
+        was drawn around the INPUT, which is the text line inside the pill
+        rather than the pill, so it was a rectangle floating in the middle of
+        the control.
+
+        This is a decision about inputs and about nothing else. Every button,
+        row, tab and link above keeps its ring, because those have no caret and
+        no other way to say where the keyboard is, and a page that took the ring
+        off those would be one nobody could drive without a mouse.
+      */
+      input:focus-visible,
+      textarea:focus-visible,
+      select:focus-visible,
+      [contenteditable]:focus-visible {
+        outline: none;
+      }
+
+      /*
+        An unobtrusive scrollbar, drawn only where the platform draws one at all.
+        `scrollbar-color` is the standard property and is what Firefox reads;
+        the `::-webkit-` rules below are for Chromium, which still ignores it on
+        some platforms. Both use a translucent ink so the same rule is legible
+        over a light preset and a dark one.
+      */
+      * {
+        scrollbar-width: thin;
+        scrollbar-color: rgba(128, 128, 128, 0.45) transparent;
+      }
+
+      ::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+      }
+
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+
+      ::-webkit-scrollbar-thumb {
+        background-color: rgba(128, 128, 128, 0.45);
+        border: 3px solid transparent;
+        background-clip: content-box;
+        border-radius: 8px;
+      }
+
+      ::-webkit-scrollbar-thumb:hover {
+        background-color: rgba(128, 128, 128, 0.7);
+      }
+
+      ::-webkit-scrollbar-corner {
+        background: transparent;
+      }
+    </style>
+  </head>
+
+  <body>
+    <!-- Use static rendering with Expo Router to support running without JavaScript. -->
+    <noscript> You need to enable JavaScript to run this app. </noscript>
+    <!-- The root element for your Expo app. -->
+    <div id="root"></div>
+  </body>
+</html>

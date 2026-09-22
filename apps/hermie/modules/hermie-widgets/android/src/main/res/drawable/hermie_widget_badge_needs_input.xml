@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The "needs input" badge: the same pill as the unread one, in the presence
+  colour that state already has.
+
+  A second drawable rather than a colour filter on the first, because a
+  RemoteViews can set a background RESOURCE but has no way to tint one — the
+  `setColorFilter` trick works on an ImageView's drawable and not on a view's
+  background, and `setBackgroundColor` would replace the rounded shape with a
+  square. Two files is what the framework leaves.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+  <solid android:color="@color/hermie_widget_needs_input" />
+  <corners android:radius="9dp" />
+</shape>

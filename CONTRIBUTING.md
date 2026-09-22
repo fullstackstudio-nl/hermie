@@ -5,17 +5,32 @@ the conventions that are easy to get wrong.
 
 ## What you need installed
 
-| Tool        | Version                                 | Needed for           |
-| ----------- | --------------------------------------- | -------------------- |
-| Node        | 22 or newer (`.nvmrc` pins the minimum) | everything           |
-| npm         | 10 or newer                             | workspaces           |
-| Xcode       | 16.1 or newer                           | iOS and macOS builds |
-| CocoaPods   | 1.15 or newer                           | iOS and macOS pods   |
-| JDK         | 17                                      | Android builds       |
-| Android SDK | platform 35, build-tools 35             | Android builds       |
+| Tool        | Version                                 | Needed for         |
+| ----------- | --------------------------------------- | ------------------ |
+| Node        | 22 or newer (`.nvmrc` pins the minimum) | everything         |
+| npm         | 10 or newer                             | workspaces         |
+| Xcode       | 16.1 or newer                           | iOS and Mac builds |
+| CocoaPods   | 1.15 or newer                           | the iOS pods       |
+| JDK         | 17                                      | Android builds     |
+| Android SDK | platform 36, build-tools 36, NDK 27.1   | Android builds     |
+
+A Mac build needs one more thing: an **Apple Developer team**. It is the iOS app
+built for the "Designed for iPad" destination, and that configuration runs App
+Store validation, so it cannot be built unsigned. Set `HERMIE_APPLE_TEAM_ID` to
+your ten-character team identifier.
 
 Set `ANDROID_HOME` to your SDK location (usually `~/Library/Android/sdk` on macOS) before building
-for Android.
+for Android. Those versions are not a guess: `cd apps/hermie/android && ./gradlew -q app:properties`
+prints what `expo-root-project` resolved, and that is what has to be installed.
+
+Any JDK 17 works — React Native 0.81 / AGP 8 want 17, not 21 and not 11. On macOS,
+`brew install --cask temurin@17` needs `sudo` for its installer; `brew install openjdk@17` does not,
+but it is keg-only, so `/usr/libexec/java_home -v 17` cannot see it and `JAVA_HOME` has to name the
+keg directly:
+
+```sh
+export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
+```
 
 ## Getting set up
 
@@ -38,7 +53,13 @@ npm run format                 # prettier --check
 npm test                       # vitest: the workspace packages
 npm run test:app               # jest-expo: the app
 npm run sync:hermes-shared:check   # drift check on the vendored protocol sources
+npm run contrast:check         # every ink clears AA on every composited surface
 ```
+
+`npm run contrast` prints the whole table instead of only the failures. It reads
+`apps/hermie/src/ui/tokens.ts`, so a colour changed there is measured there — see
+`scripts/check-contrast.ts` for what "composited" means and why a token measured
+against a token proves nothing.
 
 `npm run format:write` and `npm run lint:fix` apply the automatic fixes.
 
@@ -47,12 +68,48 @@ npm run sync:hermes-shared:check   # drift check on the vendored protocol source
 ```sh
 npm run ios
 npm run android
-npm run macos
+npm run mac                       # needs HERMIE_APPLE_TEAM_ID
+npm run mac -- --no-open          # build only
+npm run mac -- --debug            # against Metro
 ```
 
-The Metro bundler is shared: `npm run start --workspace @hermie/app` starts it once and serves iOS,
-Android and macOS. macOS uses the `macos` platform, which is configured in
-`apps/hermie/metro.config.js`.
+The Metro bundler is shared: `npm run start --workspace @hermie/app` starts it once and serves all
+three, because the Mac IS the iOS bundle — see
+[docs/adr/0011-mac-via-the-ipad-build.md](docs/adr/0011-mac-via-the-ipad-build.md).
+
+`npm run mac` generates `ios/` if it is missing, installs pods when `Podfile.lock` has moved on,
+builds Release for `platform=macOS,variant=Designed for iPad`, and then wraps the product: a bare iOS
+`.app` fails to open with "incorrect executable format", so it goes inside
+`Hermie.app/Wrapper/Hermie.app` with a relative `WrappedBundle` symlink beside it.
+
+### Web
+
+The browser build is served by Hermie Web, the small Node process in `packages/hermie-web` — see
+[docs/web.md](docs/web.md) for what it is and [ADR-0015](docs/adr/0015-web-variant-on-its-own-port.md)
+for why.
+
+```sh
+npm run web:build    # compile the server, then export the browser bundle
+npm run web          # both, in front of the fake gateway, at http://127.0.0.1:9120
+```
+
+`web:build` is two steps in two workspaces, and they land beside each other:
+`tsc -b` writes the server to `packages/hermie-web/dist/server`, and
+`apps/hermie/scripts/export-web.mjs` runs `expo export --platform web` into
+`packages/hermie-web/dist/web`. That is the directory the server looks in when `--static` is not
+given, and the export **empties** it first — Expo writes hashed bundle names, so a second export
+would otherwise leave the previous one behind for ever. CI runs `npm run web:build` on every pull
+request, because a native-only import added to a shared file compiles, typechecks and lints perfectly
+and then fails to bundle for the web.
+
+`npm run web` builds and then starts two processes through `scripts/dev-web.mjs`: the fake gateway on
+9119 in **cookie** mode, and Hermie Web on 9120 in front of it with self-update switched off. Sign in
+as `tester` / `hunter2`.
+
+The fake gateway is started with `--public-host 127.0.0.1:9119`, which arms its `Host`/`Origin`
+guard against a name it will only ever see if Hermie Web rewrote the headers. That is deliberate: the
+development loop exercises the same guard a real `hermes serve` applies, so a broken proxy fails here
+rather than looking healthy until somebody deploys it.
 
 ## The fake gateway
 
@@ -91,14 +148,156 @@ a real connection to it in session-token mode. On an Android emulator the host m
 To work against a real gateway, [docs/test-gateway.md](docs/test-gateway.md) sets one up from
 scratch.
 
+## Opening the app on one screen (development only)
+
+Most of the interface is behind a tap, and `xcrun simctl` has no tap, swipe or
+rotate verb — there is no `Simulator.app` on this machine, and `idb`, `fbsimctl`,
+`maestro` and `appium` are all absent (see
+[docs/platform-notes.md](docs/platform-notes.md)). Some tooling can drive a
+simulator by other means, but none of it can rotate one, and a tool that works
+from screenshot coordinates will miss a screen that re-renders under it.
+
+Launch arguments need none of that. They are deterministic, they cost no
+coordinate arithmetic, and they are the only thing that still works when two
+changes are in flight against one Metro instance — so a Debug build reads them:
+
+```sh
+xcrun simctl launch <udid> dev.hermie.app \
+  --initialUrl http://localhost:8081 \
+  --hermieOpen gallery:sheet-options-model-page \
+  --hermieTheme dark --hermiePreset graphite
+```
+
+| Argument                       | Opens                                                        |
+| ------------------------------ | ------------------------------------------------------------ |
+| `--hermieOpen gallery:<id>`    | one gallery section, alone, filling the screen               |
+| `--hermieOpen gallery:chat`    | the gallery's whole chat screen                              |
+| `--hermieOpen sheet:<name>`    | shorthand for that sheet's section                           |
+| `--hermieOpen chat:<handle>`   | the real chat screen for that bot                            |
+| `--hermieOpen overlay:<s>[/p]` | `activity`, `crons`, `settings`, and a settings page¹        |
+| `--hermieTheme light\|dark`    | pin the scheme (a simulator's appearance cannot be set here) |
+| `--hermiePreset <name>`        | pin the theme: `blue`, `graphite` or `lime`                  |
+| `--hermieGateway <url>`        | seed that gateway's configuration and skip onboarding        |
+| `--hermieToken <token>`        | the session token to seed beside it                          |
+
+¹ The settings pages are `connection`, `gallery`, `licences`, `logs`, `memory` and `themes` —
+`--hermieOpen overlay:settings/logs`. Every one of them is behind a tap, and a simulator this
+machine can only launch cannot tap; a page nobody can open is a page nobody photographs.
+
+**`--hermieGateway` is how you reach a connected app without typing.** `chat:`
+and `overlay:` need a configured gateway, and configuring one meant completing
+the five-step wizard on the simulator by hand — finding a field in a screenshot,
+typing an address, waiting for a probe, typing a token, tapping through a
+connection test. That is what kept `docs/screenshots/` stale through three design
+passes. With the fake gateway running in session-token mode:
+
+```sh
+npm run fake-gateway -- --auth token --token demo
+
+xcrun simctl launch <udid> dev.hermie.app \
+  --initialUrl http://localhost:8081 \
+  --hermieGateway http://localhost:9119 --hermieToken demo \
+  --hermieTheme light --hermiePreset blue --hermieOpen chat:researcher
+```
+
+It writes the same two stores the wizard's Done step writes, in the same shape,
+through the same `saveGatewaySetup` and `configFromDraft` — so what you photograph
+afterwards is the app a reader gets, not a code path that only exists for
+screenshots. It does NOT probe, so Settings shows "Unknown" for the gateway
+version and the user until a real wizard run fills those in. An address with no
+scheme is read as `http://`, unlike the wizard's resolver, because there is no
+probe here to discover which one answers and the only gateways this names are a
+loopback port or a LAN address. `--hermieToken` on its own does nothing: a
+credential with no gateway beside it is a secret in the keychain that no stored
+configuration explains. Only the session-token flow can be seeded — a native PKCE
+credential is minted by a round trip through an identity provider and there is
+nothing to copy from a command line.
+
+**On Android the same grammar arrives as Intent extras**, because `adb` cannot set
+a process argument vector. `modules/hermie-dev-launch` reads
+`getIntent().getExtras()` and flattens each string extra into the `--flag value`
+pair the parser already takes, so a key is spelled without the dashes:
+
+```sh
+adb shell am force-stop dev.hermie.app
+adb shell am start -a android.intent.action.VIEW \
+  -n dev.hermie.app/.MainActivity \
+  -d 'exp+hermie://expo-development-client/?url=http%3A%2F%2F10.0.2.2%3A8081' \
+  --es hermieGateway http://10.0.2.2:9119 --es hermieToken demo \
+  --es hermieTheme light --es hermiePreset blue \
+  --es hermieOpen chat:researcher
+```
+
+Two things that are only true here. `MainActivity` is `launchMode="singleTask"`,
+so `getIntent()` keeps answering the intent the activity was **created** with — a
+second `am start` against a live process lands in `onNewIntent` and changes
+nothing, which is why the force-stop above is not optional. And the `-d` URL is
+`expo-dev-client`'s, not ours: without it a Debug build stops on its launcher
+instead of loading Metro's bundle. The emulator reaches the host at `10.0.2.2`,
+never `localhost`.
+
+`--hermieOpen=<value>` works too. Section ids come from `GALLERY_SECTION_IDS` in
+`apps/hermie/src/features/settings/GalleryScreen.tsx`, which is the registry the
+gallery renders from — adding a component to the kit means adding a row there, and
+that is what keeps "one launch, one screenshot" true for the next component as
+well. `sheet:` shorthands are pinned against that list by
+`__tests__/dev-launch-intent.test.ts`.
+
+A gallery section needs no gateway and no onboarding: it is decided before the
+connection phase is, so a clean simulator is enough. `chat:` and `overlay:` do
+need a configured gateway — which is what `--hermieGateway` above is for.
+
+**None of this reaches a release build.** On Apple platforms that is three
+independent gates: the native constant it reads is inside `#if DEBUG` in
+`modules/hermie-mac/ios/HermieMacModule.swift`, the JavaScript is behind
+`__DEV__`, and nothing is registered with the system — no URL scheme, no
+`CFBundleURLTypes`, no entitlement. Launch arguments are visible only to the
+process itself.
+
+Android has the `__DEV__` gate and a different first one, and the difference is
+worth stating rather than glossing. A library's `BuildConfig.DEBUG` is not a
+trustworthy stand-in for `#if DEBUG`, so `HermieDevLaunchModule` checks the
+application's own `FLAG_DEBUGGABLE` instead — set by the debug manifest merge and
+by nothing else, so a release APK reads no extras. That is a **runtime** gate: the
+code is present in a release APK, it just never sees an extra. The third gate does
+not hold at all — `MainActivity` is `exported`, because a launcher activity has to
+be, so any app on the device can start it with extras. `FLAG_DEBUGGABLE` is what
+makes that harmless in anything shipped.
+
+What the `__DEV__` gate removes was measured on 2026-09-20 rather than assumed
+(`npx expo export:embed --platform ios --dev false`): in the production bundle the
+native property `devLaunchArguments` appears zero times, `DEV_LAUNCH_INTENT`
+compiles to the literal `null`, and `seedDevGateway` compiles to a function whose
+whole body is `return false` — the `saveGatewaySetup` call is not in the bundle.
+`parseDevLaunchArguments` IS still there with the flag names as string literals,
+because Metro does not drop a module export, so `strings` on a release bundle will
+find `--hermieGateway`. Nothing calls it and nothing can, since the intent it
+would feed is folded to `null`. The argument is inert in Release; its parser is
+not absent.
+
 ## Native projects
 
 - `apps/hermie/ios` and `apps/hermie/android` are **generated**. They are not committed. Change
   `apps/hermie/app.config.ts` or a config plugin under `apps/hermie/plugins/`, never the generated
-  files — `npx expo prebuild --clean` will throw your edits away.
-- `apps/hermie/macos` is **committed and maintained by hand**. It came from the react-native-macos
-  template and has been adapted; `docs/platform-notes.md` records what was changed and why. Keep
-  changes there small and explain them in the commit message.
+  files — `npx expo prebuild --clean` will throw your edits away. There is no third native project:
+  the Mac is the iOS one.
+- `apps/hermie/modules` holds local Expo modules, and is **committed**. There are two. `hermie-mac`
+  exposes what React Native has no equivalent for: `ProcessInfo.processInfo.isiOSAppOnMac`, two
+  keyboard answers, an allow-list of desktop shortcuts, a `UIContextMenuInteraction` host view
+  (`HermieContextMenuView` — there is no secondary-click event in React Native at all) and Hermie's
+  own menu in the Mac's menu bar. Adding a Swift file to that module needs no project change — the
+  podspec globs `**/*.swift` — but it DOES need `pod install` before the next build, or the new file
+  is simply not compiled and the symbol is missing with no error anywhere. `hermie-scene` has no JavaScript side at all: it ships the
+  `UIWindowSceneDelegate` that `plugins/with-ios-scene-lifecycle.js` names in `Info.plist`, without
+  which **iOS 27 refuses to launch the app** — see the 2026-09-20 section of
+  [docs/platform-notes.md](docs/platform-notes.md). Expo autolinks anything under `modules/` with no
+  configuration, so a module needs `package.json`, `expo-module.config.json` and its native sources
+  and nothing else. Note that a module's `ios/` directory is **not** the generated project: ignore
+  rules that say `ios/` without anchoring will swallow it, which `npx expo-doctor` catches.
+- **Test an iOS change on the iOS 27 runtime, not only on 26.5.** The scene-life-cycle crash above
+  was invisible on every other surface: 26.5 simulators only warn, and the Mac build never checks.
+  And a `simctl launch` that prints a pid proves nothing — that crash printed one too. Follow it with
+  `xcrun simctl spawn <udid> launchctl list | grep hermie` a few seconds later.
 
 ## Vendored protocol sources
 
@@ -124,19 +323,30 @@ rewrite and why it exists.
   its scripted commands and transcripts. No real gateway address, no real bot, no real conversation,
   and nothing that names a person.
 - **Strip the metadata.** A screenshot carries EXIF and XMP that nobody looks at and everybody
-  publishes. Remove it before committing.
+  publishes. Remove it before committing — and check that you did: `sips -s format png` does NOT
+  strip it, it WRITES it, adding an `eXIf` chunk and an Adobe XMP packet to a file that had
+  neither. Drop the `eXIf`, `iTXt`, `tEXt`, `zTXt` and `tIME` chunks and keep `IHDR`, `gAMA`,
+  `cHRM`, `IDAT` and `IEND`; `xxd file.png | grep -ic exif` should answer 0.
 - **Say what is in the picture.** Every image in the README has alt text that describes the screen,
   not the file.
 
 ## Releasing
 
 [docs/release.md](docs/release.md) is the process: the version numbers and the script that sets all
-four of them, what a `v*` tag sets off, the secrets the macOS signing and notarisation steps look
-for, and the TestFlight and Play steps that are still done by hand.
+three of them, what a `v*` tag sets off, and the TestFlight and Play steps that are still done by
+hand. A Mac release is the iOS one — there is no separate artefact to sign.
+
+`npm run android:release` builds the signed app bundle and APK. The upload key it signs with is four
+`HERMIE_UPLOAD_*` properties in your own `~/.gradle/gradle.properties` — never in this repository,
+and never quoted, because a properties file keeps the quote characters.
 
 The icons are generated, not drawn per size. `design/icon.svg` is the source; `npm run icons`
 rewrites every PNG from it and `npm run icons:check` — which CI runs — fails if one of them has
-drifted. Never edit a PNG in `apps/hermie/assets` or the macOS asset catalogue directly.
+drifted. Never edit a PNG in `apps/hermie/assets` directly.
+
+The same two commands also rewrite the Play listing's feature graphic and 512 px icon from
+`design/store/feature-graphic.svg` and `design/icon.svg`; [docs/release.md](docs/release.md)
+describes both.
 
 ## Commits
 
@@ -145,7 +355,7 @@ Conventional commits, in the imperative, in English:
 ```
 feat(chats): resume the canonical session on connect
 fix(gateway-client): mint a fresh ticket for every dial
-docs(adr): record why macOS goes through react-native-macos
+docs(adr): record why the Mac is the iPad build
 chore(deps): move to Expo SDK 54.0.37
 ```
 
@@ -170,4 +380,5 @@ node scripts/check-no-trailers.mjs origin/main..HEAD
 
 Keep them scoped to one thing. Fill in the template: what changed, why, and how you verified it.
 State plainly which platforms you actually built and ran — "not verified on Android" is useful
-information and nobody will hold it against you.
+information and nobody will hold it against you. A Mac build and a Mac RUN are different claims: the
+build is scripted, and the run needs a window nobody else's copy is already holding.

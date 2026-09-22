@@ -30,6 +30,17 @@ export const BLOCKED_HEADER_NAMES: ReadonlySet<string> = new Set([
 ])
 
 /**
+ * Did the user name a scheme themselves?
+ *
+ * The difference matters: an address typed WITHOUT one is a question the app
+ * may answer by trying both, and an address typed WITH `https://` is an
+ * instruction, never to be quietly downgraded.
+ */
+export function hasExplicitScheme(raw: string): boolean {
+  return SCHEME_RE.test(raw.trim())
+}
+
+/**
  * Coerce what a user typed into a base URL:
  *
  * - no scheme → `https://`

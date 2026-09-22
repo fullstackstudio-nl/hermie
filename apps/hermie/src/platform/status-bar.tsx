@@ -1,20 +1,22 @@
 /**
- * The system status bar's ink, following the app's own appearance.
+ * The system status bar's ink.
  *
- * iOS infers it from the view controller and Android does not: the window
- * starts with `windowLightStatusBar` unset (white icons), and edge-to-edge —
- * on by default since Expo SDK 54 — makes the bar transparent, so those white
- * icons land straight on Hermie's own background. On the light theme (#F2F2F7)
- * the clock, the battery and the signal bars simply disappear.
+ * A seam because a browser tab has no status bar to tint at all, and because
+ * `expo-status-bar`'s own web module is a silent no-op that still pulls a
+ * native-module shim into the bundle. Declaring the platform difference here
+ * keeps it visible next to the other seams instead of hidden inside a
+ * dependency.
  *
- * It is driven by the resolved theme rather than by the system scheme, so a
- * reader who pinned the app to Light while the phone is Dark gets the ink the
- * APP is painting under, not the one the phone would have chosen.
+ * `background` is in the contract for the web sibling, which paints a document
+ * rather than a status bar. Nothing on a phone has a use for it: the bar is
+ * transparent over the app's own wallpaper.
  */
 import { StatusBar } from 'expo-status-bar'
 
-export function AppStatusBar({ scheme }: { scheme: 'light' | 'dark' }) {
-  // `expo-status-bar`'s `style` is the ink, not the background: a dark app
-  // needs light icons.
-  return <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
+import type { SystemChromeProps } from './platform-contracts'
+
+export type { StatusBarInk } from './platform-contracts'
+
+export function SystemStatusBar({ ink }: SystemChromeProps) {
+  return <StatusBar style={ink} />
 }

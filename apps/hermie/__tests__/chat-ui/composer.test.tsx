@@ -1,17 +1,99 @@
 /**
  * The composer: send, stop, the slash popover, and the attachment tray.
  */
-import { fireEvent, screen } from '@testing-library/react-native'
-import { StyleSheet } from 'react-native'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react-native'
+import { AccessibilityInfo, Platform, ScrollView, StyleSheet } from 'react-native'
 
 import { Composer } from '../../src/chat-ui'
+import { ATTACH_LIST_MIN_WIDTH } from '../../src/chat-ui/AttachMenu'
 import {
-  COMPOSER_BUTTON_SIZE,
+  ATTACH_POPOVER_MIN_WIDTH,
   COMPOSER_FIELD_INSET,
   COMPOSER_FIELD_RADIUS,
-  COMPOSER_LINE_HEIGHT
+  composerFieldPadding,
+  COMPOSER_IOS_TOP_INSET,
+  COMPOSER_LINE_HEIGHT,
+  COMPOSER_ROUND_SIZE,
+  COMPOSER_TEXT_LINE_HEIGHT,
+  SLASH_POPOVER_MAX_HEIGHT,
+  SLASH_SLOW_MS
 } from '../../src/chat-ui/Composer'
-import { renderScreen } from '../support/render'
+import { renderScreen, withProviders } from '../support/render'
+
+const mockEscapeListeners = new Set<() => void>()
+const mockShortcutListeners = new Set<(action: string) => void>()
+let mockShiftDown = false
+let mockHardwareKeyboard = false
+let mockHasNativePasteboard = false
+const mockReadPasteboardAttachment = jest.fn()
+
+// A Mac is the iOS build on Apple Silicon, and this file needs to render as
+// both. `COMPOSER_ROUND_SIZE` is read at import time and is therefore fixed at
+// the value below for the whole file; only what is read per render follows the
+// flag.
+jest.mock('../../src/platform/runs-on-mac', () => ({ RUNS_ON_MAC: false }))
+
+const runsOnMac = jest.requireMock('../../src/platform/runs-on-mac') as { RUNS_ON_MAC: boolean }
+
+// ↑, ↓ and Tab reach the composer from the keyboard seam, not from the field: a
+// `TextInput` only reports keys that insert text.
+jest.mock('../../src/platform/desktop-shortcuts', () => ({
+  subscribeToShortcuts: (handler: (event: { action: string; typing: boolean }) => void) => {
+    mockShortcutListeners.add(handler)
+
+    return () => mockShortcutListeners.delete(handler)
+  },
+  setMenuBar: jest.fn(),
+  isMenuBarInstalled: jest.fn(() => false)
+}))
+
+jest.mock('../../src/platform/keyboard-modifiers', () => ({
+  isShiftDown: () => mockShiftDown,
+  hasHardwareKeyboard: () => mockHardwareKeyboard,
+  subscribeToEscape: (handler: () => void) => {
+    mockEscapeListeners.add(handler)
+
+    return () => mockEscapeListeners.delete(handler)
+  }
+}))
+
+// The pasteboard read ⌘V triggers. `get` so a test can flip `mockHasNativePasteboard`
+// after the module has already been imported once — see the same trap noted in
+// `quick-look.test.ts`.
+jest.mock('../../src/platform/native-paste', () => ({
+  get HAS_NATIVE_PASTEBOARD() {
+    return mockHasNativePasteboard
+  },
+  readPasteboardAttachment: () => mockReadPasteboardAttachment()
+}))
+
+beforeEach(() => {
+  mockEscapeListeners.clear()
+  mockShortcutListeners.clear()
+  mockShiftDown = false
+  mockHasNativePasteboard = false
+  mockReadPasteboardAttachment.mockReset().mockResolvedValue([])
+})
+
+/** One press of ↑, ↓ or Tab, as the seam delivers it. */
+function pressKey(action: 'suggestionUp' | 'suggestionDown' | 'suggestionAccept') {
+  act(() => {
+    for (const listener of [...mockShortcutListeners]) {
+      // Typing: false — these arrive from the menu bar's own key equivalents, or
+      // from a keyboard with nothing focused. The typing gate has its own tests.
+      listener({ action, typing: false })
+    }
+  })
+}
+
+/** ⌘V, as the same seam delivers it — genuinely `typing: true`, unlike the list keys above. */
+function pressPaste() {
+  act(() => {
+    for (const listener of [...mockShortcutListeners]) {
+      listener({ action: 'paste', typing: true })
+    }
+  })
+}
 
 /** The resolved style of a rendered node, function styles included. */
 function styleOf(testID: string): Record<string, number> {
@@ -31,7 +113,9 @@ const SUGGESTIONS = [
 function renderComposer(props: Record<string, unknown> = {}) {
   const handlers = {
     onAttach: jest.fn(),
+    onAttachFile: jest.fn(),
     onChangeText: jest.fn(),
+    onPasteFiles: jest.fn(),
     onQuerySlash: jest.fn(),
     onRemoveAttachment: jest.fn(),
     onSend: jest.fn(),
@@ -41,6 +125,44 @@ function renderComposer(props: Record<string, unknown> = {}) {
   renderScreen(<Composer value="" {...handlers} {...props} />)
 
   return handlers
+}
+
+/**
+ * The same render, with a way to hand the composer a NEW set of props.
+ *
+ * Several of the cases below are about a prop changing under a mounted
+ * composer — a failure clearing, a slow fetch being overtaken by its own answer
+ * — and those are the ones a fresh render cannot express: the whole question is
+ * what the component does with the transition.
+ */
+function renderComposerHandle(props: Record<string, unknown> = {}) {
+  const handlers = {
+    onAttach: jest.fn(),
+    onAttachFile: jest.fn(),
+    onChangeText: jest.fn(),
+    onQuerySlash: jest.fn(),
+    onRemoveAttachment: jest.fn(),
+    onSend: jest.fn(),
+    onStop: jest.fn()
+  }
+  const rendered = renderScreen(<Composer value="" {...handlers} {...props} />)
+
+  return {
+    handlers,
+    // Through the providers again: `renderScreen` wraps the tree, and a bare
+    // rerender would replace the theme and safe-area context with nothing.
+    rerender: (next: Record<string, unknown>) =>
+      rendered.rerender(withProviders(<Composer value="" {...handlers} {...next} />))
+  }
+}
+
+/** Escape, as the keyboard seam delivers it. */
+function pressEscape() {
+  act(() => {
+    for (const listener of [...mockEscapeListeners]) {
+      listener()
+    }
+  })
 }
 
 describe('Composer', () => {
@@ -65,8 +187,21 @@ describe('Composer', () => {
     expect(handlers.onSend).toHaveBeenCalledWith('Check the release notes')
   })
 
-  it('turns into a stop button while a turn runs', () => {
-    const handlers = renderComposer({ running: true, value: 'ignored' })
+  it('sends what is typed even while a turn runs, rather than stopping it', () => {
+    // Sending is always possible: the message is parked behind the running turn
+    // and appears at the end of the transcript as a queued bubble. The button
+    // under the words you just typed must not throw the reply away.
+    const handlers = renderComposer({ running: true, value: 'and one more thing' })
+
+    expect(screen.queryByTestId('composer-stop')).toBeNull()
+
+    fireEvent.press(screen.getByTestId('composer-send'))
+    expect(handlers.onSend).toHaveBeenCalledWith('and one more thing')
+    expect(handlers.onStop).not.toHaveBeenCalled()
+  })
+
+  it('is a stop button while a turn runs and there is nothing to send', () => {
+    const handlers = renderComposer({ running: true })
 
     expect(screen.queryByTestId('composer-send')).toBeNull()
 
@@ -82,12 +217,38 @@ describe('Composer', () => {
     expect(handlers.onStop).toHaveBeenCalled()
   })
 
-  it('asks for slash candidates and shows the popover', () => {
+  it('asks for slash candidates on the whole typed line and shows the popover', () => {
+    // The LINE, not the name: `complete.slash` completes the argument as well,
+    // and it can only do that if it is given what was typed.
     const handlers = renderComposer({ suggestions: SUGGESTIONS, value: '/co' })
 
-    expect(handlers.onQuerySlash).toHaveBeenCalledWith('co')
+    expect(handlers.onQuerySlash).toHaveBeenCalledWith('/co')
     expect(screen.getByTestId('composer-slash-popover')).toBeTruthy()
     expect(screen.getByTestId('slash-option-compact')).toBeTruthy()
+  })
+
+  it('keeps asking once there is an argument, which is what completes it', () => {
+    const handlers = renderComposer({ suggestions: SUGGESTIONS, value: '/model exa' })
+
+    expect(handlers.onQuerySlash).toHaveBeenCalledWith('/model exa')
+    expect(screen.getByTestId('composer-slash-popover')).toBeTruthy()
+  })
+
+  it('closes the list at a newline, because a multi-line draft is a message', () => {
+    const handlers = renderComposer({ suggestions: SUGGESTIONS, value: '/note\nsecond line' })
+
+    expect(handlers.onQuerySlash).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('composer-slash-popover')).toBeNull()
+  })
+
+  it('writes what the caller says the row inserts, argument and all', () => {
+    const handlers = renderComposer({
+      suggestions: [{ description: 'A model', insert: '/model example-large', name: 'example-large' }],
+      value: '/model exa'
+    })
+
+    fireEvent.press(screen.getByTestId('slash-option-example-large'))
+    expect(handlers.onChangeText).toHaveBeenCalledWith('/model example-large')
   })
 
   it('writes the picked command back into the draft', () => {
@@ -104,9 +265,261 @@ describe('Composer', () => {
     expect(screen.queryByTestId('composer-slash-popover')).toBeNull()
   })
 
+  /**
+   * A refused completion call, and a slow one, are two facts an empty popover
+   * used to say nothing about.
+   *
+   * The popover opened on `suggestions.length > 0` alone, so against a gateway
+   * that refused both calls the composer drew NOTHING — the owner typed `/` on
+   * his phone and saw an empty field, while the same build showed the list on
+   * the web and on the simulator.
+   */
+  describe('when the gateway will not answer', () => {
+    const FAILURE = { method: 'commands.catalog', reason: '5030 worker exited' }
+
+    it('opens the popover on a failure with no suggestions at all', () => {
+      renderComposer({ slashFailure: FAILURE, value: '/' })
+
+      expect(screen.getByTestId('composer-slash-popover')).toBeTruthy()
+      expect(screen.getByTestId('slash-failure')).toBeTruthy()
+      expect(screen.getByText('Commands unavailable — commands.catalog')).toBeTruthy()
+      expect(screen.getByText('5030 worker exited')).toBeTruthy()
+    })
+
+    it('draws the failure row as text rather than as something to accept', () => {
+      const handlers = renderComposer({ slashFailure: FAILURE, value: '/' })
+
+      // Not a `Pressable`: there is nothing to pick, and a row that took a tap
+      // would be offering one.
+      const row = screen.getByTestId('slash-failure')
+
+      expect(row.props.accessibilityRole).toBeUndefined()
+      expect(row.props.onClick).toBeUndefined()
+
+      // And Return still sends the line rather than being swallowed by a list
+      // with nothing in it.
+      fireEvent(screen.getByTestId('composer-input'), 'submitEditing')
+      expect(handlers.onSend).toHaveBeenCalledWith('/')
+    })
+
+    it('says so beside the list when the catalogue alone refused', () => {
+      // `complete.slash` answers from the session and the catalogue is what
+      // routing reads, so this is the state where the list looks fine and
+      // Return sends the pick as prose.
+      renderComposer({ slashFailure: FAILURE, suggestions: SUGGESTIONS, value: '/co' })
+
+      expect(screen.getByTestId('slash-failure')).toBeTruthy()
+      expect(screen.getByTestId('slash-option-compact')).toBeTruthy()
+    })
+
+    it('clears the row on the next answer that works', () => {
+      const { rerender } = renderComposerHandle({ slashFailure: FAILURE, value: '/co' })
+
+      expect(screen.getByTestId('slash-failure')).toBeTruthy()
+
+      rerender({ slashFailure: null, suggestions: SUGGESTIONS, value: '/co' })
+
+      expect(screen.queryByTestId('slash-failure')).toBeNull()
+      expect(screen.getByTestId('slash-option-compact')).toBeTruthy()
+    })
+
+    it('is dismissed by Escape like any other popover', () => {
+      renderComposer({ slashFailure: FAILURE, value: '/' })
+
+      expect(screen.getByTestId('slash-failure')).toBeTruthy()
+      pressEscape()
+      expect(screen.queryByTestId('composer-slash-popover')).toBeNull()
+    })
+  })
+
+  /**
+   * A slow first fetch is a third fact, and the one that tells a reader to wait
+   * rather than to conclude the feature is broken.
+   */
+  describe('while the first catalogue fetch is slow', () => {
+    beforeEach(() => jest.useFakeTimers())
+    afterEach(() => jest.useRealTimers())
+
+    it('says nothing at all before the threshold', () => {
+      renderComposer({ slashLoading: true, value: '/' })
+
+      act(() => void jest.advanceTimersByTime(SLASH_SLOW_MS - 1))
+
+      expect(screen.queryByTestId('slash-loading')).toBeNull()
+      expect(screen.queryByTestId('composer-slash-popover')).toBeNull()
+    })
+
+    it('opens a Loading row once the fetch has taken long enough', () => {
+      renderComposer({ slashLoading: true, value: '/' })
+
+      act(() => void jest.advanceTimersByTime(SLASH_SLOW_MS))
+
+      expect(screen.getByTestId('composer-slash-popover')).toBeTruthy()
+      expect(screen.getByTestId('slash-loading')).toBeTruthy()
+    })
+
+    it('gives way to the failure, which is the more specific answer', () => {
+      const { rerender } = renderComposerHandle({ slashLoading: true, value: '/' })
+
+      act(() => void jest.advanceTimersByTime(SLASH_SLOW_MS))
+      expect(screen.getByTestId('slash-loading')).toBeTruthy()
+
+      rerender({ slashFailure: { method: 'complete.slash', reason: 'no answer' }, slashLoading: false, value: '/' })
+
+      expect(screen.queryByTestId('slash-loading')).toBeNull()
+      expect(screen.getByTestId('slash-failure')).toBeTruthy()
+    })
+
+    it('never draws the row for a gateway that answers promptly', () => {
+      const { rerender } = renderComposerHandle({ slashLoading: true, value: '/' })
+
+      act(() => void jest.advanceTimersByTime(SLASH_SLOW_MS - 100))
+      rerender({ slashLoading: false, suggestions: SUGGESTIONS, value: '/' })
+      act(() => void jest.advanceTimersByTime(SLASH_SLOW_MS))
+
+      expect(screen.queryByTestId('slash-loading')).toBeNull()
+      expect(screen.getByTestId('slash-option-compact')).toBeTruthy()
+    })
+  })
+
+  /**
+   * The highlight has to stay on screen, or the arrow keys are driving a list
+   * the reader cannot see.
+   *
+   * ↑ and ↓ moved the selection and nothing else, and a real gateway answers a
+   * bare `/` with thirty-four commands — so the fourth press walked the
+   * highlight out of the bottom of the popover and every press after that did
+   * nothing visible at all.
+   */
+  describe('the slash list and the highlight it has to keep on screen', () => {
+    const SIX = Array.from({ length: 6 }, (_, index) => ({
+      description: `Command number ${index + 1}`,
+      name: `cmd${index + 1}`
+    }))
+
+    /** Six 50pt rows in a 220pt window: the last two are below the fold. */
+    const ROW_HEIGHT = 50
+
+    function layOutList() {
+      fireEvent(screen.getByTestId('composer-slash-list'), 'layout', {
+        nativeEvent: { layout: { height: SLASH_POPOVER_MAX_HEIGHT, width: 320, x: 0, y: 0 } }
+      })
+
+      SIX.forEach((suggestion, index) => {
+        fireEvent(screen.getByTestId(`slash-option-${suggestion.name}`), 'layout', {
+          nativeEvent: { layout: { height: ROW_HEIGHT, width: 320, x: 0, y: index * ROW_HEIGHT } }
+        })
+      })
+    }
+
+    it('scrolls the last row into view from the bottom, and the first back to zero', () => {
+      const scrollTo = jest.spyOn(ScrollView.prototype, 'scrollTo').mockImplementation(() => {})
+
+      try {
+        renderComposer({ suggestions: SIX, value: '/' })
+        layOutList()
+
+        // Down to row 6. Its bottom is at 300 in a 220pt window, so the list has
+        // to sit at 80 for the whole row to be visible.
+        for (let step = 0; step < 5; step += 1) {
+          pressKey('suggestionDown')
+        }
+
+        expect(scrollTo).toHaveBeenLastCalledWith({ animated: true, y: 6 * ROW_HEIGHT - SLASH_POPOVER_MAX_HEIGHT })
+
+        // And back to the top, which is the other edge of the same rule.
+        for (let step = 0; step < 5; step += 1) {
+          pressKey('suggestionUp')
+        }
+
+        expect(scrollTo).toHaveBeenLastCalledWith({ animated: true, y: 0 })
+      } finally {
+        scrollTo.mockRestore()
+      }
+    })
+
+    it('leaves a row that is already fully visible exactly where it is', () => {
+      const scrollTo = jest.spyOn(ScrollView.prototype, 'scrollTo').mockImplementation(() => {})
+
+      try {
+        renderComposer({ suggestions: SIX, value: '/' })
+        layOutList()
+
+        // Rows 1 to 4 all end at or before 200, inside the 220pt window, so
+        // walking down through them scrolls nothing.
+        for (let step = 0; step < 3; step += 1) {
+          pressKey('suggestionDown')
+        }
+
+        expect(scrollTo).not.toHaveBeenCalled()
+      } finally {
+        scrollTo.mockRestore()
+      }
+    })
+
+    it('asks for the destination rather than the journey under Reduce Motion', async () => {
+      /*
+        Swapped and put back by hand rather than with `spyOn`/`mockRestore`.
+
+        The preset already supplies this getter, and restoring a spy on it
+        reinstates the UNMOCKED module function, which answers `undefined` in
+        this environment — so `theme.tsx`'s `?.().then` throws for every test
+        that renders afterwards. Keeping the reference is the only restore that
+        puts back what was actually there.
+      */
+      const original = AccessibilityInfo.isReduceMotionEnabled
+      // The theme reads the preference asynchronously, so the render has to be
+      // allowed to settle before the first key: a scroll requested on the frame
+      // before the answer arrives would honestly still be animated.
+      AccessibilityInfo.isReduceMotionEnabled = () => Promise.resolve(true)
+
+      const scrollTo = jest.spyOn(ScrollView.prototype, 'scrollTo').mockImplementation(() => {})
+
+      try {
+        renderComposer({ suggestions: SIX, value: '/' })
+        await act(async () => undefined)
+        layOutList()
+
+        for (let step = 0; step < 5; step += 1) {
+          pressKey('suggestionDown')
+        }
+
+        expect(scrollTo).toHaveBeenLastCalledWith({ animated: false, y: 6 * ROW_HEIGHT - SLASH_POPOVER_MAX_HEIGHT })
+      } finally {
+        scrollTo.mockRestore()
+        AccessibilityInfo.isReduceMotionEnabled = original
+      }
+    })
+
+    it('measures again when the candidates change, rather than trusting old boxes', () => {
+      // Index 3 of `/mo` and index 3 of `/model` are different rows at
+      // different heights; a kept measurement scrolls to where a row used to be.
+      const scrollTo = jest.spyOn(ScrollView.prototype, 'scrollTo').mockImplementation(() => {})
+
+      try {
+        const { rerender } = renderComposerHandle({ suggestions: SIX, value: '/' })
+
+        layOutList()
+        for (let step = 0; step < 5; step += 1) {
+          pressKey('suggestionDown')
+        }
+        expect(scrollTo).toHaveBeenCalled()
+        scrollTo.mockClear()
+
+        // A narrower list, not yet laid out: nothing to aim at, so nothing moves.
+        rerender({ suggestions: SIX.slice(0, 2), value: '/cmd' })
+        pressKey('suggestionDown')
+
+        expect(scrollTo).not.toHaveBeenCalled()
+      } finally {
+        scrollTo.mockRestore()
+      }
+    })
+  })
+
   it('offers attachments and can remove one', () => {
     const handlers = renderComposer({
-      attachments: [{ id: 'att-1', name: 'diagram.png', uri: 'file:///tmp/diagram.png' }]
+      attachments: [{ id: 'att-1', kind: 'image', name: 'diagram.png', uri: 'file:///tmp/diagram.png' }]
     })
 
     expect(screen.getByTestId('composer-attachments')).toBeTruthy()
@@ -114,12 +527,66 @@ describe('Composer', () => {
     fireEvent.press(screen.getByTestId('composer-attachment-remove-att-1'))
     expect(handlers.onRemoveAttachment).toHaveBeenCalledWith('att-1')
 
+    // The "+" opens the MENU now; the picker is the menu's first entry. Nothing
+    // asynchronous happens between the tap and the menu, which is the point.
     fireEvent.press(screen.getByTestId('composer-attach'))
+    expect(handlers.onAttach).not.toHaveBeenCalled()
+    expect(screen.getByTestId('composer-attach-menu')).toBeTruthy()
+
+    fireEvent.press(screen.getByTestId('composer-attach-menu-photo'))
     expect(handlers.onAttach).toHaveBeenCalled()
   })
 
+  it('offers Choose file as the menu\u2019s own entry, not a long press', () => {
+    const handlers = renderComposer()
+
+    fireEvent.press(screen.getByTestId('composer-attach'))
+    fireEvent.press(screen.getByTestId('composer-attach-menu-file'))
+
+    expect(handlers.onAttachFile).toHaveBeenCalled()
+  })
+
+  it('marks the chosen entry busy and refuses a second tap on it', () => {
+    // The busy mark is the only feedback there is during the 1.5-2s the system
+    // picker takes to come up on a Mac, and a second tap during it would present
+    // two pickers.
+    const handlers = renderComposer({ attachBusy: 'file' })
+
+    fireEvent.press(screen.getByTestId('composer-attach'))
+
+    expect(screen.getByTestId('composer-attach-menu-file-busy')).toBeTruthy()
+
+    fireEvent.press(screen.getByTestId('composer-attach-menu-file'))
+    expect(handlers.onAttachFile).not.toHaveBeenCalled()
+
+    // The other entry is still usable: only the one that is waiting is blocked.
+    expect(screen.queryByTestId('composer-attach-menu-photo-busy')).toBeNull()
+  })
+
+  it('shows a file as a chip with its size, and an image as a thumbnail', () => {
+    renderComposer({
+      attachments: [
+        { id: 'att-1', kind: 'image', name: 'diagram.png', uri: 'file:///tmp/diagram.png' },
+        { id: 'att-2', kind: 'file', name: 'quarterly-report-final-v4.xlsx', size: 48210, status: 'uploaded' }
+      ]
+    })
+
+    expect(screen.getByTestId('composer-attachment-att-2')).toBeTruthy()
+    expect(screen.getByText('47 KB')).toBeTruthy()
+  })
+
+  it('says why a rejected file will not be sent', () => {
+    renderComposer({
+      attachments: [
+        { error: 'Too large · 100 MB max', id: 'att-3', kind: 'file', name: 'capture.mov', status: 'error' }
+      ]
+    })
+
+    expect(screen.getByText('Too large · 100 MB max')).toBeTruthy()
+  })
+
   it('can send an attachment with no text', () => {
-    const handlers = renderComposer({ attachments: [{ id: 'att-1', name: 'diagram.png' }] })
+    const handlers = renderComposer({ attachments: [{ id: 'att-1', kind: 'image', name: 'diagram.png' }] })
 
     fireEvent.press(screen.getByTestId('composer-send'))
     expect(handlers.onSend).toHaveBeenCalledWith('')
@@ -137,129 +604,752 @@ describe('Composer', () => {
 
     expect(screen.getByTestId('composer-attach').props.accessibilityState).toMatchObject({ disabled: true })
   })
+
+  it('offers only the pickers the caller actually gave it', () => {
+    renderScreen(<Composer onAttachFile={jest.fn()} onChangeText={jest.fn()} onSend={jest.fn()} value="" />)
+
+    fireEvent.press(screen.getByTestId('composer-attach'))
+
+    expect(screen.getByTestId('composer-attach-menu-file')).toBeTruthy()
+    expect(screen.queryByTestId('composer-attach-menu-photo')).toBeNull()
+  })
 })
 
 /**
- * The geometry of the rounded field.
+ * The geometry of the composer row.
  *
  * Sebas saw the send button poking through the top of the field's border and
- * sitting off-centre. Three things were sizing themselves independently inside
- * a 28pt corner radius — a 38pt circle, a 44pt "+" and a 40pt input in 3pt of
- * padding — so the row was as tall as its tallest child rather than as tall as
- * one line, and the circle sat in the corner's curve.
+ * sitting off-centre, because all three controls sized themselves independently
+ * inside one 28pt corner radius. The first fix was arithmetic: make the three
+ * agree on one line box and assert the inequality that made overflow impossible.
  *
- * These assertions are about the numbers rather than about pixels, because the
- * test renderer lays nothing out: what they pin down is the invariant that
- * makes overflow impossible, and the fact that every piece agrees on one line
- * box.
+ * The mockup's answer is better than the arithmetic. The buttons are **not inside
+ * the field at all** — a separate round "+", a pill field, a separate round send —
+ * so a button cannot overflow a field it is not in, at any text size, in either
+ * theme. These assertions therefore pin the new structure AND keep the old
+ * concern: the field stays a true pill at one line and keeps the same caps as it
+ * grows, and the two round controls stay round, equal and whole-numbered (the Mac
+ * renders this build scaled, so a fractional control size is a visible sliver).
  */
-describe('the Composer field', () => {
-  it('keeps the button inside the field it sits in', () => {
+describe('the composer row', () => {
+  it('keeps the buttons outside the field, so neither can overflow it', () => {
     renderComposer({ value: 'ready' })
 
     const field = styleOf('composer-field')
-    const circle = styleOf('composer-send-circle')
-
-    // A circle, and never taller than the line box it is centred in — so the
-    // field's inset is clearance on every side, in either theme.
-    expect(circle.height).toBe(COMPOSER_BUTTON_SIZE)
-    expect(circle.width).toBe(circle.height)
-    expect(circle.borderRadius).toBe(COMPOSER_BUTTON_SIZE / 2)
-    expect(COMPOSER_BUTTON_SIZE).toBeLessThanOrEqual(COMPOSER_LINE_HEIGHT)
-    expect(field.padding).toBe(COMPOSER_FIELD_INSET)
 
     // Half the single-line height: a true pill at one line, and the same caps
     // once it grows. A larger radius turns a tall field's ends into full
-    // semicircles and swallows the "+" on the bottom line.
-    expect(field.borderRadius).toBe(COMPOSER_FIELD_RADIUS)
+    // semicircles; 28pt on a 40pt box was the original bug.
+    //
+    // Per corner rather than one `borderRadius`: a glass surface spells all four
+    // out so that a bottom sheet can square its lower pair, and a blanket radius
+    // beside a per-corner one is two rules for one shape.
+    expect(field.borderTopLeftRadius).toBe(COMPOSER_FIELD_RADIUS)
+    expect(field.borderTopRightRadius).toBe(COMPOSER_FIELD_RADIUS)
+    expect(field.borderBottomLeftRadius).toBe(COMPOSER_FIELD_RADIUS)
+    expect(field.borderBottomRightRadius).toBe(COMPOSER_FIELD_RADIUS)
     expect(COMPOSER_FIELD_RADIUS).toBe((COMPOSER_LINE_HEIGHT + 2 * COMPOSER_FIELD_INSET) / 2)
+
+    // The "+" and the send are siblings of the field, not children of it: the
+    // field's own testID is not an ancestor of either.
+    expect(screen.getByTestId('composer-attach')).toBeTruthy()
+    expect(screen.getByTestId('composer-send')).toBeTruthy()
+    expect(screen.queryByTestId('composer-field')?.findAllByProps({ testID: 'composer-send' })).toHaveLength(0)
   })
 
-  it('gives the buttons and the input the same line box', () => {
+  it('draws both round controls at one whole-numbered size', () => {
     renderComposer({ value: 'ready' })
 
-    // One line box: at a single line the buttons are centred in the field, and
-    // as the input grows they stay on the bottom line rather than stretching
-    // or floating.
-    expect(styleOf('composer-send').height).toBe(COMPOSER_LINE_HEIGHT)
-    expect(styleOf('composer-attach').height).toBe(COMPOSER_LINE_HEIGHT)
-    expect(styleOf('composer-input').minHeight).toBe(COMPOSER_LINE_HEIGHT)
+    // The pressable IS the circle now — `RoundIconButton` draws one box rather
+    // than a target with a circle inside it, which is what made "the mark is
+    // centred" one claim instead of one per copy.
+    const circle = styleOf('composer-send')
+
+    expect(COMPOSER_ROUND_SIZE).toBe(Math.round(COMPOSER_ROUND_SIZE))
+    expect(styleOf('composer-attach').height).toBe(COMPOSER_ROUND_SIZE)
+    expect(circle.height).toBe(COMPOSER_ROUND_SIZE)
+    expect(circle.width).toBe(circle.height)
+    expect(circle.borderRadius).toBe(COMPOSER_ROUND_SIZE / 2)
   })
 
   it('anchors the row to the bottom so a growing input pushes upward', () => {
     renderComposer({ value: 'one\ntwo\nthree\nfour' })
 
-    expect(styleOf('composer-field').alignItems as unknown).toBe('flex-end')
-    // The input is the only thing allowed to grow.
+    // The input is the only thing allowed to grow; the round controls ride the
+    // bottom line rather than stretching with it.
     expect(styleOf('composer-input').maxHeight).toBeGreaterThan(COMPOSER_LINE_HEIGHT)
-    expect(styleOf('composer-send').height).toBe(COMPOSER_LINE_HEIGHT)
+    expect(styleOf('composer-send').height).toBe(COMPOSER_ROUND_SIZE)
+  })
+
+  /**
+   * One line, vertically centred — and why the field has no `minHeight` any more.
+   *
+   * A `minHeight` made the box taller than its content, and an iOS multiline field
+   * lays its text out from the TOP of a box like that: the placeholder sat high with
+   * the slack below it, which is what the owner reported. The height of one line now
+   * comes from the leading plus the padding, so there is no slack for the platform to
+   * put anywhere.
+   */
+  it('centres one line in the pill from an explicit leading, not from a minimum height', () => {
+    renderComposer({ value: '' })
+
+    const style = styleOf('composer-input') as {
+      lineHeight?: number
+      minHeight?: number
+      paddingBottom?: number
+      paddingTop?: number
+    }
+
+    expect(style.lineHeight).toBe(COMPOSER_TEXT_LINE_HEIGHT)
+    expect(style.minHeight).toBeUndefined()
+
+    // Leading plus both paddings IS the single-line field height, so the pill is a
+    // true pill at one line without anything having to be a minimum.
+    const inset = Platform.OS === 'ios' ? COMPOSER_IOS_TOP_INSET : 0
+
+    expect(COMPOSER_TEXT_LINE_HEIGHT + (style.paddingTop ?? 0) + inset + (style.paddingBottom ?? 0)).toBe(
+      COMPOSER_LINE_HEIGHT
+    )
+  })
+
+  it('leaves the two visible gaps equal, with the platform’s own inset taken off the top', () => {
+    // The arithmetic, stated where it is decided. `paddingTop` is deliberately NOT
+    // `paddingBottom` on iOS: the platform adds its own space above the first line,
+    // and what has to be symmetric is what a reader sees.
+    expect(composerFieldPadding(0)).toEqual({ paddingBottom: 5, paddingTop: 5 })
+    expect(composerFieldPadding(2)).toEqual({ paddingBottom: 5, paddingTop: 3 })
+
+    // …and never negative, however large a platform's inset turns out to be.
+    expect(composerFieldPadding(99).paddingTop).toBe(0)
   })
 
   it('keeps the stop button on exactly the same geometry', () => {
-    renderComposer({ running: true, value: 'ignored' })
+    renderComposer({ running: true })
 
-    expect(styleOf('composer-stop').height).toBe(COMPOSER_LINE_HEIGHT)
-    expect(styleOf('composer-send-circle').height).toBe(COMPOSER_BUTTON_SIZE)
+    const stop = styleOf('composer-stop')
+
+    expect(stop.height).toBe(COMPOSER_ROUND_SIZE)
+    expect(stop.width).toBe(COMPOSER_ROUND_SIZE)
+    expect(stop.borderRadius).toBe(COMPOSER_ROUND_SIZE / 2)
   })
 })
 
 /**
- * The keyboard path, which is the only way to send on macOS.
+ * The keyboard path, which is the only way to send on a Mac.
  *
- * The rule it enforces: Enter SENDS, or does nothing. It used to fall through
+ * Two mechanisms, and which one fires is decided by `submitBehavior`. Where a
+ * bare Return sends, iOS suppresses the newline and calls `onSubmitEditing`
+ * instead, and `onKeyPress` never sees the key at all — that is what makes a
+ * double send structurally impossible rather than guarded against.
+ *
+ * The rule both enforce: Return SENDS, or does nothing. It used to fall through
  * to the same handler as the round button, so while a reply was streaming the
- * send key cancelled the turn — typing the next message and pressing Enter
- * killed the answer being written. A prompt sent mid-turn is parked by the
- * gateway; stopping is the button's job, and Escape's.
+ * send key cancelled the turn — typing the next message and pressing Return
+ * killed the answer being written. A prompt sent mid-turn is parked in the
+ * queue; stopping is what the button does with an EMPTY field, and what Escape
+ * does always.
  */
-describe('the Composer keyboard', () => {
-  const enter = (extra: Record<string, unknown> = {}) =>
-    fireEvent(screen.getByTestId('composer-input'), 'keyPress', { nativeEvent: { key: 'Enter', ...extra } })
+/**
+ * The slash list under the keyboard.
+ *
+ * Arrow keys and Tab do not reach a `TextInput` at all — React Native builds its
+ * `onKeyPress` payload from the text a field is about to insert — so all three
+ * come down the same road as Escape and the desktop shortcuts, and only while
+ * the list is open.
+ */
+describe('the slash list and the keyboard', () => {
+  const OPTIONS = [
+    { description: 'Compact the conversation', name: 'compact' },
+    { description: 'Show the current model', name: 'model' }
+  ]
 
-  it('sends on a bare Enter where a hardware keyboard is certain', () => {
+  /** Which row the keyboard is on, as the list itself reports it. */
+  const selected = (name: string) =>
+    screen.getByTestId(`slash-option-${name}`).props.accessibilityState?.selected === true
+
+  it('starts on the first row and walks down and back up', () => {
+    renderComposer({ suggestions: OPTIONS, value: '/' })
+
+    expect(selected('compact')).toBe(true)
+
+    pressKey('suggestionDown')
+    expect(selected('model')).toBe(true)
+    expect(selected('compact')).toBe(false)
+
+    // …and stops at the end rather than wrapping: a list that wraps under a held
+    // arrow key never lets go of the reader.
+    pressKey('suggestionDown')
+    expect(selected('model')).toBe(true)
+
+    pressKey('suggestionUp')
+    expect(selected('compact')).toBe(true)
+    pressKey('suggestionUp')
+    expect(selected('compact')).toBe(true)
+  })
+
+  it('takes the highlighted row on Tab', () => {
+    const handlers = renderComposer({ suggestions: OPTIONS, value: '/' })
+
+    pressKey('suggestionDown')
+    pressKey('suggestionAccept')
+
+    expect(handlers.onChangeText).toHaveBeenCalledWith('/model ')
+    expect(handlers.onSend).not.toHaveBeenCalled()
+  })
+
+  it('takes the highlighted row on Enter rather than sending the line', () => {
+    mockHardwareKeyboard = true
+
+    try {
+      const handlers = renderComposer({ suggestions: OPTIONS, value: '/' })
+
+      fireEvent(screen.getByTestId('composer-input'), 'submitEditing')
+
+      expect(handlers.onChangeText).toHaveBeenCalledWith('/compact ')
+      expect(handlers.onSend).not.toHaveBeenCalled()
+    } finally {
+      mockHardwareKeyboard = false
+    }
+  })
+
+  it('sends on Enter with no list open, which is every other line', () => {
+    mockHardwareKeyboard = true
+
+    try {
+      const handlers = renderComposer({ suggestions: [], value: 'just a message' })
+
+      fireEvent(screen.getByTestId('composer-input'), 'submitEditing')
+
+      expect(handlers.onSend).toHaveBeenCalledWith('just a message')
+    } finally {
+      mockHardwareKeyboard = false
+    }
+  })
+
+  it('gives the keys back the moment the list is closed', () => {
+    const handlers = renderComposer({ suggestions: OPTIONS, value: '/' })
+
+    act(() => {
+      for (const listener of [...mockEscapeListeners]) {
+        listener()
+      }
+    })
+
+    expect(screen.queryByTestId('composer-slash-popover')).toBeNull()
+
+    pressKey('suggestionAccept')
+    expect(handlers.onChangeText).not.toHaveBeenCalled()
+  })
+})
+
+describe('the Composer keyboard', () => {
+  const submitEditing = () => fireEvent(screen.getByTestId('composer-input'), 'submitEditing')
+
+  const keyPress = (key: string, extra: Record<string, unknown> = {}) =>
+    fireEvent(screen.getByTestId('composer-input'), 'keyPress', { nativeEvent: { key, ...extra } })
+
+  it('asks the platform to submit on Return where a hardware keyboard is certain', () => {
+    renderComposer({ hardwareKeyboard: true, value: 'Ship it' })
+
+    expect(screen.getByTestId('composer-input').props.submitBehavior).toBe('submit')
+  })
+
+  it('leaves Return as the newline everywhere else', () => {
+    renderComposer({ hardwareKeyboard: false, value: 'Ship it' })
+
+    expect(screen.getByTestId('composer-input').props.submitBehavior).toBe('newline')
+  })
+
+  it('sends on the Return the platform turned into a submit', () => {
     const handlers = renderComposer({ hardwareKeyboard: true, value: 'Ship it' })
 
-    enter()
+    submitEditing()
     expect(handlers.onSend).toHaveBeenCalledWith('Ship it')
   })
 
-  it('does not stop a running turn on Enter', () => {
+  it('does not stop a running turn on Return', () => {
     const handlers = renderComposer({ hardwareKeyboard: true, running: true, value: 'the next message' })
 
-    enter()
+    submitEditing()
     expect(handlers.onStop).not.toHaveBeenCalled()
     expect(handlers.onSend).toHaveBeenCalledWith('the next message')
   })
 
-  it('does nothing at all on Enter with nothing to send', () => {
+  it('does nothing at all on Return with nothing to send', () => {
     const handlers = renderComposer({ hardwareKeyboard: true, running: true, value: '' })
 
-    enter()
+    submitEditing()
     expect(handlers.onStop).not.toHaveBeenCalled()
     expect(handlers.onSend).not.toHaveBeenCalled()
   })
 
-  it('keeps Shift+Enter as the newline', () => {
+  it('leaves a bare Enter alone where it is the newline', () => {
+    const handlers = renderComposer({ hardwareKeyboard: false, value: 'first line' })
+
+    keyPress('Enter')
+    expect(handlers.onSend).not.toHaveBeenCalled()
+  })
+
+  it('keeps Shift+Enter as the newline where the flag arrives', () => {
     const handlers = renderComposer({ hardwareKeyboard: true, value: 'first line' })
 
-    enter({ shiftKey: true })
+    keyPress('Enter', { shiftKey: true })
     expect(handlers.onSend).not.toHaveBeenCalled()
   })
 
   it('sends on Cmd+Enter even where a bare Enter is a newline', () => {
     const handlers = renderComposer({ hardwareKeyboard: false, value: 'Ship it' })
 
-    enter()
-    expect(handlers.onSend).not.toHaveBeenCalled()
+    keyPress('Enter', { metaKey: true })
+    expect(handlers.onSend).toHaveBeenCalledWith('Ship it')
+  })
+})
 
-    enter({ metaKey: true })
+/**
+ * Shift+Return is a newline, and it has to be inserted by hand.
+ *
+ * `submitBehavior="submit"` tells iOS not to insert one, which is what makes a
+ * bare Return the send key — and it applies to Shift+Return too, because a text
+ * field's key event carries no modifier state on iOS and both arrive as the same
+ * `"\n"`. So the composer asks the keyboard which chord it was and, for Shift,
+ * writes the newline into the draft itself at the caret.
+ */
+describe('the Composer and Shift+Return', () => {
+  const submitEditing = () => fireEvent(screen.getByTestId('composer-input'), 'submitEditing')
+
+  const moveCaret = (start: number, end: number = start) =>
+    fireEvent(screen.getByTestId('composer-input'), 'selectionChange', {
+      nativeEvent: { selection: { start, end } }
+    })
+
+  it('sends when Shift is up', () => {
+    const handlers = renderComposer({ hardwareKeyboard: true, value: 'Ship it' })
+
+    submitEditing()
+
+    expect(handlers.onSend).toHaveBeenCalledWith('Ship it')
+    expect(handlers.onChangeText).not.toHaveBeenCalled()
+  })
+
+  it('inserts a newline at the end when Shift is down, and does not send', () => {
+    mockShiftDown = true
+    const handlers = renderComposer({ hardwareKeyboard: true, value: 'first line' })
+
+    moveCaret('first line'.length)
+    submitEditing()
+
+    expect(handlers.onSend).not.toHaveBeenCalled()
+    expect(handlers.onChangeText).toHaveBeenCalledWith('first line\n')
+  })
+
+  it('inserts at the caret, not at the end', () => {
+    mockShiftDown = true
+    const handlers = renderComposer({ hardwareKeyboard: true, value: 'one two' })
+
+    moveCaret(3)
+    submitEditing()
+
+    expect(handlers.onChangeText).toHaveBeenCalledWith('one\n two')
+  })
+
+  it('replaces a selected range, the way any other character would', () => {
+    mockShiftDown = true
+    const handlers = renderComposer({ hardwareKeyboard: true, value: 'keep DROP keep' })
+
+    moveCaret(5, 9)
+    submitEditing()
+
+    expect(handlers.onChangeText).toHaveBeenCalledWith('keep \n keep')
+  })
+
+  it('leaves the caret after the newline it just inserted', () => {
+    mockShiftDown = true
+    renderComposer({ hardwareKeyboard: true, value: 'one two' })
+
+    moveCaret(3)
+    submitEditing()
+
+    expect(screen.getByTestId('composer-input').props.selection).toEqual({ start: 4, end: 4 })
+  })
+
+  it('survives a stale caret past the end of the draft', () => {
+    mockShiftDown = true
+    const handlers = renderComposer({ hardwareKeyboard: true, value: 'short' })
+
+    moveCaret(99, 120)
+    submitEditing()
+
+    expect(handlers.onChangeText).toHaveBeenCalledWith('short\n')
+  })
+
+  it('ignores Shift where a bare Return is already the newline', () => {
+    mockShiftDown = true
+    const handlers = renderComposer({ hardwareKeyboard: false, value: 'Ship it' })
+
+    submitEditing()
+
+    // `submitBehavior` is 'newline' there, so the platform inserts it and this
+    // handler is not the one that runs — but if it does, it must not double up.
+    expect(handlers.onChangeText).not.toHaveBeenCalled()
     expect(handlers.onSend).toHaveBeenCalledWith('Ship it')
   })
 
-  it('leaves Escape as the only key that stops a turn', () => {
-    const handlers = renderComposer({ hardwareKeyboard: true, running: true, value: 'ignored' })
+  /**
+   * The owner's second report: on an iPad in a keyboard case Enter did nothing
+   * useful, while the same build on a Mac sent. The decision had been hung on
+   * `RUNS_ON_MAC`, which is a proxy for "is there a keyboard" and is false on
+   * exactly that device. It now asks the HID state as well.
+   */
+  it('sends on a bare Return wherever a keyboard is actually attached', () => {
+    mockHardwareKeyboard = true
 
-    fireEvent(screen.getByTestId('composer-input'), 'keyPress', { nativeEvent: { key: 'Escape' } })
-    expect(handlers.onStop).toHaveBeenCalled()
+    try {
+      // No `hardwareKeyboard` prop at all: this is the DEFAULT, which is what
+      // the chat screen relies on.
+      const handlers = renderComposer({ value: 'Ship it' })
+
+      fireEvent(screen.getByTestId('composer-input'), 'submitEditing')
+      expect(handlers.onSend).toHaveBeenCalledWith('Ship it')
+
+      // And Shift+Return there is still the newline.
+      mockShiftDown = true
+      fireEvent(screen.getByTestId('composer-input'), 'submitEditing')
+      expect(handlers.onChangeText).toHaveBeenCalledWith('Ship it\n')
+    } finally {
+      mockHardwareKeyboard = false
+      mockShiftDown = false
+    }
+  })
+
+  it('leaves a device with no keyboard on the software Return', () => {
+    const handlers = renderComposer({ value: 'Ship it' })
+
+    fireEvent(screen.getByTestId('composer-input'), 'submitEditing')
+
+    // `submitBehavior` is 'newline' there, so this handler is not the one that
+    // runs; reaching it at all means the platform asked to submit.
+    expect(handlers.onSend).toHaveBeenCalledWith('Ship it')
+    expect(screen.queryByTestId('composer-key-hint')).toBeNull()
+  })
+
+  it('announces the two chords on the Mac and nowhere else', () => {
+    // NOT wherever a bare Return sends. On an iPad with a keyboard case it does
+    // send, and the line still has nowhere to be: iPadOS keeps its own keyboard
+    // bar along the bottom of the window and the hint was drawn straight
+    // through it, with the system's keyboard button sitting on the words.
+    renderComposer({ hardwareKeyboard: true })
+    expect(screen.queryByTestId('composer-key-hint')).toBeNull()
+
+    runsOnMac.RUNS_ON_MAC = true
+
+    try {
+      renderComposer({ hardwareKeyboard: true })
+      expect(screen.getByTestId('composer-key-hint')).toBeTruthy()
+    } finally {
+      runsOnMac.RUNS_ON_MAC = false
+    }
+  })
+})
+
+/** Escape stops a running turn, and yields to the slash popover while it is open. */
+describe('the Composer and Escape', () => {
+  const pressEscape = () =>
+    act(() => {
+      for (const listener of [...mockEscapeListeners]) {
+        listener()
+      }
+    })
+
+  it('stops a running turn', () => {
+    const handlers = renderComposer({ running: true, value: 'ignored' })
+
+    pressEscape()
+
+    expect(handlers.onStop).toHaveBeenCalledTimes(1)
+  })
+
+  it('does nothing when no turn is running', () => {
+    const handlers = renderComposer({ value: 'idle' })
+
+    pressEscape()
+
+    expect(handlers.onStop).not.toHaveBeenCalled()
+  })
+
+  it('closes the slash popover first, and leaves the turn running', () => {
+    const handlers = renderComposer({ running: true, suggestions: SUGGESTIONS, value: '/' })
+
+    expect(screen.getByTestId('composer-slash-popover')).toBeTruthy()
+
+    pressEscape()
+
+    expect(handlers.onStop).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('composer-slash-popover')).toBeNull()
+    // The draft is untouched: dismissing the list is not deleting the slash.
+    expect(handlers.onChangeText).not.toHaveBeenCalled()
+
+    // With the popover gone the turn is next in line.
+    pressEscape()
+    expect(handlers.onStop).toHaveBeenCalledTimes(1)
+  })
+})
+
+/**
+ * The attach menu as a POPOVER.
+ *
+ * It was a list of two rows in a card above the composer; the choices are round icon
+ * buttons with their labels underneath now, so two choices read as two objects.
+ *
+ * It also had a TAIL aimed at the `+`, and the owner's call is that it must not: a
+ * tail is a bubble's shape and a menu that wears one reads as something the composer
+ * said. What replaces it is the MOTION, which is why the two facts about leaving are
+ * asserted here rather than left to the eye — the menu has to animate OUT as well as
+ * in, and it must stop taking taps the moment it starts leaving, or the tap that
+ * dismissed it lands on it twice.
+ */
+describe('the attach popover', () => {
+  const hidden = { includeHiddenElements: true } as const
+
+  /** The stacked list's `minWidth`; the popover has none, which is how they differ. */
+  const widthFloorOf = (testID: string): number | undefined =>
+    (StyleSheet.flatten(screen.getByTestId(testID).props.style as never) as { minWidth?: number }).minWidth
+
+  const pressEscape = () =>
+    act(() => {
+      for (const listener of [...mockEscapeListeners]) {
+        listener()
+      }
+    })
+
+  const openMenu = (props: Record<string, unknown> = {}) => {
+    const handlers = renderComposer(props)
+
+    fireEvent.press(screen.getByTestId('composer-attach'))
+
+    return handlers
+  }
+
+  it('wears no tail, on either layout', () => {
+    openMenu()
+
+    expect(screen.getByTestId('composer-attach-menu')).toBeTruthy()
+    expect(screen.queryByTestId('composer-attach-menu-pointer', hidden)).toBeNull()
+    // The anchor view the tail was positioned against went with it.
+    expect(screen.queryByTestId('composer-attach-menu-anchor', hidden)).toBeNull()
+  })
+
+  it('draws each choice as an icon with its label underneath, not as a row of text', () => {
+    openMenu()
+
+    // A drawn mark, per choice — not a glyph, not a row.
+    expect(screen.getByTestId('composer-attach-menu-photo')).toBeTruthy()
+    expect(screen.getByTestId('composer-attach-menu-file')).toBeTruthy()
+    expect(screen.getByText('Photo library')).toBeTruthy()
+    expect(screen.getByText('Choose file')).toBeTruthy()
+
+    // The popover is a ROW of choices; a column of two is the list layout.
+    const inner = StyleSheet.flatten(screen.getByTestId('composer-attach-menu').props.style as never)
+
+    expect(inner).toBeTruthy()
+  })
+
+  it('dismisses on a tap that is not on it, and leaves by animating out', () => {
+    openMenu()
+
+    expect(screen.getByTestId('composer-attach-appear').props.pointerEvents).toBe('auto')
+
+    fireEvent.press(screen.getByTestId('composer-attach-dismiss'))
+
+    // Still mounted: that frame is the exit. It used to be `exit="cut"`, which is
+    // the thing the owner asked to change — a menu with no tail has only its
+    // motion left to say where it went.
+    expect(screen.getByTestId('composer-attach-menu')).toBeTruthy()
+    // …and it takes no taps while it goes, so the dismissal cannot land twice.
+    expect(screen.getByTestId('composer-attach-appear').props.pointerEvents).toBe('none')
+    // The catcher, which is not animated, is gone on the same frame.
+    expect(screen.queryByTestId('composer-attach-dismiss')).toBeNull()
+  })
+
+  it('dismisses on Escape, before anything else Escape could mean', () => {
+    const handlers = openMenu({ running: true })
+
+    pressEscape()
+
+    expect(screen.getByTestId('composer-attach-appear').props.pointerEvents).toBe('none')
+    expect(screen.queryByTestId('composer-attach-dismiss')).toBeNull()
+    // Registered last, so the running turn is untouched — the menu is the level the
+    // reader is looking at.
+    expect(handlers.onStop).not.toHaveBeenCalled()
+  })
+
+  it('has no catcher to tap when it is closed', () => {
+    renderComposer()
+
+    expect(screen.queryByTestId('composer-attach-dismiss')).toBeNull()
+  })
+
+  it('falls back to the stacked list where the popover cannot fit', () => {
+    renderComposer()
+
+    // The composer's own width, reported as a phone's with the tray open.
+    fireEvent(screen.getByTestId('composer-row'), 'layout', {
+      nativeEvent: { layout: { width: ATTACH_POPOVER_MIN_WIDTH - 1, height: 60, x: 0, y: 0 } }
+    })
+    fireEvent.press(screen.getByTestId('composer-attach'))
+
+    // The stacked list is the one with a floor under its width; the popover is as
+    // wide as its two labels and no wider.
+    expect(widthFloorOf('composer-attach-menu')).toBe(ATTACH_LIST_MIN_WIDTH)
+    // …and the choices are still both there and still both work.
+    expect(screen.getByText('Photo library')).toBeTruthy()
+    expect(screen.getByText('Choose file')).toBeTruthy()
+  })
+
+  it('takes the popover at the width a chat column actually has', () => {
+    renderComposer()
+
+    fireEvent(screen.getByTestId('composer-row'), 'layout', {
+      nativeEvent: { layout: { width: ATTACH_POPOVER_MIN_WIDTH, height: 60, x: 0, y: 0 } }
+    })
+    fireEvent.press(screen.getByTestId('composer-attach'))
+
+    expect(widthFloorOf('composer-attach-menu')).toBeUndefined()
+  })
+})
+
+/**
+ * The pending tray.
+ *
+ * The cards in it are deliberately the SAME cards a sent message shows — that
+ * is §6.7 — which is exactly what made the state ambiguous: the owner could not
+ * tell a file that was attached from one already on its way. So the tray has to
+ * say which it is in words, and the send button has to carry the fact too,
+ * because the tray scrolls out of reach on a short screen with the keyboard up
+ * and the button never does.
+ *
+ * It stays INSIDE the field. Lifting it back out into a strip of its own is the
+ * shape this composer deliberately moved away from, and these assertions are
+ * what stop a later change from undoing that by accident.
+ */
+describe('the Composer pending tray', () => {
+  const image = { id: 'att-1', kind: 'image' as const, name: 'shot.png', uri: 'file:///tmp/shot.png' }
+  const doc = { id: 'att-2', kind: 'file' as const, name: 'report.pdf', size: 2048 }
+
+  it('says in words that the file has not gone anywhere', () => {
+    renderComposer({ attachments: [doc] })
+
+    expect(screen.getByTestId('composer-attachments-pending')).toBeTruthy()
+    expect(screen.getByText('Not sent yet')).toBeTruthy()
+    expect(screen.getByText('· 1 file')).toBeTruthy()
+  })
+
+  it('counts what is waiting', () => {
+    renderComposer({ attachments: [image, doc] })
+
+    expect(screen.getByText('· 2 files')).toBeTruthy()
+  })
+
+  it('has no tray at all with nothing attached', () => {
+    renderComposer({ value: 'just words' })
+
+    expect(screen.queryByTestId('composer-attachments-pending')).toBeNull()
+    expect(screen.queryByTestId('composer-attachments')).toBeNull()
+  })
+
+  it('keeps the tray inside the field rather than above it', () => {
+    renderComposer({ attachments: [doc] })
+
+    // The field is the pill the caret is in; what is attached is attached to
+    // the MESSAGE, which is that pill.
+    expect(screen.getByTestId('composer-field')).toBeTruthy()
+    expect(screen.getByTestId('composer-attachments-pending')).toBeTruthy()
+  })
+
+  it('still removes an image from its own ×', () => {
+    const handlers = renderComposer({ attachments: [image] })
+
+    fireEvent.press(screen.getByTestId('composer-attachment-remove-att-1'))
+    expect(handlers.onRemoveAttachment).toHaveBeenCalledWith('att-1')
+  })
+
+  it('still removes a file from its own ×', () => {
+    const handlers = renderComposer({ attachments: [doc] })
+
+    fireEvent.press(screen.getByTestId('composer-attachment-att-2-remove'))
+    expect(handlers.onRemoveAttachment).toHaveBeenCalledWith('att-2')
+  })
+
+  it('shows the count on the send button too', () => {
+    renderComposer({ attachments: [image, doc] })
+
+    expect(screen.getByTestId('composer-send-badge')).toBeTruthy()
+    expect(screen.getByTestId('composer-send').props.accessibilityLabel).toBe('Send message with 2 attachments')
+  })
+
+  it('names a single attachment in the singular', () => {
+    renderComposer({ attachments: [doc] })
+
+    expect(screen.getByTestId('composer-send').props.accessibilityLabel).toBe('Send message with 1 attachment')
+  })
+
+  it('has no badge with nothing attached', () => {
+    renderComposer({ value: 'just words' })
+
+    expect(screen.queryByTestId('composer-send-badge')).toBeNull()
+    expect(screen.getByTestId('composer-send').props.accessibilityLabel).toBe('Send message')
+  })
+})
+
+describe('pasting from the general pasteboard', () => {
+  it('reads the pasteboard on ⌘V while the field is focused, and hands over what it finds', async () => {
+    mockHasNativePasteboard = true
+    mockReadPasteboardAttachment.mockResolvedValue([
+      { uri: 'file:///tmp/pasted.png', name: 'pasted.png', size: 10, mimeType: 'image/png' }
+    ])
+
+    const handlers = renderComposer()
+
+    fireEvent(screen.getByTestId('composer-input'), 'focus')
+    pressPaste()
+
+    await waitFor(() =>
+      expect(handlers.onPasteFiles).toHaveBeenCalledWith([
+        { uri: 'file:///tmp/pasted.png', name: 'pasted.png', size: 10, mimeType: 'image/png' }
+      ])
+    )
+    expect(mockReadPasteboardAttachment).toHaveBeenCalled()
+  })
+
+  it('does not ask the pasteboard when the field is unfocused', () => {
+    mockHasNativePasteboard = true
+    renderComposer()
+
+    // No `fireEvent(..., 'focus')`: the field never took the caret.
+    pressPaste()
+
+    expect(mockReadPasteboardAttachment).not.toHaveBeenCalled()
+  })
+
+  it('does not ask on a build with no native pasteboard reader', () => {
+    mockHasNativePasteboard = false
+    renderComposer()
+
+    fireEvent(screen.getByTestId('composer-input'), 'focus')
+    pressPaste()
+
+    expect(mockReadPasteboardAttachment).not.toHaveBeenCalled()
+  })
+
+  it('reports nothing when the pasteboard held only text', async () => {
+    mockHasNativePasteboard = true
+    mockReadPasteboardAttachment.mockResolvedValue([])
+
+    const handlers = renderComposer()
+
+    fireEvent(screen.getByTestId('composer-input'), 'focus')
+    pressPaste()
+
+    await waitFor(() => expect(mockReadPasteboardAttachment).toHaveBeenCalled())
+    expect(handlers.onPasteFiles).not.toHaveBeenCalled()
   })
 })

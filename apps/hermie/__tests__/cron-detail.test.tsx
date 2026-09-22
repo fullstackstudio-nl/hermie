@@ -9,7 +9,13 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react-native'
 
 import { renderScreen } from './support/render'
-import { type CronController, CronDetailScreen, type CronJob, cronJobFromRow } from '../src/features/cron'
+import {
+  type CronController,
+  CronDetailScreen,
+  type CronJob,
+  cronJobFromRow,
+  cronRunFromRow
+} from '../src/features/cron'
 import { useCronStore } from '../src/store/cron'
 
 const job = (overrides: Record<string, unknown> = {}): CronJob =>
@@ -164,4 +170,45 @@ it('opens a run', async () => {
   fireEvent.press(row)
 
   expect(onOpenRun).toHaveBeenCalledWith(expect.objectContaining({ id: run.id }))
+})
+
+/**
+ * Two fields the gateway sends in a shape the reader did not expect, both found
+ * by comparing the fake gateway with `hermes serve` rather than by a failure.
+ */
+describe('reading the gateway’s own shapes', () => {
+  /**
+   * A `/runs` row is a session row, and the sessions table has NO status column
+   * — the outcome is `end_reason`. Reading `status` alone meant every run in the
+   * history rendered as the "ok" the screen falls back to, including the ones
+   * that were interrupted, and nothing anywhere said otherwise.
+   */
+  it('takes a run’s outcome from end_reason, which is the column that exists', () => {
+    const base = { id: 'cron_job-heartbeat_1', title: 'VM heartbeat', started_at: 1, ended_at: 2, message_count: 3 }
+
+    expect(cronRunFromRow({ ...base, end_reason: 'interrupted' }).status).toBe('interrupted')
+    expect(cronRunFromRow({ ...base, end_reason: 'done' }).status).toBe('done')
+    // A build that does send `status` is still read, and wins: it is the more
+    // specific answer where both are present.
+    expect(cronRunFromRow({ ...base, end_reason: 'done', status: 'error' }).status).toBe('error')
+    expect(cronRunFromRow(base).status).toBeNull()
+  })
+
+  /**
+   * `last_fire_error` is `{at, detail}`, not a string: the scheduler stamps when
+   * it could not START the job. Read as a string it was dropped silently, so a
+   * cron that never got off the ground showed no error at all here.
+   */
+  it('reads a missed fire out of the object the scheduler records it as', () => {
+    const missed = job({
+      last_error: null,
+      last_fire_error: { at: '2026-09-20T03:00:00Z', detail: 'The scheduler was not running at 03:00.' }
+    })
+
+    expect(missed.lastError).toBe('The scheduler was not running at 03:00.')
+
+    // A string still works, and a real error beside it still wins.
+    expect(job({ last_error: null, last_fire_error: 'plain string' }).lastError).toBe('plain string')
+    expect(job({ last_error: 'boom', last_fire_error: { detail: 'missed' } }).lastError).toBe('boom')
+  })
 })

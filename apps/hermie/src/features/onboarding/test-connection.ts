@@ -1,16 +1,28 @@
 import { type GatewayConnection, GatewayError } from '@hermie/gateway-client'
+import { pluginAdvert } from '@hermie/gateway-client/plugin'
 
 import { createGatewayConnection, createMemoryTokenStore, createTokenCoordinator } from '../../gateway/client'
 import {
   authModeOf,
   connectionPayloadKey,
   type ConnectionTestOutcome,
-  headerRecord,
+  effectiveHeaders,
   type OnboardingDraft
 } from './draft'
 
 /** How long the whole dial — ticket, socket, `gateway.ready` — gets before the test fails. */
 export const CONNECTION_TEST_TIMEOUT_MS = 30_000
+
+/**
+ * The three things the test exercises, in order.
+ *
+ * Reported as each one STARTS, so the step can show which half of the transport
+ * a failure belongs to. That distinction is the whole value of the step: REST
+ * refused is a credential, the socket refused is a reverse proxy that does not
+ * pass upgrades through, and one line saying "it did not work" tells you
+ * neither.
+ */
+export type ConnectionTestStage = 'rest' | 'socket' | 'profiles'
 
 /**
  * Wait for the connection to reach `ready`, or fail at the first sign that it
@@ -80,7 +92,9 @@ function waitForReady(connection: GatewayConnection, timeoutMs: number): Promise
  */
 export async function runConnectionTest(
   draft: OnboardingDraft,
-  timeoutMs: number = CONNECTION_TEST_TIMEOUT_MS
+  timeoutMs: number = CONNECTION_TEST_TIMEOUT_MS,
+  /** Called as each stage starts. Reporting only; it decides nothing. */
+  onStage: (stage: ConnectionTestStage) => void = () => {}
 ): Promise<ConnectionTestOutcome> {
   const baseUrl = draft.baseUrl
 
@@ -89,7 +103,7 @@ export async function runConnectionTest(
   }
 
   const authMode = authModeOf(draft.probe)
-  const extraHeaders = headerRecord(draft.headers)
+  const extraHeaders = effectiveHeaders(draft)
   const coordinator =
     authMode === 'native_pkce'
       ? createTokenCoordinator({ baseUrl, extraHeaders, store: createMemoryTokenStore(draft.tokens) })
@@ -109,7 +123,9 @@ export async function runConnectionTest(
   try {
     let userDisplayName = ''
 
-    if (authMode === 'native_pkce') {
+    onStage('rest')
+
+    if (authMode !== 'session_token') {
       const identity = await connection.http.authMe()
       userDisplayName = identity.displayName || identity.email || identity.userId
     } else {
@@ -118,8 +134,10 @@ export async function runConnectionTest(
       await connection.http.get('/api/profiles')
     }
 
+    onStage('socket')
     await waitForReady(connection, timeoutMs)
 
+    onStage('profiles')
     const result = await connection.request('profiles.list', { include_sessions: true })
     // Read the coordinator back rather than the draft: if the dial rotated the
     // pair, this is the only place the live one exists. The payload key is
@@ -132,6 +150,10 @@ export async function runConnectionTest(
       key: connectionPayloadKey(tested),
       userDisplayName,
       botCount: (result.profiles ?? []).length,
+      // Read off the roster this stage just fetched: the plugin publishes its
+      // advert into the gateway's own `ui_meta`, so "is it installed" is
+      // already in the answer.
+      plugin: pluginAdvert(result.profiles ?? []),
       ...(tokens ? { tokens } : {})
     }
   } finally {

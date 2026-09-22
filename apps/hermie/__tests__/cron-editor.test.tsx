@@ -33,7 +33,7 @@ it('will not save without a name or instructions', () => {
   fireEvent.press(screen.getByTestId('cron-editor-save'))
 
   expect(onSave).not.toHaveBeenCalled()
-  expect(screen.getByText('Give the routine a name.')).toBeTruthy()
+  expect(screen.getByText('Give the cron a name.')).toBeTruthy()
   expect(screen.getByText('Write the instructions the bot should follow.')).toBeTruthy()
 })
 
@@ -65,6 +65,9 @@ it('sends the built schedule, the trimmed fields and the chosen target', () => {
     name: 'Morning briefing',
     prompt: 'Summarize overnight updates.',
     deliver: 'bot-chat:researcher',
+    // No picker was offered and none was chosen, so the create runs unscoped:
+    // the launch profile's cron store, which is what the gateway defaults to.
+    profile: null,
     schedule: 'every monday at 8am'
   })
 })
@@ -97,6 +100,6 @@ it('surfaces what the gateway said when a save was refused', () => {
   open({ error: "Invalid schedule 'soon'" })
 
   expect(screen.getByTestId('cron-editor-error')).toHaveTextContent(
-    "The gateway refused the routine: Invalid schedule 'soon'"
+    "The gateway refused the cron: Invalid schedule 'soon'"
   )
 })

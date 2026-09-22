@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The presence bead, as a shape rather than four drawables.
+
+  The colour is set at runtime with `setInt(…, "setColorFilter", …)` because the
+  four states come from the snapshot and a RemoteViews cannot pick a drawable by
+  a string. The ring is the surface colour, so the bead reads as sitting ON the
+  avatar rather than as a hole in it — the same construction as the iOS overlay.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+  <solid android:color="#FFFFFF" />
+  <stroke android:width="2dp" android:color="@color/hermie_widget_surface" />
+  <size android:width="12dp" android:height="12dp" />
+</shape>

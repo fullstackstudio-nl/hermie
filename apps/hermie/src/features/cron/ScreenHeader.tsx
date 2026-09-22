@@ -3,11 +3,13 @@
  *
  * The cron feature is one screen with early-return sub-screens rather than a
  * navigator (see `CronScreen`), so nothing above it supplies a back button.
- * This is that button, shaped like the design board's `‹ Hermie` eyebrow.
+ * This is that button, shaped like the design board's `< Hermie` eyebrow — with the
+ * chevron drawn rather than typed, so it matches every other one in the app.
  */
 import { Pressable, View } from 'react-native'
 
 import { Text } from '../../ui/primitives'
+import { Icon, ICON_SIZE } from '../../ui/Icon'
 import { useTheme } from '../../ui/theme'
 import { CONTROL_MIN_HEIGHT } from '../../ui/tokens'
 
@@ -29,16 +31,27 @@ export function ScreenHeader({ back, onBack, title, subtitle, action }: ScreenHe
         accessibilityRole="button"
         accessibilityLabel={back}
         onPress={onBack}
-        style={{ justifyContent: 'center', minHeight: CONTROL_MIN_HEIGHT }}
+        style={{
+          alignItems: 'center',
+          flexDirection: 'row',
+          gap: 2,
+          justifyContent: 'center',
+          minHeight: CONTROL_MIN_HEIGHT
+        }}
       >
-        <Text color="accent" variant="callout">{`‹ ${back}`}</Text>
+        <Icon color={theme.colors.accentText} name="chevronLeft" size={ICON_SIZE.inline} />
+        <Text color="accentText" variant="preview">
+          {back}
+        </Text>
       </Pressable>
 
       <View style={{ alignItems: 'center', flexDirection: 'row', gap: theme.space.md }}>
         <View style={{ flex: 1, gap: theme.space.xxs }}>
-          <Text variant="display">{title}</Text>
+          <Text accessibilityRole="header" aria-level={1} variant="title">
+            {title}
+          </Text>
           {subtitle ? (
-            <Text color="textMuted" variant="callout">
+            <Text color="textMuted" variant="preview">
               {subtitle}
             </Text>
           ) : null}

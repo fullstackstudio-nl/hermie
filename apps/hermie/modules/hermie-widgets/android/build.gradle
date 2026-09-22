@@ -1,0 +1,18 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'nl.fullstackstudio.hermie.widgets'
+version = '0.1.0'
+
+android {
+  namespace 'nl.fullstackstudio.hermie.widgets'
+
+  // `expo-module-gradle-plugin` reads both of these back out of `defaultConfig`
+  // while it configures publishing, and fails configuration if either is absent.
+  defaultConfig {
+    versionCode 1
+    versionName '0.1.0'
+  }
+}

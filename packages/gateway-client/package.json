@@ -9,13 +9,17 @@
   "exports": {
     ".": "./src/index.ts",
     "./connection": "./src/connection.ts",
+    "./context": "./src/context.ts",
     "./credentials": "./src/credentials.ts",
     "./http": "./src/http.ts",
     "./native-auth": "./src/native-auth.ts",
     "./pkce": "./src/pkce.ts",
+    "./plugin": "./src/plugin.ts",
     "./probe": "./src/probe.ts",
+    "./push": "./src/push.ts",
     "./socket-factory": "./src/socket-factory.ts",
     "./types": "./src/types.ts",
+    "./ui-meta": "./src/ui-meta.ts",
     "./url": "./src/url.ts"
   },
   "dependencies": {

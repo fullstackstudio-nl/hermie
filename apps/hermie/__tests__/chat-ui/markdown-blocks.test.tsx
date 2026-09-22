@@ -50,7 +50,7 @@ function StreamingHarness({ chunks }: { chunks: string[] }) {
     }
   }, [chunks.length, index])
 
-  return <Markdown streaming text={chunks[index] ?? ''} />
+  return <Markdown text={chunks[index] ?? ''} />
 }
 
 describe('markdown block splitting', () => {
@@ -126,11 +126,12 @@ describe('Markdown streaming', () => {
 
     expect(settled.length).toBeGreaterThan(100)
 
-    // At most twice: once while the block WAS the tail and carried the
-    // streaming caret, once when the caret moved on to the next block. Never
+    // ONCE, now that nothing marks the tail. It was twice while the tail
+    // carried a streaming caret and rendered again when the caret moved on to
+    // the next block; the caret is gone — see `markdown/Block.tsx`. Never
     // per delta — that is the whole point.
     for (const raw of settled) {
-      expect(rendersByRaw.get(raw) ?? 0).toBeLessThanOrEqual(2)
+      expect(rendersByRaw.get(raw) ?? 0).toBeLessThanOrEqual(1)
     }
 
     // The budget, stated as a total. Without memoization this would be roughly

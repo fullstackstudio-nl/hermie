@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
-  "description": "Hermie \u2014 a mobile and desktop client for Hermes Agent",
+  "description": "Hermie — a mobile and desktop client for Hermes Agent",
   "homepage": "https://hermie.dev",
   "workspaces": [
     "apps/*",
@@ -13,7 +13,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "typecheck": "tsc -b",
+    "typecheck": "tsc -b && tsc -p packages/hermie-web/tsconfig.test.json",
     "typecheck:clean": "tsc -b --clean",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -23,14 +23,22 @@
     "test:app": "npm run test --workspace @hermie/app",
     "sync:hermes-shared": "node scripts/sync-hermes-shared.mjs",
     "sync:hermes-shared:check": "node scripts/sync-hermes-shared.mjs --check",
-    "icons": "node scripts/generate-app-icons.mjs",
-    "icons:check": "node scripts/generate-app-icons.mjs --check",
+    "contrast": "tsx scripts/check-contrast.ts",
+    "contrast:check": "tsx scripts/check-contrast.ts --check",
+    "icons": "node scripts/generate-app-icons.mjs && node scripts/generate-store-assets.mjs",
+    "icons:check": "node scripts/generate-app-icons.mjs --check && node scripts/generate-store-assets.mjs --check",
+    "licences": "node scripts/generate-third-party-licenses.mjs",
+    "licences:check": "node scripts/generate-third-party-licenses.mjs --check",
     "set-version": "node scripts/set-version.mjs",
     "fake-gateway": "tsx packages/fake-gateway/src/cli.ts",
+    "web:build": "npm run build --workspace @hermie/web && npm run export:web --workspace @hermie/app",
+    "web": "npm run web:build && node scripts/dev-web.mjs",
     "ios": "npm run ios --workspace @hermie/app",
     "android": "npm run android --workspace @hermie/app",
-    "macos": "npm run macos --workspace @hermie/app",
-    "prepare": "husky"
+    "android:release": "npm run android:release --workspace @hermie/app --",
+    "mac": "npm run mac --workspace @hermie/app --",
+    "prepare": "husky",
+    "screenshots:ios": "node scripts/screenshots-ios.mjs"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.6.1",
@@ -46,9 +54,5 @@
     "typescript": "~5.9.2",
     "typescript-eslint": "^8.20.0",
     "vitest": "^3.0.0"
-  },
-  "overrides": {
-    "react-native": "0.81.5",
-    "react": "19.1.0"
   }
 }

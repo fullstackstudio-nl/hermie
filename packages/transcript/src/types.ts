@@ -9,6 +9,7 @@
  * Nothing here filters. Verbosity and the bot-to-bot toggle are selectors
  * (`selectors.ts`); the reducer always keeps the full truth.
  */
+import type { CronDeliveryShape } from './cron-delivery'
 import type { ErrorSurface, SessionLiveInfo, Usage } from '@hermes/shared/gateway-events'
 
 /** Client-side verbosity filter. Purely a read-time concern. */
@@ -48,7 +49,23 @@ export interface ItemBase {
 export interface UserItem extends ItemBase {
   kind: 'user'
   text: string
-  /** `@image:` / `@file:` reference strings pulled out of the persisted text. */
+  /**
+   * The `@file:` / `@image:` REFERENCE strings this turn carries — never display
+   * names. One contract, whichever transport built the item:
+   *
+   * - a persisted row: the directives `stripUserText` lifted out of its text;
+   * - a local submit: the same directives, as `beginLocalTurn` projects them out
+   *   of the body it was handed — plus, for an image, a reference whose path
+   *   position holds only the file name, because `image.attach_bytes` takes the
+   *   bytes out of band and the gateway alone decides where they land.
+   *
+   * Everything else derives from this, and nothing stores a second copy: the chip
+   * name (`attachmentName` in the chat kit) and the reconciliation key
+   * (`attachmentsMatchKey`) both read the name off the reference. A display name
+   * stored here instead is a name the other side of the wire has never seen —
+   * which is fine while there is text to pair a turn on, and is how a file sent
+   * with no text came back as a second bubble.
+   */
   attachments?: string[]
   /** Submitted locally, not yet acknowledged by the gateway. */
   pending?: boolean
@@ -213,12 +230,23 @@ export interface StatusItem extends ItemBase {
 }
 
 export type NoticeKind =
+  /**
+   * The answer to a slash command the owner typed.
+   *
+   * Not the machine narrating itself: it is the PAYLOAD of something somebody
+   * asked for, which is why `selectors.ts` keeps it at every verbosity level and
+   * `NoticePill` opens it without being asked. Live-only — command output is
+   * never persisted, so no history row ever projects onto this kind.
+   */
+  | 'command'
   | 'model_switch'
   | 'personality_switch'
   | 'auto_continue'
   | 'process_complete'
   | 'async_delegation_complete'
   | 'internal_notification'
+  /** A `[System: …]` note nothing labelled, its wrapper already taken off. */
+  | 'system_note'
   | 'error'
   | 'notice'
   | 'reclaimed'
@@ -239,6 +267,25 @@ export interface NoticeItem extends ItemBase {
   body?: string
   /** Only on `noticeKind: 'process_complete'`: the blocks not yet attributed. */
   completions?: ProcessCompletionBlock[]
+}
+
+/**
+ * A scheduled job's report, delivered into this chat.
+ *
+ * Notice-class, not speech: it arrives on the `user` role because the turn it
+ * starts runs on that role, but nobody said it — the scheduler did. Detected
+ * from the header alone (`cron-delivery.ts`), because the wire carries no marker.
+ */
+export interface CronDeliveryItem extends ItemBase {
+  kind: 'cron_delivery'
+  /** The job name the header carried. */
+  jobName: string
+  /** `jobName` is the redactor's placeholder, not a name; do not title a card with it. */
+  nameRedacted?: boolean
+  /** The report itself, header removed. Empty when the header arrived without one. */
+  body: string
+  /** Which header matched, so a card can say how it got here. */
+  shape: CronDeliveryShape
 }
 
 export type RequestState = 'open' | 'answered' | 'cancelled'
@@ -295,6 +342,7 @@ export type TranscriptItem =
   | BotDmInItem
   | BotDmOutItem
   | ClarifyItem
+  | CronDeliveryItem
   | NoticeItem
   | StatusItem
   | SubagentGroupItem
@@ -324,6 +372,20 @@ export interface TurnState {
   startedAt?: number
   /** The assistant item currently receiving deltas. */
   assistantId?: string
+  /**
+   * The item holding THIS turn's thought.
+   *
+   * One turn is one thought, and the events that carry it do not all arrive
+   * while the same bubble is live: `reasoning.delta` streams before the first
+   * token, and `reasoning.available` comes out of `tool_progress`, which means
+   * it lands AFTER a tool call has already sealed that bubble. Resolving the
+   * target through `turn.assistantId` alone therefore started a second bubble
+   * for the same thinking, and the reader saw `Thought for 1s` twice with the
+   * same block under each — see `reasoningTargetId`.
+   *
+   * Cleared with the rest of the turn, so the next one thinks afresh.
+   */
+  reasoningId?: string
   /** True when WE submitted this turn; false means a foreign turn. */
   local: boolean
   /** Next `seq` to hand out. */
@@ -399,6 +461,35 @@ export const SUBAGENT_STREAM_CAP = 24
 
 /** The gap between history seqs; live items are handed the next multiple. */
 export const SEQ_STEP = 1000
+
+/**
+ * `id`, or the nearest spelling of it no item in `taken` is already using.
+ *
+ * `order` is a LIST, so an id it already holds becomes a SECOND entry pointing
+ * at one item: React reports "Encountered two children with the same key" and
+ * the reader sees the same bubble twice. No id in this package is unique on its
+ * own — a live one is minted from a counter, a persisted one from the gateway's
+ * row number, a tool one from `tool_id` — and a gateway that restarts under a
+ * live session hands all three out again from the beginning. So every id is put
+ * through here on its way into a transcript rather than trusted.
+ *
+ * The suffix is deliberately one an id never carries otherwise, and it only
+ * ever lands on the LATER of the two: an item already on screen keeps the id a
+ * list is keyed on, so nothing remounts.
+ */
+export function freeItemId(taken: Readonly<Record<string, unknown>>, id: string): string {
+  if (!taken[id]) {
+    return id
+  }
+
+  let attempt = 2
+
+  while (taken[`${id}#${attempt}`]) {
+    attempt += 1
+  }
+
+  return `${id}#${attempt}`
+}
 
 export function createChatState(botName: string, storedSessionId: string, resolvedSessionId: string): ChatState {
   return {

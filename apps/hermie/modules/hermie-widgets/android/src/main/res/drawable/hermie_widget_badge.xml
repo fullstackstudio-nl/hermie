@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The unread pill. Tinted at runtime so "needs input" can reuse it. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+  <solid android:color="@color/hermie_widget_accent" />
+  <corners android:radius="9dp" />
+</shape>

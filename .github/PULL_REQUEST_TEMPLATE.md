@@ -19,7 +19,7 @@
 - [ ] Ran on iOS simulator
 - [ ] Ran on a physical iPhone or iPad
 - [ ] Ran on Android
-- [ ] Ran on macOS
+- [ ] Ran on a Mac (the iPad build)
 - [ ] Tested against a real gateway
 
 Not verified:

@@ -1,15 +1,17 @@
 import { describe, expect, it } from 'vitest'
 
 import { reconcile, reconcileTail } from './reconcile'
-import { applyEvent, applyServerRequest, beginLocalTurn } from './reducer'
+import { applyEvent, applyResumeSnapshot, applyServerRequest, beginLocalTurn, confirmSubmit } from './reducer'
 import { rowsToItems, type TranscriptRow } from './rows-to-items'
 import { approvalRequest, dmDispatchTurn, streamedTurn } from './__fixtures__/events'
-import { dmReplyProcessText, rpcHistoryRows } from './__fixtures__/rows'
+import { cronBotChatText, dmReplyProcessText, rpcHistoryRows } from './__fixtures__/rows'
 import {
   type ApprovalItem,
   type BotDmOutItem,
   type ChatState,
   createChatState,
+  type CronDeliveryItem,
+  SEQ_STEP,
   type ToolItem,
   type UserItem
 } from './types'
@@ -144,11 +146,13 @@ describe('reconcileTail', () => {
   })
 
   it('drops a placeholder the tail turned out not to need', () => {
-    // Our own queued prompt: the optimistic bubble is already there, so the
-    // row pairs with it by text and never reaches the placeholder. Nothing
-    // will ever fill that bubble, so it must not stay on screen.
+    // A turn that started without us, whose row the tail then turns out to
+    // describe as ours: the optimistic bubble is already there, so the row
+    // pairs with it by text and never reaches the placeholder. Nothing will
+    // ever fill that bubble, so it must not stay on screen.
     let live = beginLocalTurn(fresh(), 'and then deploy', undefined, NOW)
 
+    live = confirmSubmit(live, { status: 'streaming' }, NOW)
     live = applyEvent(live, { type: 'message.start', seq: 1 }, NOW)
     live = { ...live, turn: { ...live.turn, local: false } }
     live = applyEvent(live, { type: 'message.start', seq: 2 }, NOW)
@@ -202,12 +206,68 @@ describe('reconcileTail', () => {
     expect(state.byRowId['99']).toBeDefined()
   })
 
+  it('fills a foreign placeholder with the cron card, not with an empty bubble', () => {
+    // A cron delivery starts a turn nobody local submitted, so the reducer stands
+    // a placeholder in first and the tail has to recognise the row as the author.
+    const live = run([{ type: 'message.start', seq: 1 }])
+    const placeholder = list(live)[0] as UserItem
+
+    expect(placeholder.unknownAuthor).toBe(true)
+
+    const state = reconcileTail(live, rowsToItems([{ role: 'user', row_id: 51, text: cronBotChatText }], 'rest'))
+
+    expect(state.items[placeholder.id]).toMatchObject({ kind: 'cron_delivery', jobName: 'Inbox scan', rowId: 51 })
+    expect(list(state).filter(item => item.kind === 'user' && item.unknownAuthor)).toHaveLength(0)
+    expect(state.turn.foreignReconcilePending).toBeUndefined()
+  })
+
   it('merges a row it already shows instead of duplicating it', () => {
     const live = reconcile(fresh(), rowsToItems(rpcHistoryRows, 'rpc'))
     const before = live.order.length
     const state = reconcileTail(live, rowsToItems(rpcHistoryRows.slice(-2), 'rpc'))
 
     expect(state.order.length).toBe(before)
+  })
+})
+
+describe('a cron delivery that was live before it was persisted', () => {
+  /** The chat was open and resuming when the scheduled turn was already running. */
+  const midDelivery = () => applyResumeSnapshot(fresh(), { inflight: { user: cronBotChatText }, running: true }, NOW)
+
+  const persisted = rowsToItems([{ role: 'user', row_id: 61, text: cronBotChatText, timestamp: 1_700_000_050 }], 'rest')
+
+  it('reconciles the live card and the persisted row onto ONE item', () => {
+    const state = reconcile(midDelivery(), persisted)
+    const cards = list(state).filter(item => item.kind === 'cron_delivery')
+
+    expect(cards).toHaveLength(1)
+    expect(cards[0]).toMatchObject({ rowId: 61, jobName: 'Inbox scan' })
+  })
+
+  it('does the same through a tail fetch, and a second sweep is a no-op', () => {
+    const once = reconcileTail(midDelivery(), persisted)
+
+    expect(once.order).toHaveLength(1)
+    expect(list(once)[0]).toMatchObject({ kind: 'cron_delivery', rowId: 61 })
+
+    const twice = reconcileTail(once, persisted)
+
+    expect(twice.order).toHaveLength(1)
+  })
+
+  it('needs no merge rule of its own: the persisted row carries the whole card', () => {
+    // `mergeWithLive` has no `cron_delivery` case on purpose. Proof: the live item
+    // and the reconciled one differ in nothing but the ids and bookkeeping the
+    // merge is there to preserve.
+    const live = list(midDelivery())[0] as CronDeliveryItem
+    const merged = list(reconcile(midDelivery(), persisted))[0] as CronDeliveryItem
+
+    expect(merged.id).toBe(live.id)
+    expect({ jobName: merged.jobName, body: merged.body, shape: merged.shape }).toEqual({
+      jobName: live.jobName,
+      body: live.body,
+      shape: live.shape
+    })
   })
 })
 
@@ -251,6 +311,27 @@ describe('a turn we sent ourselves coming back persisted', () => {
     expect(twice.order).toHaveLength(once.order.length)
   })
 
+  /**
+   * The list renders one cell per id, so an id is a KEY: change it and React
+   * unmounts the row and mounts a new one, which throws away every height the
+   * list had measured and re-measures it a frame later. That is indistinguishable
+   * on screen from the transcript jumping, and it was the fourth suspect for it.
+   *
+   * Adoption is where it would happen if it happened anywhere: the persisted row
+   * arrives with a durable `row_id` and the live bubble has an id of its own, and
+   * only one of the two may survive. It has to be the live one.
+   */
+  it('leaves every rendered key exactly where it was, twice over', () => {
+    const live = liveTurn()
+    const keys = live.order
+    const once = reconcileTail(live, rowsToItems(persistedRows, 'rest'))
+
+    expect(once.order).toEqual(keys)
+    expect(reconcileTail(once, rowsToItems(persistedRows, 'rest')).order).toEqual(keys)
+    // And through the other door, which takes the whole list rather than its tail.
+    expect(reconcile(once, rowsToItems(persistedRows, 'rest')).order).toEqual(keys)
+  })
+
   it('still appends a row that is genuinely new', () => {
     const state = reconcileTail(liveTurn(), rowsToItems(persistedRows, 'rest'))
     const next = reconcileTail(
@@ -259,5 +340,148 @@ describe('a turn we sent ourselves coming back persisted', () => {
     )
 
     expect(next.order).toHaveLength(state.order.length + 1)
+  })
+})
+
+/**
+ * Pairing on the attachments when there is no text to pair on.
+ *
+ * `reconcile` and `reconcileTail` both key the live side by what an item says, so
+ * an item that says nothing was never a candidate at all. A turn carrying only a
+ * file is exactly that — the directive is lifted out of the text — so the
+ * attachments have to count towards the key, and count in a way both sides can
+ * produce: the reference's base name, because the gateway alone decides the path
+ * an attached image lands on.
+ */
+describe('pairing a turn that says nothing but carries something', () => {
+  const REF = '@file:"/srv/work/uploads/hermie/2026-09-20/8setj4h3-ui.xml"'
+  const row = (text: string, rowId: number): TranscriptRow[] => [{ role: 'user', text, row_id: rowId, timestamp: 1 }]
+  const sent = (text: string, attachments: string[]) =>
+    confirmSubmit(beginLocalTurn(fresh(), text, attachments, NOW), { status: 'streaming' }, NOW)
+  const userItems = (state: ChatState) => list(state).filter((item): item is UserItem => item.kind === 'user')
+
+  it('adopts the row onto the bubble in a tail sweep', () => {
+    const next = reconcileTail(sent(REF, [REF]), rowsToItems(row(REF, 4), 'rest'))
+
+    expect(userItems(next)).toHaveLength(1)
+    expect(userItems(next)[0]?.rowId).toBe(4)
+  })
+
+  it('adopts it in a full re-hydration, keeping the bubble its id', () => {
+    const state = sent(REF, [REF])
+    const id = userItems(state)[0]?.id
+    const next = reconcile(state, rowsToItems(row(REF, 4), 'rest'))
+
+    expect(userItems(next)).toHaveLength(1)
+    expect(userItems(next)[0]?.id).toBe(id)
+  })
+
+  it('refuses to pair a different file, however similar the turn looks', () => {
+    const other = '@file:"/srv/work/uploads/hermie/2026-09-20/99xyzabc-ui.xml"'
+    const next = reconcileTail(sent(REF, [REF]), rowsToItems(row(other, 4), 'rest'))
+
+    expect(userItems(next)).toHaveLength(2)
+  })
+
+  it('pairs an attached image on its name, which is all the client was told', () => {
+    const next = reconcileTail(
+      sent('', ['@image:shot.png']),
+      rowsToItems(row('@image:/srv/work/.hermes/images/shot.png', 4), 'rest')
+    )
+
+    expect(userItems(next)).toHaveLength(1)
+    // The row's own directive wins: it is the durable one, and the path in it is
+    // where the file really is.
+    expect(userItems(next)[0]?.attachments).toEqual(['@image:/srv/work/.hermes/images/shot.png'])
+  })
+
+  it('pairs regardless of the order the two sides list two attachments in', () => {
+    const image = '@image:shot.png'
+    const next = reconcileTail(sent(REF, [REF, image]), rowsToItems(row(`${image}\n${REF}`, 4), 'rest'))
+
+    expect(userItems(next)).toHaveLength(1)
+  })
+
+  it('still pairs a turn that has words, whatever it carries', () => {
+    // The attachment must not become a second thing that has to match: an
+    // ordinary message's row carries no attachments at all.
+    const next = reconcileTail(sent('just words', []), rowsToItems(row('just words', 4), 'rest'))
+
+    expect(userItems(next)).toHaveLength(1)
+  })
+})
+
+/**
+ * The gateway restarting under a live session.
+ *
+ * Found by pulling the fake gateway out from under the running app and sending
+ * twice: React reported `Encountered two children with the same key … .$o=29000`
+ * — which is `o:9000` once React's key escaping is undone — and the same user
+ * bubble was drawn twice.
+ *
+ * `o:` ids are minted from `turn.nextSeq`, and `rebuild` used to re-derive that
+ * counter from the transcript's LENGTH. A rebuilt session answers with fewer
+ * rows than the client holds, so the re-hydration shrank the list and moved the
+ * counter back onto a seq that was still in use. `order` is a list, so the next
+ * send pushed an id it already held.
+ */
+describe('a re-hydration that shortens the transcript', () => {
+  /** Seven rows is the seeded Bot Chat, which is the shape this was found in. */
+  const sevenRows = Array.from({ length: 7 }, (_, index): TranscriptRow => ({
+    role: index % 2 ? 'assistant' : 'user',
+    text: `row ${index + 1}`,
+    row_id: index + 1,
+    timestamp: 1_700_000_000 + index
+  }))
+
+  /** Three sends the dead gateway never persisted, on top of the seven rows. */
+  const afterThreeUnpersistedSends = (): ChatState =>
+    ['one', 'two', 'three'].reduce(
+      (state, text) => beginLocalTurn(state, text, undefined, NOW),
+      reconcile(fresh(), rowsToItems(sevenRows, 'rpc'))
+    )
+
+  it('never moves the id counter backwards', () => {
+    const live = afterThreeUnpersistedSends()
+    // The rebuilt session is a row short of what the client holds.
+    const next = reconcile(live, rowsToItems(sevenRows.slice(0, 6), 'rpc'))
+
+    expect(next.turn.nextSeq).toBeGreaterThanOrEqual(live.turn.nextSeq)
+  })
+
+  it('leaves no two rows sharing an id when the next message is sent', () => {
+    const rehydrated = reconcile(afterThreeUnpersistedSends(), rowsToItems(sevenRows.slice(0, 6), 'rpc'))
+    const next = beginLocalTurn(rehydrated, 'after the restart', undefined, NOW)
+
+    expect(new Set(next.order).size).toBe(next.order.length)
+  })
+
+  it('draws the message that was sent once, and the ones before it once each', () => {
+    const rehydrated = reconcile(afterThreeUnpersistedSends(), rowsToItems(sevenRows.slice(0, 6), 'rpc'))
+    const next = beginLocalTurn(rehydrated, 'after the restart', undefined, NOW)
+    const texts = next.order.map(id => next.items[id]).map(item => (item?.kind === 'user' ? item.text : ''))
+
+    expect(texts.filter(text => text === 'after the restart')).toEqual(['after the restart'])
+    expect(texts.filter(text => text === 'three')).toEqual(['three'])
+  })
+
+  /**
+   * The seam, on its own: an id that arrives already taken never becomes a
+   * second entry in `order`. `nextSeq` is monotonic now, so nothing in the app
+   * should reach this — which is exactly why it is worth a case of its own.
+   */
+  it('keeps both items when something mints an id the transcript already holds', () => {
+    const live = afterThreeUnpersistedSends()
+    // The seq the FIRST of those three sends was minted at, so the id the next
+    // one asks for is one the transcript is already holding.
+    const spent = live.turn.nextSeq - 3 * SEQ_STEP
+
+    expect(live.items[`o:${spent}`]).toBeDefined()
+
+    const taken = { ...live, turn: { ...live.turn, nextSeq: spent } }
+    const next = beginLocalTurn(taken, 'after the restart', undefined, NOW)
+
+    expect(new Set(next.order).size).toBe(next.order.length)
+    expect(next.order).toHaveLength(live.order.length + 1)
   })
 })

@@ -56,7 +56,7 @@ it('says the run is read-only and offers no composer', async () => {
 
   await screen.findByText('Check the VM and report.')
 
-  expect(screen.getByText('Read-only: a routine run cannot be continued from here.')).toBeTruthy()
+  expect(screen.getByText('Read-only: a cron run cannot be continued from here.')).toBeTruthy()
   expect(screen.queryByTestId('composer-input')).toBeNull()
 })
 
@@ -64,4 +64,30 @@ it('says so when the run has no transcript', async () => {
   renderScreen(<CronRunScreen controller={controllerWith([])} job={JOB} onClose={jest.fn()} run={RUN} />)
 
   await waitFor(() => expect(screen.getByText('This run recorded no messages.')).toBeTruthy())
+})
+
+/**
+ * A run session is titled with its job's name, so the header used to print that
+ * name twice in two sizes — the same stutter the crons list and Activity were
+ * cured of. The subtitle earns its line only where the run calls itself
+ * something else.
+ */
+it('does not print the job’s name under a run that is already called that', async () => {
+  renderScreen(<CronRunScreen controller={controllerWith(ROWS)} job={JOB} onClose={jest.fn()} run={RUN} />)
+
+  await screen.findByText('Check the VM and report.')
+
+  // Once, as the title. A run with a title of its own still names its job.
+  expect(screen.getAllByText(JOB.name)).toHaveLength(1)
+
+  renderScreen(
+    <CronRunScreen
+      controller={controllerWith(ROWS)}
+      job={JOB}
+      onClose={jest.fn()}
+      run={{ ...RUN, title: 'Manual re-run' }}
+    />
+  )
+
+  await waitFor(() => expect(screen.getByText(new RegExp(JOB.name, 'u'))).toBeTruthy())
 })

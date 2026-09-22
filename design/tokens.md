@@ -1,8 +1,24 @@
 # Hermie design tokens — Messenger direction
 
+> **The app background is not in this table.** It was, as `#F2F2F7` / `#000000`,
+> and neither string appears anywhere in `apps/hermie/src` any more. The floor is
+> a property of the THEME PRESET, of which there are three in two schemes, and
+> `apps/hermie/src/ui/themes.ts` is the only place it is written down:
+>
+> | Preset   | Light     | Dark      |
+> | -------- | --------- | --------- |
+> | Blue     | `#EAF3FF` | `#070F1D` |
+> | Graphite | `#F0F1F3` | `#2E3138` |
+> | Lime     | `#F3FAE4` | `#0B1206` |
+>
+> A reader can also make one, so even those six are the shipped set rather than
+> the possible set. Blue is the default, and it is what the browser build's
+> document template and `app.config.ts`'s splash colours are painting before the
+> app boots — which is why a stale pair here was worth more than a stale table
+> usually is.
+
 | Role                            | Light     | Dark      |
 | ------------------------------- | --------- | --------- |
-| bg                              | `#F2F2F7` | `#000000` |
 | surface                         | `#FFFFFF` | `#111113` |
 | surfaceRaised / received bubble | `#E9E9ED` | `#28282C` |
 | text                            | `#17171B` | `#F5F5F7` |

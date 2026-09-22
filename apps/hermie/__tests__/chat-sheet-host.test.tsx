@@ -11,6 +11,7 @@
 import { act, fireEvent, screen } from '@testing-library/react-native'
 import { useState } from 'react'
 
+import { SHEET_ANIMATION_MS } from '../src/ui/BottomSheet'
 import { ChatSheetHost, type RequestItem } from '../src/features/chats/ChatSheetHost'
 import {
   initialSheetHostState,
@@ -100,8 +101,7 @@ function Harness({
   manual = 'none',
   onCloseRequest = jest.fn(),
   onRespondApproval = jest.fn(),
-  onShowRequest,
-  answeredDismissMs
+  onShowRequest
 }: {
   items: RequestItem[]
   open?: string
@@ -109,9 +109,15 @@ function Harness({
   onCloseRequest?: (item: RequestItem) => void
   onRespondApproval?: (item: RequestItem, choice: string) => void
   onShowRequest?: (item: RequestItem) => void
-  answeredDismissMs?: number
 }) {
   const [sheet, setSheet] = useState(manual)
+
+  // The chat screen keeps the questions the reader has put aside and stops
+  // offering them, which is what takes a sheet off the screen at all. Modelled
+  // here rather than stubbed, because the host restores a question it is still
+  // being handed — see `keepHeld`.
+  const [aside, setAside] = useState<string[]>([])
+  const open_ = open && !aside.includes(open) ? open : undefined
 
   return (
     <ChatSheetHost
@@ -120,15 +126,17 @@ function Harness({
       findRequest={id => items.find(item => item.id === id)}
       manual={sheet}
       onCloseManual={() => setSheet('none')}
-      onCloseRequest={onCloseRequest}
+      onCloseRequest={item => {
+        setAside(current => (current.includes(item.id) ? current : [...current, item.id]))
+        onCloseRequest(item)
+      }}
       onLockClarify={jest.fn()}
       onRespondApproval={onRespondApproval}
       onSubmitClarify={jest.fn()}
       options={OPTIONS}
       tapGuardMs={0}
-      {...(answeredDismissMs === undefined ? {} : { answeredDismissMs })}
       {...(onShowRequest ? { onShowRequest } : {})}
-      {...(open ? { request: items.find(item => item.id === open) } : {})}
+      {...(open_ ? { request: items.find(item => item.id === open_) } : {})}
     />
   )
 }
@@ -189,45 +197,56 @@ describe('ChatSheetHost', () => {
     expect(screen.getByTestId('approval-resolution')).toHaveTextContent('Timed out')
   })
 
-  it('closes itself a moment after the reader answers it here', () => {
+  it('leaves on the tap, before the answer has been anywhere', () => {
     jest.useFakeTimers()
 
+    // The sheet no longer waits for `approval.respond` to land and then sits
+    // for two seconds saying what the reader just did. The tap starts the
+    // slide-out, and the RPC travels behind it: `onRespondApproval` is called
+    // with the question already off the screen.
     try {
       const onCloseRequest = jest.fn()
-      const answered: RequestItem = { ...approvalItem, answer: 'once', state: 'answered' }
-      const view = renderHost(
+      const onRespondApproval = jest.fn()
+      renderHost(
         <Harness
-          answeredDismissMs={2000}
           items={[approvalItem]}
           onCloseRequest={onCloseRequest}
+          onRespondApproval={onRespondApproval}
           open={approvalItem.id}
         />
       )
 
       fireEvent.press(screen.getByTestId('approval-choice-once'))
 
-      view.rerender(
-        withProviders(<Harness answeredDismissMs={2000} items={[answered]} onCloseRequest={onCloseRequest} />)
-      )
+      expect(onRespondApproval).toHaveBeenCalledWith(expect.objectContaining({ id: approvalItem.id }), 'once')
+      // Off the SCREEN, still open on the gateway: the question keeps its place
+      // in the transcript until the answer lands, and comes back with its
+      // `Answer` button if it does not.
+      expect(onCloseRequest).toHaveBeenCalledWith(expect.objectContaining({ id: approvalItem.id }))
 
-      expect(screen.getByTestId('approval-resolution')).toBeTruthy()
-
+      // And it is off the screen one slide-out later, with the question still
+      // open in `items`: nothing in this test ever answers it.
       act(() => {
-        jest.advanceTimersByTime(2000)
+        jest.advanceTimersByTime(SHEET_ANIMATION_MS * 2)
       })
 
-      // …and then the slide-out it starts.
-      act(() => {
-        jest.advanceTimersByTime(500)
-      })
-
-      // Gone, and without a dismissal being recorded: an answered question is
-      // not one the reader put aside.
-      expect(screen.queryByTestId('approval-resolution')).toBeNull()
-      expect(onCloseRequest).not.toHaveBeenCalled()
+      expect(screen.queryByTestId('approval-sheet')).toBeNull()
     } finally {
       jest.useRealTimers()
     }
+  })
+
+  it('answers a question exactly once, however often the button is pressed', () => {
+    // A closing sheet SLIDES, so its buttons are under the finger for the whole
+    // animation — and the answer no longer waits for anything that would make a
+    // second press a no-op on its own.
+    const onRespondApproval = jest.fn()
+    renderHost(<Harness items={[approvalItem]} onRespondApproval={onRespondApproval} open={approvalItem.id} />)
+
+    fireEvent.press(screen.getByTestId('approval-choice-once'))
+    fireEvent.press(screen.getByTestId('approval-choice-once'))
+
+    expect(onRespondApproval).toHaveBeenCalledTimes(1)
   })
 
   it('re-arms the tap guard for the next question rather than inheriting the last one', () => {

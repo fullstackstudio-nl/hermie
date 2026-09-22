@@ -8,6 +8,7 @@ import { useMemo } from 'react'
 import { ScrollView, View } from 'react-native'
 
 import { MONOSPACE } from '../markdown'
+import { directTouchPanRef } from '../platform/pointer-drag'
 import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
 import { parseUnifiedDiff, type DiffLine } from './diff'
@@ -57,7 +58,7 @@ export function DiffView({ diff, maxLines = 160, testID }: DiffViewProps) {
   return (
     <View
       style={{
-        borderColor: theme.colors.border,
+        borderColor: theme.hairline,
         borderRadius: theme.radii.lg,
         borderWidth: 1,
         marginTop: theme.space.sm,
@@ -68,6 +69,7 @@ export function DiffView({ diff, maxLines = 160, testID }: DiffViewProps) {
       <ScrollView
         directionalLockEnabled
         horizontal
+        ref={directTouchPanRef}
         showsHorizontalScrollIndicator={false}
         // A horizontal `ScrollView` grows to fill its column unless told not to.
         style={{ flexGrow: 0 }}

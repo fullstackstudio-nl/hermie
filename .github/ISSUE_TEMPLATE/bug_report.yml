@@ -40,8 +40,8 @@ body:
       options:
         - iPhone
         - iPad
+        - Mac (iPad build)
         - Android
-        - macOS
     validations:
       required: true
 
@@ -62,7 +62,6 @@ body:
         - Built from source
         - TestFlight
         - Play internal testing
-        - macOS download
         - Other
     validations:
       required: true

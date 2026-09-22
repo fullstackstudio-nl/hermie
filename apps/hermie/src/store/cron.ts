@@ -1,14 +1,15 @@
 /**
- * Routines state.
+ * Crons state.
  *
  * Like the other stores here this is a plain reducer over data the gateway
  * already sent: the round trips live in `features/cron/cron-controller.ts`, so
  * this file can be read (and tested) without a socket in sight.
  *
- * Two things are worth knowing about the shape. The list is the WS
- * `cron.manage {action:'list'}` answer and nothing else, so `gatewayRunning`
- * belongs to the list rather than to a job — it is `gateway_running` from that
- * same reply, and it is what the banner reads. And a detail read never replaces
+ * Two things are worth knowing about the shape. The list is the HTTP
+ * `GET /api/cron/jobs?profile=all` answer, which is the only one that spans
+ * every profile; `gatewayRunning` rides along from a separate WS `cron.manage`
+ * call, so it belongs to the list rather than to a job, and it is `null` — not
+ * false — when that call did not answer. And a detail read never replaces
  * a list row: `details` is a separate map, because the detail read is the only
  * one that carries the full prompt and losing it on the next list refresh would
  * empty the editor mid-edit.

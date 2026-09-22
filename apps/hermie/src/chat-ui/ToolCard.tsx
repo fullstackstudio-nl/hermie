@@ -9,20 +9,66 @@
  * Silent tools (`todo`, `react_to_message`) render NOTHING while they succeed —
  * their UI is somewhere else entirely — but they do render when they fail,
  * because a failure nobody can see is the worst of both.
+ *
+ * ## The inline answer
+ *
+ * ADR-0010 keeps the sheet: a question the agent is BLOCKED on has to arrive in
+ * front of the reader rather than wait somewhere in a scrolled-away transcript.
+ * What the sheet cannot do is answer the reader who has already scrolled to the
+ * card, read the arguments, and knows what they want — for them the sheet is a
+ * second surface asking a question they have finished thinking about.
+ *
+ * So `approval` draws the server's choices ON the card, in the server's order,
+ * with the same rule the sheet follows: the buttons are exactly `choices` and
+ * never a set this component invented. One tap answers, and because both
+ * surfaces read the same request store the sheet goes down with it.
+ *
+ * It is a PROP rather than a lookup, and that is the honest shape: the gateway's
+ * approval carries a tool NAME and no tool-call id (see docs/platform-notes.md),
+ * so only the host can decide which card a question belongs to, and only the
+ * host can decline to decide when two calls share a name.
  */
 import { useState } from 'react'
 import { ActivityIndicator, Pressable, View } from 'react-native'
 
 import { MONOSPACE } from '../markdown'
-import { Text } from '../ui/primitives'
+import { Button, Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
+import { Icon, ICON_SIZE } from '../ui/Icon'
 import { CONTROL_MIN_HEIGHT, TAP_SLOP } from '../ui/tokens'
 import { DiffView } from './DiffView'
 import { clipInline, formatDuration } from './format'
 import { chatStrings } from './strings'
 import { argumentRows, extractToolErrorMessage, formatToolResultSummary } from './tool-result-summary'
 import { isSilentTool, toolFamily, toolGlyph } from './tool-render-class'
+import { useLedgerWidth } from './primitives/Bubble'
 import type { Presentation, ToolItem } from './types'
+
+/**
+ * A question waiting on this card, as the little the card needs to draw it.
+ *
+ * Not the `ApprovalItem`: the card has no business knowing about request ids or
+ * about the queue, and a shape this small is one a test can state in a line.
+ */
+export interface InlineApproval {
+  /** Exactly the server's `choices`, in the server's order. Never invented. */
+  choices: readonly string[]
+  /** `choice` is one of `choices`, verbatim. */
+  onRespond: (choice: string) => void
+}
+
+/** `always` → "Always allow"; an unknown choice keeps its own name. */
+function choiceLabel(choice: string): string {
+  return chatStrings.approval.choices[choice] ?? choice.replace(/_/gu, ' ')
+}
+
+function choiceVariant(choice: string): 'primary' | 'secondary' | 'danger' {
+  if (choice === 'deny') {
+    return 'danger'
+  }
+
+  return choice === 'once' ? 'primary' : 'secondary'
+}
 
 export interface ToolCardProps {
   item: ToolItem
@@ -30,6 +76,14 @@ export interface ToolCardProps {
   /** Controlled disclosure; omit to let the card manage its own. */
   expanded?: boolean
   onToggleExpanded?: (expanded: boolean) => void
+  /**
+   * An open question about THIS call, answerable here.
+   *
+   * Absent for every card the host has not linked to a question, which is all
+   * of them most of the time. See the note at the top about why the host
+   * decides and not the card.
+   */
+  approval?: InlineApproval
 }
 
 const LONG_VALUE_CHARS = 280
@@ -61,12 +115,12 @@ function Truncatable({ value, testID }: { value: string; testID?: string }) {
       {long ? (
         <Pressable
           accessibilityRole="button"
-          accessibilityState={{ expanded: open }}
+          aria-expanded={open}
           hitSlop={TAP_SLOP}
           onPress={() => setOpen(current => !current)}
           style={{ justifyContent: 'center', minHeight: CONTROL_MIN_HEIGHT }}
         >
-          <Text color="accent" variant="caption">
+          <Text color="accentText" variant="meta">
             {open ? chatStrings.tool.showLess : chatStrings.tool.showMore}
           </Text>
         </Pressable>
@@ -99,8 +153,9 @@ function oneLineSummary(item: ToolItem): string {
   return ''
 }
 
-export function ToolCard({ item, presentation = 'collapsed', expanded, onToggleExpanded }: ToolCardProps) {
+export function ToolCard({ item, presentation = 'collapsed', expanded, onToggleExpanded, approval }: ToolCardProps) {
   const theme = useTheme()
+  const maxWidth = useLedgerWidth()
   // `null` means "the user has not decided", so a verbosity change still opens
   // or closes the card; one tap pins it and verbosity stops overriding it.
   const [selfExpanded, setSelfExpanded] = useState<boolean | null>(null)
@@ -136,12 +191,16 @@ export function ToolCard({ item, presentation = 'collapsed', expanded, onToggleE
   return (
     <View
       style={{
-        backgroundColor: theme.colors.surfaceRaised,
+        backgroundColor: theme.elevation.e3c,
         borderLeftColor: failed ? theme.colors.danger : 'transparent',
         borderLeftWidth: failed ? 3 : 0,
         borderRadius: theme.radii.xl,
+        // Inside a transcript the cap is the bubble's; the margin is what keeps
+        // a card off the gutter on a column narrow enough for the cap to be the
+        // whole of it.
         marginRight: 26,
         marginVertical: theme.space.md,
+        maxWidth,
         overflow: 'hidden'
       }}
       testID={`tool-card-${item.id}`}
@@ -149,7 +208,7 @@ export function ToolCard({ item, presentation = 'collapsed', expanded, onToggleE
       <Pressable
         accessibilityLabel={`${item.name}. ${summaryLine}`}
         accessibilityRole="button"
-        accessibilityState={{ expanded: isExpanded }}
+        aria-expanded={isExpanded}
         onPress={toggle}
         style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
         testID={`tool-toggle-${item.id}`}
@@ -162,12 +221,12 @@ export function ToolCard({ item, presentation = 'collapsed', expanded, onToggleE
             padding: theme.space.md
           }}
         >
-          <Text color={failed ? 'danger' : 'textMuted'} style={{ fontSize: 15, width: 22 }}>
+          <Text color={failed ? 'dangerText' : 'textMuted'} style={{ fontSize: 15, width: 22 }}>
             {failed ? '!' : toolGlyph(family)}
           </Text>
 
           <View style={{ flex: 1, gap: 2 }}>
-            <Text color={failed ? 'danger' : 'text'} style={{ fontSize: 14, fontWeight: '600' }}>
+            <Text color={failed ? 'dangerText' : 'text'} style={{ fontSize: 14, fontWeight: '600' }}>
               {item.name}
             </Text>
             {summaryLine ? (
@@ -185,16 +244,51 @@ export function ToolCard({ item, presentation = 'collapsed', expanded, onToggleE
             </Text>
           ) : null}
 
-          <Text color="textMuted" style={{ fontSize: 16 }}>
-            {isExpanded ? '⌄' : '›'}
-          </Text>
+          <Icon
+            color={theme.colors.textMuted}
+            name={isExpanded ? 'chevronDown' : 'chevronRight'}
+            size={ICON_SIZE.inline}
+          />
         </View>
       </Pressable>
+
+      {/*
+        Above the body, not inside it.
+
+        A collapsed card is one line, and a question folded away inside a
+        disclosure the reader has to open first is a question that is not being
+        asked. It sits under the summary row either way, which is where the eye
+        already is.
+      */}
+      {approval ? (
+        <View
+          style={{
+            borderTopColor: theme.hairline,
+            borderTopWidth: 1,
+            gap: theme.space.sm,
+            padding: theme.space.md
+          }}
+          testID={`tool-approval-${item.id}`}
+        >
+          <Text color="textMuted" variant="meta">
+            {chatStrings.approval.title}
+          </Text>
+          {approval.choices.map(choice => (
+            <Button
+              key={choice}
+              onPress={() => approval.onRespond(choice)}
+              testID={`tool-approval-${item.id}-${choice}`}
+              title={choiceLabel(choice)}
+              variant={choiceVariant(choice)}
+            />
+          ))}
+        </View>
+      ) : null}
 
       {isExpanded ? (
         <View
           style={{
-            borderTopColor: theme.colors.border,
+            borderTopColor: theme.hairline,
             borderTopWidth: 1,
             padding: theme.space.md,
             paddingTop: theme.space.xs
@@ -204,7 +298,7 @@ export function ToolCard({ item, presentation = 'collapsed', expanded, onToggleE
           {item.outputRisk ? (
             <View
               style={{
-                backgroundColor: theme.colors.surface,
+                backgroundColor: theme.elevation.e3c,
                 borderColor: theme.colors.danger,
                 borderRadius: theme.radii.md,
                 borderWidth: 1,
@@ -214,7 +308,7 @@ export function ToolCard({ item, presentation = 'collapsed', expanded, onToggleE
               }}
               testID={`tool-risk-${item.id}`}
             >
-              <Text color="danger" style={{ fontSize: 12, fontWeight: '600' }}>
+              <Text color="dangerText" style={{ fontSize: 12, fontWeight: '600' }}>
                 {`${chatStrings.tool.riskTitle} · ${item.outputRisk.risk}`}
               </Text>
               {item.outputRisk.findings.map((finding, index) => (
@@ -249,7 +343,7 @@ export function ToolCard({ item, presentation = 'collapsed', expanded, onToggleE
           {failed ? (
             <>
               <SectionLabel>{chatStrings.tool.failed}</SectionLabel>
-              <Text color="danger" selectable style={{ fontSize: 13, lineHeight: 19 }}>
+              <Text color="dangerText" selectable style={{ fontSize: 13, lineHeight: 19 }}>
                 {errorText}
               </Text>
             </>

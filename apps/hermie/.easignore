@@ -11,13 +11,19 @@ dist/
 coverage/
 *.tsbuildinfo
 .expo/
-ios/
-android/
 DerivedData/
+build/
 
-# The macOS target is built by Xcode on a Mac, never on an EAS worker, and it is
-# the largest directory in the repository. See docs/release.md.
-macos/
+# The two GENERATED native projects, spelled with their parent directory.
+#
+# A bare `ios/` looks right and is wrong: these patterns match at any depth, so
+# it also swallows `modules/hermie-mac/ios/`, and an archive missing that builds
+# an app whose local Expo module simply is not there. `npx expo-doctor` fails on
+# it, which is how this was found. Naming the parent cannot match anything under
+# `modules/`, and if the archive root ever changes the only cost is uploading a
+# directory EAS regenerates anyway.
+hermie/ios/
+hermie/android/
 
 # Documentation, design sources and screenshots
 docs/

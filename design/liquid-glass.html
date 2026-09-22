@@ -1,0 +1,3026 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light" data-wall="blue">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hermie — Liquid Glass direction</title>
+<link rel="icon" href="data:,">
+<style>
+/* ============================================================
+   HERMIE — LIQUID GLASS
+   Self-contained mockup. No external requests, no web fonts.
+   Section 1  tokens
+   Section 2  base + page chrome
+   Section 3  glass primitives
+   Section 4  sidebar
+   Section 5  chat: bubbles, markdown, machine events, cards
+   Section 6  composer + sheet
+   Section 7  frames (wide, phone) + component board
+   ============================================================ */
+
+/* ---------- 1. TOKENS: structural (theme-independent) ---------- */
+:root{
+  /* type */
+  --font: -apple-system, "SF Pro Text", "SF Pro Display", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+
+  --t-title: 700 28px/32px var(--font);
+  --t-title-wide: 700 30px/34px var(--font);
+  --t-sheet: 700 21px/26px var(--font);
+  --t-name: 600 17px/22px var(--font);
+  --t-body: 400 17px/25px var(--font);
+  --t-body-read: 400 17px/27px var(--font);
+  --t-preview: 400 15px/20px var(--font);
+  --t-meta: 400 13px/17px var(--font);
+  --t-micro: 600 11px/14px var(--font);
+  --t-code: 400 13.5px/21px var(--mono);
+  --track-title: -0.022em;
+  --track-micro: 0.055em;
+
+  /* spacing scale */
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:20px; --s6:24px; --s8:32px; --s10:40px; --s12:48px;
+  --gap-window:14px;
+
+  /* radii */
+  --r-panel:30px; --r-sheet:28px; --r-bubble:22px; --r-tail:6px;
+  --r-card:18px; --r-inset:12px; --r-pill:999px; --r-thumb:14px;
+  --r-phone:46px; --r-frame:22px;
+
+  /* control sizes */
+  --ctl:38px;          /* round glass control, wide layout */
+  --ctl-phone:40px;
+  --avatar-list:48px;
+  --avatar-head:38px;
+  --row-h:74px;
+  --bead:14px;         /* presence bead on a 48px avatar */
+
+  /* bubble width rule */
+  --bubble-max: min(68%, 640px);
+
+  /* blur */
+  --blur-panel: blur(36px) saturate(185%);
+  --blur-float: blur(24px) saturate(175%);
+  --blur-sheet: blur(46px) saturate(180%);
+  --blur-scrim: blur(3px) saturate(115%);
+
+  /* motion */
+  --dur-micro:120ms; --dur-fast:180ms; --dur-base:260ms; --dur-sheet:420ms;
+  --ease-out: cubic-bezier(.22,.61,.36,1);
+  --ease-in-out: cubic-bezier(.4,0,.2,1);
+  --ease-spring: cubic-bezier(.34,1.28,.5,1);
+
+  /* fold */
+  --fold-h: 352px;   /* ~14 lines at 25px */
+}
+
+/* ---------- 1b. TOKENS: light ---------- */
+:root[data-theme="light"]{
+  color-scheme: light;
+  --studio:#EDEFF4;
+  --studio-2:#E4E7EE;
+
+  --text:#12151C;
+  --text-2:#4B5462;
+  --text-3:#586171;
+  --on-accent:#FFFFFF;
+
+  --accent:#1668E3;          /* solid action fill */
+  --accent-text:#0B57C4;     /* accent used as text/icon on glass */
+  --accent-soft:rgba(22,104,227,.12);
+  --bub-out-top:#2A72DC;     /* white body text = 4.67:1 */
+  --bub-out-bot:#0F4FBE;     /* white body text = 7.2:1  */
+
+  --danger:#C0293A;
+  --danger-text:#A81F30;
+  --danger-soft:rgba(192,41,58,.12);
+  --ok:#1C8547;
+  --ok-text:#116038;
+  --warn-text:#865600;
+
+  /* presence */
+  --pres-online:#20A24B;
+  --pres-working:#1668E3;
+  --pres-input:#E09000;
+  --pres-offline:#8A93A3;
+
+  /* glass */
+  --glass-panel:
+    linear-gradient(155deg, rgba(255,255,255,.74) 0%, rgba(255,255,255,.48) 46%, rgba(255,255,255,.60) 100%);
+  --glass-float:
+    linear-gradient(170deg, rgba(255,255,255,.80) 0%, rgba(255,255,255,.58) 100%);
+  --glass-sheet:
+    linear-gradient(180deg, rgba(255,255,255,.86) 0%, rgba(255,255,255,.72) 100%);
+  --glass-card:
+    linear-gradient(170deg, rgba(255,255,255,.70) 0%, rgba(255,255,255,.52) 100%);
+  --tint-1: rgba(255,255,255,.52);   /* level-3 tint, no blur */
+  --tint-2: rgba(255,255,255,.34);
+  --tint-sunk: rgba(14,32,64,.055);  /* inset field / code well */
+  --hair: rgba(16,38,78,.13);
+  --hair-soft: rgba(16,38,78,.08);
+
+  /* frosted incoming bubble + the reading tint that guarantees AA */
+  --bub-in: linear-gradient(180deg, rgba(255,255,255,.76), rgba(244,248,255,.64));
+  --bub-in-read: linear-gradient(180deg, rgba(255,255,255,.93), rgba(243,247,255,.88));
+  --bub-dm: linear-gradient(180deg, rgba(243,238,255,.88), rgba(235,229,253,.80));
+  --dm-chip-text:#5B3E97;
+
+  /* edges + shadows */
+  --edge:
+    inset 1.5px 1.5px 0 -0.5px rgba(255,255,255,.92),
+    inset -1px -1px 0 -0.5px rgba(255,255,255,.40),
+    inset 0 0 0 1px rgba(255,255,255,.30);
+  --edge-soft:
+    inset 1px 1px 0 -0.5px rgba(255,255,255,.80),
+    inset 0 0 0 1px rgba(255,255,255,.26);
+  --sh-panel: 0 30px 64px -22px rgba(14,40,86,.40), 0 10px 26px -14px rgba(14,40,86,.28);
+  --sh-float: 0 14px 30px -12px rgba(14,40,86,.30), 0 3px 10px -6px rgba(14,40,86,.20);
+  --sh-card: 0 6px 16px -10px rgba(14,40,86,.24);
+  --sh-sheet: 0 -18px 60px -16px rgba(14,40,86,.34);
+  --sh-frame: 0 40px 90px -30px rgba(18,32,60,.45), 0 12px 30px -16px rgba(18,32,60,.30);
+}
+
+/* ---------- 1c. TOKENS: dark ---------- */
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --studio:#0B0D12;
+  --studio-2:#141821;
+
+  --text:#F3F6FB;
+  --text-2:#C8D2E0;
+  --text-3:#CBD5E4;
+  --on-accent:#FFFFFF;
+
+  --accent:#2C7BEA;
+  --accent-text:#B4D6FF;
+  --accent-soft:rgba(90,164,255,.18);
+  --bub-out-top:#2A72DC;   /* white body text = 4.63:1 */
+  --bub-out-bot:#0F52C2;   /* white body text = 6.99:1 */
+
+  --danger:#D8465A;
+  --danger-text:#FFC2CD;
+  --danger-soft:rgba(255,120,135,.16);
+  --ok:#5CCB86;
+  --ok-text:#8FE3B0;
+  --warn-text:#FFCB61;
+
+  --pres-online:#3ED374;
+  --pres-working:#5AA4FF;
+  --pres-input:#FFB531;
+  --pres-offline:#7E8798;
+
+  /* ---- dark elevation ladder ----------------------------------
+     The first dark pass read as one flat black field. Every dark
+     surface now sits on a named rung of a single blue-slate ramp,
+     each rung is a visible step lighter than the one below it, and
+     every rung carries a hairline stroke so the edge is readable
+     even where two rungs meet. Ratios are in liquid-glass-tokens.md.
+       e0 wallpaper  e1 panel  e2 row  e2s selected row
+       e3 bubble/card  e4 control
+     ------------------------------------------------------------- */
+  --e0:#0A1830;   /* wallpaper floor, deep but blue — never #000 */
+  --e1:#1C2A45;   /* floating panel */
+  --e2:#28385A;   /* list row hover, inset group */
+  --e2s:#334670;  /* selected row */
+  --e3:#3E5480;   /* incoming bubble */
+  --e3c:#2F4066;  /* machine card — cooler, one notch under the bubble */
+  --e3f:#425A88;  /* composer / header float */
+  --e4:#50699A;   /* round controls, chips */
+
+  --glass-panel:
+    linear-gradient(155deg, rgba(255,255,255,.10) 0%, rgba(255,255,255,.03) 50%, rgba(255,255,255,.07) 100%),
+    linear-gradient(rgba(28,42,69,.80), rgba(28,42,69,.80));
+  --glass-float:
+    linear-gradient(170deg, rgba(255,255,255,.12) 0%, rgba(255,255,255,.05) 100%),
+    linear-gradient(rgba(66,90,136,.74), rgba(66,90,136,.74));
+  --glass-sheet:
+    linear-gradient(180deg, rgba(255,255,255,.11) 0%, rgba(255,255,255,.04) 100%),
+    linear-gradient(rgba(51,70,112,.92), rgba(51,70,112,.92));
+  --glass-card:
+    linear-gradient(170deg, rgba(255,255,255,.09) 0%, rgba(255,255,255,.035) 100%),
+    linear-gradient(rgba(47,64,102,.86), rgba(47,64,102,.86));
+  --tint-1: rgba(255,255,255,.12);
+  --tint-2: rgba(255,255,255,.07);
+  --tint-sunk: rgba(6,12,24,.44);
+  --hair: rgba(190,212,255,.22);
+  --hair-soft: rgba(190,212,255,.13);
+
+  --bub-in:
+    linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.035)),
+    linear-gradient(rgba(62,84,128,.82), rgba(62,84,128,.82));
+  --bub-in-read:
+    linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.03)),
+    linear-gradient(rgba(62,84,128,.94), rgba(62,84,128,.94));
+  --bub-dm:
+    linear-gradient(180deg, rgba(198,170,255,.16), rgba(160,130,240,.08)),
+    linear-gradient(rgba(65,52,112,.88), rgba(65,52,112,.88));
+  --dm-chip-text:#D3BEFF;
+
+  --edge:
+    inset 1.5px 1.5px 0 -0.5px rgba(255,255,255,.34),
+    inset -1px -1px 0 -0.5px rgba(255,255,255,.10),
+    inset 0 0 0 1px rgba(255,255,255,.12);
+  --edge-soft:
+    inset 1px 1px 0 -0.5px rgba(255,255,255,.24),
+    inset 0 0 0 1px rgba(255,255,255,.10);
+  --sh-panel: 0 30px 70px -24px rgba(0,0,0,.72), 0 10px 26px -14px rgba(0,0,0,.55);
+  --sh-float: 0 14px 32px -14px rgba(0,0,0,.62), 0 3px 10px -6px rgba(0,0,0,.45);
+  --sh-card: 0 6px 16px -10px rgba(0,0,0,.45);
+  --sh-sheet: 0 -18px 60px -16px rgba(0,0,0,.62);
+  --sh-frame: 0 40px 90px -30px rgba(0,0,0,.80), 0 12px 30px -16px rgba(0,0,0,.60);
+}
+
+/* ---------- 1d. WALLPAPERS (six combinations) ---------- */
+:root[data-theme="light"][data-wall="blue"]{
+  --wall:
+    radial-gradient(70% 58% at 6% 2%, rgba(255,255,255,.95), rgba(255,255,255,0) 60%),
+    radial-gradient(62% 54% at 80% 8%, #B9D7FF, rgba(185,215,255,0) 72%),
+    radial-gradient(58% 52% at 96% 84%, #C9DDFF, rgba(201,221,255,0) 74%),
+    radial-gradient(52% 48% at 18% 82%, #DCEBFF, rgba(220,235,255,0) 72%),
+    radial-gradient(46% 44% at 44% 96%, #DBD9FF, rgba(219,217,255,0) 76%),
+    linear-gradient(158deg, #EAF3FF 0%, #D6E6FF 46%, #C5DAFB 100%);
+}
+:root[data-theme="light"][data-wall="warm"]{
+  --wall:
+    radial-gradient(70% 58% at 6% 2%, rgba(255,255,255,.92), rgba(255,255,255,0) 60%),
+    radial-gradient(62% 54% at 82% 6%, #FFD9BC, rgba(255,217,188,0) 72%),
+    radial-gradient(58% 52% at 96% 86%, #FFD3D2, rgba(255,211,210,0) 74%),
+    radial-gradient(52% 48% at 16% 84%, #FFE9C9, rgba(255,233,201,0) 72%),
+    radial-gradient(44% 42% at 48% 98%, #F6DCC0, rgba(246,220,192,0) 76%),
+    linear-gradient(158deg, #FFF3E6 0%, #FFE4CE 46%, #F8D6BC 100%);
+}
+:root[data-theme="light"][data-wall="graphite"]{
+  --wall:
+    radial-gradient(70% 58% at 6% 2%, rgba(255,255,255,.92), rgba(255,255,255,0) 58%),
+    radial-gradient(62% 54% at 84% 8%, #D7DCE6, rgba(215,220,230,0) 72%),
+    radial-gradient(56% 50% at 96% 86%, #C8CFDC, rgba(200,207,220,0) 74%),
+    radial-gradient(52% 48% at 14% 84%, #DDE2EB, rgba(221,226,235,0) 72%),
+    linear-gradient(158deg, #EFF1F5 0%, #DFE3EB 48%, #CFD5E0 100%);
+}
+:root[data-theme="light"][data-wall="slate"]{
+  --wall:
+    radial-gradient(70% 58% at 6% 2%, rgba(255,255,255,.90), rgba(255,255,255,0) 58%),
+    radial-gradient(62% 54% at 84% 8%, #D9DEE6, rgba(217,222,230,0) 72%),
+    radial-gradient(56% 50% at 96% 86%, #C9D1DB, rgba(201,209,219,0) 74%),
+    radial-gradient(52% 48% at 14% 84%, #DCE1E8, rgba(220,225,232,0) 72%),
+    linear-gradient(158deg, #EEF0F3 0%, #DFE3E9 48%, #CED4DC 100%);
+}
+:root[data-theme="dark"][data-wall="blue"]{
+  --wall:
+    radial-gradient(64% 56% at 78% 6%, #17457F, rgba(23,69,127,0) 72%),
+    radial-gradient(58% 52% at 96% 86%, #10305C, rgba(16,48,92,0) 74%),
+    radial-gradient(54% 48% at 12% 84%, #143A6B, rgba(20,58,107,0) 72%),
+    radial-gradient(42% 40% at 44% 98%, #2A2358, rgba(42,35,88,0) 76%),
+    linear-gradient(158deg, #0C1B33 0%, #0A1628 48%, #070F1D 100%);
+}
+:root[data-theme="dark"][data-wall="warm"]{
+  --wall:
+    radial-gradient(64% 56% at 80% 6%, #6A3512, rgba(106,53,18,0) 72%),
+    radial-gradient(58% 52% at 96% 86%, #5A1F24, rgba(90,31,36,0) 74%),
+    radial-gradient(54% 48% at 12% 84%, #55340F, rgba(85,52,15,0) 72%),
+    linear-gradient(158deg, #2A1708 0%, #201206 48%, #160C05 100%);
+}
+:root[data-theme="dark"][data-wall="graphite"]{
+  --wall:
+    radial-gradient(64% 56% at 80% 6%, #2B313C, rgba(43,49,60,0) 72%),
+    radial-gradient(58% 52% at 96% 86%, #23283180, rgba(35,40,49,0) 74%),
+    radial-gradient(54% 48% at 12% 84%, #262C36, rgba(38,44,54,0) 72%),
+    linear-gradient(158deg, #171B22 0%, #12151B 48%, #0D0F14 100%);
+}
+/* Slate is NOT a lighter Graphite: Graphite's dark base is near-black
+   (#171B22 -> #0D0F14) and every panel on it is a pale shape in the dark,
+   while Slate's (#3B4552 -> #2E3640) is about three times the luminance, so
+   the panels sit one step above their background and the whole window reads
+   as one desaturated grey-blue object. Its blooms are hue shifts at the same
+   luminance rather than highlights: the dark ink set is calibrated against a
+   deep wallpaper, and `npm run contrast:check` measures every ink against the
+   BRIGHTEST point of every dark wallpaper, so a bloom above #3B4552 fails. */
+:root[data-theme="dark"][data-wall="slate"]{
+  --wall:
+    radial-gradient(64% 56% at 80% 6%, #39445A, rgba(57,68,90,0) 72%),
+    radial-gradient(58% 52% at 96% 86%, #323B47, rgba(50,59,71,0) 74%),
+    radial-gradient(54% 48% at 12% 84%, #374250, rgba(55,66,80,0) 72%),
+    linear-gradient(158deg, #3B4552 0%, #343D48 48%, #2E3640 100%);
+}
+/* A wallpaper may name its own DEFAULT accent, and Slate does. The outgoing
+   bubble is the largest saturated area in the composition, so a desaturated
+   wallpaper under the stock blue bubble is a grey window with a blue stripe
+   down one side. A chat whose colour the reader picked keeps it. */
+:root[data-wall="slate"] [data-accent="default"],
+:root[data-wall="slate"] .chat:not([data-accent]){
+  --chat-accent:#4F6B96; --chat-accent-text:#3F5A83; --chat-soft:rgba(79,107,150,.13);
+  --chat-out-top:#4F6B96; --chat-out-bot:#3B5476;
+}
+:root[data-theme="dark"][data-wall="slate"] [data-accent="default"],
+:root[data-theme="dark"][data-wall="slate"] .chat:not([data-accent]){ --chat-accent-text:#C6D8F2; }
+
+/* light-theme rungs (the ladder matters most in dark, but the names
+   are shared so components never branch on theme) */
+:root[data-theme="light"]{
+  --e0:#DCE8FB; --e1:#F4F8FE; --e2:#EAF1FC; --e2s:#E2EDFD;
+  --e3:#FFFFFF; --e3c:#F7FAFE; --e3f:#FDFEFF; --e4:#FFFFFF;
+  --tail-in: rgba(245,249,255,.74);
+  --tail-dm: rgba(236,230,253,.86);
+}
+:root[data-theme="dark"]{
+  --tail-in:#3E5480;
+  --tail-dm:#413470;
+}
+
+/* ---------- 1e. PER-CHAT ACCENT ----------
+   Every chat can carry one of eight curated colours, or Default.
+   The colour is applied by setting data-accent on the chat root; it
+   tints exactly four things: the avatar ring, the selected row's
+   glass tint, the header accent, and the outgoing bubble gradient.
+   Both gradient stops keep white body text at AA or better.        */
+:root{
+  --chat-accent: var(--accent);
+  --chat-accent-text: var(--accent-text);
+  --chat-soft: var(--accent-soft);
+  --chat-out-top: var(--bub-out-top);
+  --chat-out-bot: var(--bub-out-bot);
+}
+[data-accent="indigo"]  { --chat-accent:#4B4CC8; --chat-accent-text:#3F3FB4; --chat-soft:rgba(75,76,200,.13); --chat-out-top:#5556CE; --chat-out-bot:#33309F; }
+[data-accent="violet"]  { --chat-accent:#7B3FC4; --chat-accent-text:#6A2FB4; --chat-soft:rgba(123,63,196,.13); --chat-out-top:#8244CE; --chat-out-bot:#5B23A0; }
+[data-accent="magenta"] { --chat-accent:#B62F81; --chat-accent-text:#A22270; --chat-soft:rgba(182,47,129,.13); --chat-out-top:#C0368A; --chat-out-bot:#8E1B64; }
+[data-accent="red"]     { --chat-accent:#C5303A; --chat-accent-text:#AE2029; --chat-soft:rgba(197,48,58,.13); --chat-out-top:#CF3B44; --chat-out-bot:#9C1A24; }
+[data-accent="orange"]  { --chat-accent:#B04C08; --chat-accent-text:#9A4106; --chat-soft:rgba(176,76,8,.13);  --chat-out-top:#B8540C; --chat-out-bot:#8B3A05; }
+[data-accent="teal"]    { --chat-accent:#0E7A84; --chat-accent-text:#0A6670; --chat-soft:rgba(14,122,132,.13); --chat-out-top:#14828C; --chat-out-bot:#07606A; }
+[data-accent="green"]   { --chat-accent:#16783C; --chat-accent-text:#12652F; --chat-soft:rgba(22,120,60,.13);  --chat-out-top:#1A8043; --chat-out-bot:#0E5C2E; }
+[data-accent="graphite"]{ --chat-accent:#485468; --chat-accent-text:#3D4859; --chat-soft:rgba(72,84,104,.13);  --chat-out-top:#54607A; --chat-out-bot:#343E52; }
+[data-accent="slate"]   { --chat-accent:#4F6B96; --chat-accent-text:#3F5A83; --chat-soft:rgba(79,107,150,.13); --chat-out-top:#4F6B96; --chat-out-bot:#3B5476; }
+:root[data-theme="dark"] [data-accent="indigo"]  { --chat-accent-text:#CCCDFF; }
+:root[data-theme="dark"] [data-accent="violet"]  { --chat-accent-text:#E0C8FF; }
+:root[data-theme="dark"] [data-accent="magenta"] { --chat-accent-text:#FFC2E2; }
+:root[data-theme="dark"] [data-accent="red"]     { --chat-accent-text:#FFC2C7; }
+:root[data-theme="dark"] [data-accent="orange"]  { --chat-accent-text:#FFD0A8; }
+:root[data-theme="dark"] [data-accent="teal"]    { --chat-accent-text:#A6E8EE; }
+:root[data-theme="dark"] [data-accent="green"]   { --chat-accent-text:#A8ECBE; }
+:root[data-theme="dark"] [data-accent="graphite"]{ --chat-accent-text:#D2DAE6; }
+:root[data-theme="dark"] [data-accent="slate"]   { --chat-accent-text:#C6D8F2; }
+
+/* ---------- 2. BASE + PAGE CHROME ---------- */
+*,*::before,*::after{ box-sizing:border-box; }
+html{ -webkit-text-size-adjust:100%; }
+body{
+  margin:0; overflow-x:hidden;
+  font:var(--t-body); color:var(--text);
+  background:
+    radial-gradient(90% 60% at 50% -10%, var(--studio-2), rgba(0,0,0,0) 70%),
+    var(--studio);
+  min-height:100vh;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,h4,h5,p,ol,ul,figure,table{ margin:0; }
+ol,ul{ padding:0; }
+button{ font:inherit; color:inherit; background:none; border:0; margin:0; padding:0; cursor:pointer; }
+:focus-visible{ outline:2px solid var(--accent-text); outline-offset:2px; border-radius:6px; }
+
+.page{ max-width:1236px; margin:0 auto; padding:88px 28px 120px; }
+
+.lede{ max-width:64ch; margin:0 0 var(--s10); }
+.lede h1{ font:var(--t-title-wide); letter-spacing:var(--track-title); margin-bottom:var(--s3); }
+.lede p{ font:var(--t-preview); color:var(--text-2); }
+
+.sec{ margin:0 0 var(--s12); }
+.sec__head{ display:flex; align-items:baseline; gap:var(--s3); flex-wrap:wrap; margin-bottom:var(--s4); }
+.sec__id{
+  font:var(--t-micro); letter-spacing:var(--track-micro); text-transform:uppercase;
+  color:var(--on-accent); background:var(--accent);
+  padding:4px 8px; border-radius:6px;
+}
+.sec__head h2{ font:600 19px/24px var(--font); letter-spacing:-0.012em; }
+.sec__head p{ font:var(--t-meta); color:var(--text-3); }
+.scroller{ overflow-x:auto; padding-bottom:var(--s3); }
+.scroller::-webkit-scrollbar{ height:8px; }
+.scroller::-webkit-scrollbar-thumb{ background:var(--hair); border-radius:99px; }
+
+/* toolbar (outside the device frames) */
+.toolbar{
+  position:fixed; inset:0 0 auto 0; z-index:60;
+  display:flex; align-items:center; gap:var(--s4);
+  padding:10px 20px;
+  background:var(--glass-float);
+  -webkit-backdrop-filter:var(--blur-float); backdrop-filter:var(--blur-float);
+  box-shadow:var(--edge-soft), 0 1px 0 var(--hair-soft), var(--sh-float);
+}
+.toolbar__brand{ font:600 15px/20px var(--font); letter-spacing:-0.01em; margin-right:auto; }
+.toolbar__brand span{ color:var(--text-3); font-weight:400; }
+.switcher{ display:flex; align-items:center; gap:var(--s2); }
+.switcher > .lbl{ font:var(--t-micro); letter-spacing:var(--track-micro); text-transform:uppercase; color:var(--text-3); }
+
+/* ---------- 3. GLASS PRIMITIVES ---------- */
+.panel{
+  position:relative; isolation:isolate;
+  border-radius:var(--r-panel);
+  background:var(--glass-panel);
+  -webkit-backdrop-filter:var(--blur-panel); backdrop-filter:var(--blur-panel);
+  box-shadow:var(--edge), var(--sh-panel);
+}
+/* specular corner sheen, kept to the outer 12% so it never sits under text */
+.panel::after{
+  content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none; z-index:5;
+  background:linear-gradient(148deg, rgba(255,255,255,.40) 0%, rgba(255,255,255,0) 12%);
+}
+:root[data-theme="dark"] .panel::after{
+  background:linear-gradient(148deg, rgba(255,255,255,.16) 0%, rgba(255,255,255,0) 12%);
+}
+/* level 2 — floats on top of a panel (header, composer, sheet, overlay) */
+.float{
+  position:relative;
+  border-radius:var(--r-sheet);
+  background:var(--glass-float);
+  -webkit-backdrop-filter:var(--blur-float); backdrop-filter:var(--blur-float);
+  box-shadow:var(--edge-soft), 0 0 0 1px var(--hair-soft), var(--sh-float);
+}
+/* level 3 — tint only, no second blur (see the nesting rule in the tokens doc) */
+.tint{ background:var(--tint-1); box-shadow:inset 0 0 0 1px var(--hair-soft); }
+.sunk{ background:var(--tint-sunk); box-shadow:inset 0 0 0 1px var(--hair-soft); }
+
+/* round glass control */
+.gbtn{
+  display:inline-grid; place-items:center; flex:0 0 auto;
+  width:var(--ctl); height:var(--ctl); border-radius:var(--r-pill);
+  color:var(--text); background:var(--tint-1);
+  box-shadow:var(--edge-soft), var(--sh-card);
+  transition:transform var(--dur-micro) var(--ease-out), background var(--dur-micro) linear;
+}
+.gbtn:hover{ background:var(--tint-1); transform:translateY(-1px); }
+.gbtn:active{ transform:scale(.94); }
+.gbtn--lg{ width:44px; height:44px; }
+.gbtn--sm{ width:30px; height:30px; }
+.pbtn{
+  display:inline-grid; place-items:center;
+  width:var(--ctl); height:var(--ctl); border-radius:var(--r-pill);
+  color:var(--on-accent); background:linear-gradient(180deg, var(--chat-out-top), var(--chat-out-bot));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.34), 0 6px 14px -6px rgba(10,50,120,.55);
+  transition:transform var(--dur-micro) var(--ease-out);
+}
+.pbtn:active{ transform:scale(.94); }
+.btn{
+  display:inline-flex; align-items:center; justify-content:center; gap:var(--s2);
+  min-height:44px; padding:0 var(--s5); border-radius:var(--r-inset);
+  font:600 16px/20px var(--font); color:var(--text);
+  background:var(--tint-1); box-shadow:var(--edge-soft);
+  transition:transform var(--dur-micro) var(--ease-out);
+}
+.btn:active{ transform:scale(.985); }
+.btn--primary{ color:var(--on-accent); background:linear-gradient(180deg, var(--chat-out-top), var(--chat-out-bot)); box-shadow:inset 0 1px 0 rgba(255,255,255,.3); }
+.btn--danger{ color:var(--danger-text); background:var(--danger-soft); box-shadow:inset 0 0 0 1px var(--danger-soft); }
+.btn:disabled{ opacity:.42; cursor:default; }
+.btn--sm{ min-height:32px; padding:0 var(--s3); font:600 13px/16px var(--font); border-radius:9px; }
+.link{ color:var(--chat-accent-text); font:600 14px/18px var(--font); }
+.link:hover{ text-decoration:underline; }
+
+/* chips */
+.chip{
+  display:inline-flex; align-items:center; gap:6px;
+  height:32px; padding:0 var(--s3); border-radius:var(--r-pill);
+  font:600 14px/18px var(--font); color:var(--text-2);
+  background:var(--tint-1); box-shadow:inset 0 0 0 1px var(--hair-soft);
+  white-space:nowrap;
+}
+.chip[aria-pressed="true"]{ color:var(--on-accent); background:var(--accent); box-shadow:inset 0 1px 0 rgba(255,255,255,.26); }
+.chip--micro{
+  height:20px; padding:0 7px; border-radius:6px;
+  font:var(--t-micro); letter-spacing:.02em;
+}
+.chip--bot{ color:var(--dm-chip-text); background:var(--chat-soft); }
+.chip--count{
+  min-width:22px; height:22px; padding:0 6px; border-radius:var(--r-pill);
+  display:inline-grid; place-items:center;
+  font:700 12px/22px var(--font); color:var(--on-accent); background:var(--accent);
+}
+
+/* segmented control */
+.seg{
+  display:inline-flex; gap:2px; padding:2px; border-radius:var(--r-pill);
+  background:var(--tint-sunk); box-shadow:inset 0 0 0 1px var(--hair-soft);
+}
+.seg > *{
+  padding:5px 12px; border-radius:var(--r-pill);
+  font:600 13px/17px var(--font); color:var(--text-2);
+  transition:color var(--dur-micro) linear;
+}
+.seg > [aria-pressed="true"]{
+  color:var(--text); background:var(--e4);
+  box-shadow:0 1px 3px rgba(16,38,78,.20), inset 0 0 0 1px var(--hair-soft);
+}
+
+/* switch */
+.sw{ width:51px; height:31px; border-radius:var(--r-pill); background:var(--tint-sunk); box-shadow:inset 0 0 0 1px var(--hair-soft); position:relative; transition:background var(--dur-fast) var(--ease-out); }
+.sw::after{ content:""; position:absolute; top:2px; left:2px; width:27px; height:27px; border-radius:50%; background:#fff; box-shadow:0 2px 5px rgba(10,30,70,.30); transition:transform var(--dur-fast) var(--ease-spring); }
+.sw[aria-checked="true"]{ background:var(--ok); }
+.sw[aria-checked="true"]::after{ transform:translateX(20px); }
+
+/* ---------- 3b. PRESENCE ----------
+   One bead component, four states, three sizes. Colour never carries
+   the meaning alone: online is filled, working pulses a ring, needs
+   input is a filled bead with a notch, offline is a hollow ring.     */
+.pres{
+  position:relative; flex:0 0 auto;
+  width:var(--bead); height:var(--bead); border-radius:50%;
+  box-shadow:0 0 0 2.5px var(--e1);
+}
+.pres--online{ background:var(--pres-online); }
+.pres--working{ background:var(--pres-working); }
+.pres--input{ background:var(--pres-input); }
+.pres--offline{ background:transparent; box-shadow:0 0 0 2.5px var(--e1), inset 0 0 0 2px var(--pres-offline); }
+/* Working is STATIC: a solid blue bead with a still inner mark. Nothing
+   spins or pulses for it — a bot being busy does not need the reader. */
+.pres--working::before{
+  content:""; position:absolute; left:50%; top:50%; width:36%; height:36%;
+  transform:translate(-50%,-50%); border-radius:50%;
+  background:rgba(255,255,255,.95);
+}
+.pres--input::before{
+  content:""; position:absolute; left:50%; top:50%; width:2px; height:42%;
+  transform:translate(-50%,-50%); border-radius:1px;
+  background:rgba(255,255,255,.95);
+}
+/* Needs input is the ONLY bead that moves: slow, low-amplitude amber
+   pulse, because that state is a request aimed at the reader. */
+.pres--input::after{
+  content:""; position:absolute; inset:-3px; border-radius:50%;
+  border:2px solid var(--pres-input);
+  animation:beadPulse 2s var(--ease-in-out) infinite;
+}
+@keyframes beadPulse{
+  0%{ transform:scale(.92); opacity:.6 }
+  55%{ transform:scale(1.2); opacity:0 }
+  100%{ transform:scale(1.2); opacity:0 }
+}
+.pres--inline{ --bead:9px; box-shadow:none; }
+.pres--inline.pres--offline{ box-shadow:inset 0 0 0 1.5px var(--pres-offline); }
+.pres--lg{ --bead:18px; }
+
+/* ---------- 3c. AVATARS (CSS only, no image files) ---------- */
+.av{
+  position:relative; flex:0 0 auto;
+  width:var(--avatar-list); height:var(--avatar-list); border-radius:50%;
+  display:grid; place-items:center;
+  font:700 18px/1 var(--font); letter-spacing:.01em; color:#fff;
+  background:var(--av-fill, linear-gradient(150deg,#63A8FF,#1B5FD0));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.42), 0 3px 8px -4px rgba(10,30,70,.5);
+}
+.av--researcher{ --av-fill:linear-gradient(150deg,#4FD3C4,#1668B5); }
+.av--writer{     --av-fill:linear-gradient(150deg,#C79BFF,#6C2BC0); }
+.av--bookkeeper{ --av-fill:linear-gradient(150deg,#FFC46B,#C06A0A); }
+.av--postman{    --av-fill:linear-gradient(150deg,#8FE6A6,#17855A); }
+.av--default{    --av-fill:linear-gradient(150deg,#B9C4D6,#6B7A90); }
+.av--sm{ --avatar-list:var(--avatar-head); font-size:15px; }
+.av--xs{ --avatar-list:26px; font-size:11px; }
+/* the ring is the per-chat colour */
+.av--ring{ box-shadow:inset 0 1px 0 rgba(255,255,255,.42), 0 0 0 2px var(--e1), 0 0 0 4px var(--chat-accent); }
+.av .pres{ position:absolute; right:-1px; bottom:-1px; }
+
+/* ---------- 4. SIDEBAR ---------- */
+.sidebar{ display:flex; flex-direction:column; width:344px; flex:0 0 344px; overflow:hidden; }
+.sidebar__head{ display:flex; align-items:center; gap:var(--s3); padding:var(--s5) var(--s4) var(--s3); }
+.sidebar__head h2{ font:var(--t-title-wide); letter-spacing:var(--track-title); margin-right:auto; }
+.sidebar__edit{ font:600 15px/20px var(--font); color:var(--accent-text); padding:4px 6px; border-radius:8px; }
+
+.field{
+  display:flex; align-items:center; gap:var(--s2);
+  height:36px; padding:0 var(--s3); margin:0 var(--s4) var(--s3);
+  border-radius:var(--r-pill);
+  background:var(--tint-sunk); box-shadow:inset 0 0 0 1px var(--hair-soft);
+  color:var(--text-3); font:var(--t-preview);
+}
+/* phone only: the connection speaks when it needs something, and is silent
+   when it is ready — the presence bead on every row already says that */
+.connline{
+  display:flex; align-items:center; gap:var(--s2);
+  margin:0 var(--s4) var(--s3); padding:6px var(--s3);
+  border-radius:var(--r-pill);
+  background:var(--tint-sunk); box-shadow:inset 0 0 0 1px var(--hair-soft);
+  font:var(--t-meta); color:var(--text-2);
+}
+/* Signed out is the one connection state a reader can act on, so there it is a
+   button. Amber, and still static: the pulse belongs to a bot's needs-input
+   presence and to nothing else. */
+.connline--out{ color:var(--warn-text); cursor:pointer; }
+.chips{ display:flex; gap:6px; padding:0 var(--s4) var(--s3); overflow-x:auto; scrollbar-width:none; }
+.chips::-webkit-scrollbar{ display:none; }
+
+.list{ flex:1 1 auto; overflow-y:auto; padding:0 var(--s2) var(--s2); }
+.list::-webkit-scrollbar{ width:8px; }
+.list::-webkit-scrollbar-thumb{ background:var(--hair-soft); border-radius:99px; }
+
+/* named section break the owner can insert and rename */
+.divider{
+  display:flex; align-items:center; gap:var(--s2);
+  padding:var(--s4) var(--s3) 6px;
+  font:var(--t-micro); letter-spacing:var(--track-micro); text-transform:uppercase; color:var(--text-3);
+}
+.divider__rule{ flex:1 1 auto; height:1px; background:var(--hair-soft); }
+.divider__act{ display:none; gap:4px; }
+.is-editing .divider__act{ display:inline-flex; }
+.is-editing .divider__rule{ display:none; }
+
+.row{
+  position:relative; display:flex; align-items:center; gap:var(--s3);
+  width:100%; min-height:var(--row-h); padding:var(--s2) var(--s3);
+  border-radius:var(--r-card); text-align:left;
+  transition:background var(--dur-micro) linear;
+}
+.row:hover{ background:var(--tint-2); }
+.row[aria-selected="true"]{
+  background:linear-gradient(170deg, var(--chat-soft), var(--tint-1));
+  box-shadow:var(--edge-soft), var(--sh-card);
+}
+.row__grip{
+  display:none; flex:0 0 auto; width:20px; color:var(--text-3);
+  cursor:grab;
+}
+.is-editing .row__grip{ display:grid; place-items:center; }
+.is-editing .row{ padding-left:var(--s2); }
+.row__body{ flex:1 1 auto; min-width:0; }
+.row__top{ display:flex; align-items:baseline; gap:var(--s2); }
+.row__name{ display:block; min-width:0; font:var(--t-name); letter-spacing:-0.01em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.row__time{ margin-left:auto; font:var(--t-meta); color:var(--text-3); white-space:nowrap; }
+.row__prev{
+  display:flex; align-items:center; gap:6px; margin-top:2px;
+  font:var(--t-preview); color:var(--text-2);
+}
+.row__prev span{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.row--unread .row__name{ font-weight:700; }
+.row--unread .row__prev{ color:var(--text); }
+.row__tail{ display:flex; align-items:center; gap:6px; flex:0 0 auto; align-self:center; }
+
+/* archive */
+.arch{
+  display:flex; align-items:center; gap:var(--s2);
+  width:100%; padding:var(--s3); margin-top:var(--s2);
+  border-radius:var(--r-card); color:var(--text-2); font:600 15px/20px var(--font);
+}
+.arch:hover{ background:var(--tint-2); }
+.arch svg{ transition:transform var(--dur-fast) var(--ease-out); }
+.is-open > .arch svg.chev{ transform:rotate(90deg); }
+[data-disc] .arch__body{ display:none; }
+[data-disc].is-open .arch__body{ display:block; }
+
+/* footer: 4-tab glass strip above the gateway card */
+.tabs{
+  display:grid; grid-template-columns:repeat(4,1fr); gap:2px;
+  margin:var(--s2) var(--s3) var(--s2); padding:3px;
+  border-radius:var(--r-inset);
+  background:var(--tint-sunk); box-shadow:inset 0 0 0 1px var(--hair-soft);
+}
+.tab{
+  display:grid; justify-items:center; gap:2px; padding:6px 2px;
+  border-radius:9px; color:var(--text-2);
+  font:var(--t-micro); letter-spacing:.01em;
+}
+.tab[aria-current="page"]{
+  color:var(--text); background:var(--e3);
+  box-shadow:0 1px 3px rgba(16,38,78,.18), inset 0 0 0 1px var(--hair-soft);
+}
+
+/* ---------- 4b. COLLAPSED SIDEBAR (THE RAIL) ---------- */
+/*
+   What is left of the sidebar when the reader hides it. 56px, because that is a
+   38px round control plus the panel's own breathing room on each side — narrow
+   enough that the swap is worth about 250px of prose at the 834px window this
+   exists for, wide enough that every tab-strip destination stays one tap away.
+
+   Collapsing to nothing was the other option and it loses two things at once: the
+   only way back that does not involve knowing a keyboard shortcut, and Activity,
+   Crons and Settings, whose strip lives at the foot of the list.
+*/
+.sidebar--rail{
+  width:56px; flex:0 0 56px;
+  align-items:center; gap:var(--s2);
+  padding:var(--s3) var(--s2);
+}
+.rail__spacer{ flex:1 1 auto; }
+.rail__btn{
+  position:relative;
+  display:grid; place-items:center;
+  width:38px; height:38px; border-radius:999px;
+  color:var(--text-2);
+}
+.rail__btn--on{
+  color:var(--text);
+  background:var(--e4);
+  box-shadow:0 1px 3px rgba(16,38,78,.18), inset 0 0 0 1px var(--hair-soft);
+}
+/* The unread total. A hidden list still receives messages, and every bead and
+   per-row badge went with the rows — without this the collapsed state swallows
+   the one fact the list exists to report. */
+.rail__badge{
+  position:absolute; top:-4px; right:-5px;
+  min-width:18px; padding:0 4px;
+  border-radius:999px; border:1.5px solid var(--e1);
+  background:var(--accent); color:#fff;
+  font:var(--t-micro); font-weight:700; text-align:center;
+}
+
+/* edit-mode action bar */
+.editbar{
+  display:none; gap:var(--s2); align-items:center;
+  margin:0 var(--s3) var(--s2); padding:var(--s2) var(--s3);
+  border-radius:var(--r-card); font:var(--t-meta); color:var(--text-2);
+}
+.is-editing .editbar{ display:flex; }
+
+/* ---------- 5. CHAT PANEL ---------- */
+.chat{ position:relative; display:flex; flex-direction:column; flex:1 1 auto; min-width:0; overflow:hidden; }
+.chat__head{ display:flex; align-items:center; gap:var(--s3); margin:10px; padding:var(--s2) var(--s3); border-radius:22px; }
+.chat__id{ flex:1 1 auto; min-width:0; }
+.chat__name{ font:600 18px/22px var(--font); letter-spacing:-0.014em; }
+.chat__sub{ display:flex; align-items:center; gap:5px; margin-top:1px; font:var(--t-meta); color:var(--text-2); }
+.chat__sub b{ font-weight:600; color:var(--chat-accent-text); }
+.chat__acts{ display:flex; gap:6px; }
+
+/* slim bar pinned under the header */
+.agents{
+  display:flex; align-items:center; gap:var(--s2);
+  margin:0 10px var(--s2); padding:6px var(--s3);
+  border-radius:var(--r-pill); font:var(--t-meta); color:var(--text-2);
+}
+.agents__pips{ display:flex; gap:3px; }
+.agents__pips i{ width:5px; height:5px; border-radius:50%; background:var(--pres-working); }
+.agents__pips i:nth-child(2){ opacity:.7 }
+.agents__pips i:nth-child(3){ opacity:.45 }
+.agents b{ font-weight:600; color:var(--text); }
+.agents time{ font:var(--t-code); font-size:12px; color:var(--text-2); }
+
+.scroll{
+  flex:1 1 auto; overflow-y:auto; overscroll-behavior:contain;
+  padding:var(--s2) var(--s6) var(--s4);
+  display:flex; flex-direction:column; gap:var(--s1);
+}
+.scroll::-webkit-scrollbar{ width:9px; }
+.scroll::-webkit-scrollbar-thumb{ background:var(--hair-soft); border-radius:99px; }
+
+.stamp{ align-self:center; margin:var(--s4) 0 var(--s3); font:var(--t-micro); letter-spacing:var(--track-micro); text-transform:uppercase; color:var(--text-3); }
+
+/* ---------- 5b. BUBBLES ----------
+   The tail is one SVG path that belongs to the bubble element and is
+   only rendered on the last bubble of a group. No separate square
+   view, nothing positioned by hand at paint time.                    */
+.msg{ display:flex; gap:var(--s2); max-width:100%; }
+.msg--in{ justify-content:flex-start; }
+.msg--out{ justify-content:flex-end; }
+.msg + .msg{ margin-top:var(--s1); }
+.msg--gap{ margin-top:var(--s4); }
+
+.bub{
+  position:relative; max-width:var(--bubble-max);
+  padding:11px var(--s4) 12px;
+  border-radius:var(--r-bubble);
+  font:var(--t-body); color:var(--text);
+  box-shadow:var(--edge-soft), var(--sh-card);
+}
+.bub--in{
+  background:var(--bub-in);
+  -webkit-backdrop-filter:var(--blur-float); backdrop-filter:var(--blur-float);
+  border-bottom-left-radius:var(--r-tail);
+}
+.bub--out{
+  color:var(--on-accent);
+  background:linear-gradient(180deg, var(--chat-out-top), var(--chat-out-bot));
+  border-bottom-right-radius:var(--r-tail);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.26), 0 8px 18px -10px rgba(10,44,110,.55);
+}
+.bub--dm{
+  background:var(--bub-dm);
+  -webkit-backdrop-filter:var(--blur-float); backdrop-filter:var(--blur-float);
+  border-bottom-left-radius:var(--r-tail);
+}
+/* grouped: middle bubbles keep square-ish corners on the sender side */
+.bub--mid.bub--in, .bub--first.bub--in{ border-bottom-left-radius:var(--r-tail); }
+.bub--mid.bub--out, .bub--first.bub--out{ border-bottom-right-radius:var(--r-tail); }
+/* the reading treatment: near-opaque wash so body text keeps AA on
+   every wallpaper, and a calmer measure for long replies */
+.bub--read{
+  background:var(--bub-in-read);
+  font:var(--t-body-read);
+  padding:var(--s4) var(--s5) var(--s3);
+}
+.tail{ position:absolute; bottom:0; width:13px; height:17px; pointer-events:none; }
+.tail--in{ left:-6px; fill:var(--tail-in); transform:scaleX(-1); }
+.tail--dm{ left:-6px; fill:var(--tail-dm); transform:scaleX(-1); }
+.tail--out{ right:-6px; fill:var(--chat-out-bot); }
+.bub--mid > .tail, .bub--first > .tail{ display:none; }
+
+.meta{ display:flex; align-items:center; gap:5px; margin-top:3px; font:var(--t-meta); font-size:12px; color:var(--text-3); }
+.msg--out .meta{ justify-content:flex-end; }
+.meta--read{ color:var(--chat-accent-text); }
+.mstack{ display:flex; flex-direction:column; align-items:flex-start; min-width:0; max-width:100%; }
+.msg--out .mstack{ align-items:flex-end; }
+
+/* reaction chip hanging off the bottom edge */
+.react{
+  display:inline-flex; align-items:center; gap:3px;
+  margin:-10px 0 0 var(--s4); padding:2px 7px;
+  border-radius:var(--r-pill); font:600 12px/16px var(--font); color:var(--text-2);
+  background:var(--e3); box-shadow:0 2px 6px -2px rgba(16,38,78,.3), inset 0 0 0 1px var(--hair-soft);
+  position:relative; z-index:2;
+}
+
+/* attachments */
+.thumbs{ display:flex; gap:var(--s2); margin-top:var(--s2); }
+.thumb{
+  width:108px; height:78px; border-radius:var(--r-thumb); overflow:hidden; position:relative;
+  box-shadow:inset 0 0 0 1px var(--hair-soft);
+  background:linear-gradient(160deg,#DCEBFF,#AFCDF5);
+}
+.thumb--2{ background:linear-gradient(160deg,#FFE7D2,#F3BE96); }
+.thumb svg{ position:absolute; inset:0; width:100%; height:100%; }
+.thumb figcaption{ position:absolute; inset:auto 0 0 0; padding:3px 6px; font:var(--t-micro); color:#0F2340; background:rgba(255,255,255,.72); }
+
+/* typing → streaming, one bubble, no placeholder box */
+.bub--typing{ padding:14px var(--s4); }
+.dots{ display:flex; gap:5px; }
+.dots i{ width:8px; height:8px; border-radius:50%; background:var(--text-3); animation:dot 1.3s var(--ease-in-out) infinite; }
+.dots i:nth-child(2){ animation-delay:.16s }
+.dots i:nth-child(3){ animation-delay:.32s }
+@keyframes dot{ 0%,100%{ opacity:.3; transform:translateY(0) } 50%{ opacity:1; transform:translateY(-3px) } }
+.caret{ display:inline-block; width:2px; height:17px; vertical-align:-3px; margin-left:2px; background:var(--chat-accent); animation:blink 1s steps(2) infinite; }
+@keyframes blink{ 50%{ opacity:0 } }
+
+/* ---------- 5c. MARKDOWN INSIDE A BUBBLE ---------- */
+.md > * + *{ margin-top:var(--s3); }
+.md h4{ font:700 19px/25px var(--font); letter-spacing:-0.014em; }
+.md h5{ font:600 15px/20px var(--font); color:var(--text-2); letter-spacing:.005em; }
+.md strong{ font-weight:650; }
+.md ol,.md ul{ padding-left:1.35em; }
+.md li + li{ margin-top:6px; }
+.md code{
+  font:var(--t-code); padding:1px 5px; border-radius:6px;
+  background:var(--tint-sunk); box-shadow:inset 0 0 0 1px var(--hair-soft);
+  overflow-wrap:break-word; word-break:break-word;
+}
+.md pre{
+  margin:0; padding:var(--s3) var(--s4); border-radius:var(--r-inset);
+  background:var(--tint-sunk); box-shadow:inset 0 0 0 1px var(--hair-soft);
+  overflow-x:auto;
+}
+.md pre code{ background:none; box-shadow:none; padding:0; white-space:pre; word-break:normal; }
+.md pre::-webkit-scrollbar{ height:8px; }
+.md pre::-webkit-scrollbar-thumb{ background:var(--hair); border-radius:99px; }
+.tablewrap{ overflow-x:auto; border-radius:var(--r-inset); box-shadow:inset 0 0 0 1px var(--hair-soft); }
+.tablewrap::-webkit-scrollbar{ height:8px; }
+.tablewrap::-webkit-scrollbar-thumb{ background:var(--hair); border-radius:99px; }
+.md table{ border-collapse:collapse; width:100%; min-width:420px; font:400 14px/19px var(--font); }
+.md th{
+  text-align:left; padding:7px var(--s3); white-space:nowrap;
+  font:var(--t-micro); letter-spacing:var(--track-micro); text-transform:uppercase; color:var(--text-2);
+  border-bottom:1px solid var(--hair-soft);
+}
+.md td{ padding:7px var(--s3); border-bottom:1px solid var(--hair-soft); white-space:nowrap; }
+.md tr:last-child td{ border-bottom:0; }
+.md td code{ font-size:12.5px; }
+
+/* the fold */
+.fold__body{ position:relative; overflow:hidden; max-height:var(--fold-h); }
+.fold__body::after{
+  content:""; position:absolute; inset:auto 0 0 0; height:64px; pointer-events:none;
+  background:linear-gradient(180deg, rgba(255,255,255,0), var(--fold-fade, #fff));
+}
+:root[data-theme="dark"] .fold__body::after{ --fold-fade:#3C5079; }
+.is-open > .fold__body{ max-height:none; }
+.is-open > .fold__body::after{ display:none; }
+.fold__btn{
+  display:inline-flex; align-items:center; gap:5px; margin-top:var(--s3);
+  padding:5px var(--s3); border-radius:var(--r-pill);
+  font:600 14px/18px var(--font); color:var(--chat-accent-text);
+  background:var(--chat-soft);
+}
+.fold__btn svg{ transition:transform var(--dur-fast) var(--ease-out); }
+.is-open > .fold__btn svg{ transform:rotate(180deg); }
+
+/* ---------- 5d. MACHINE EVENTS ----------
+   Tool calls, thinking, cron deliveries and bot-to-bot lines are not
+   speech, so they are never bubbles. They read as a quiet ledger in
+   the bot's gutter: same left edge, distinct silhouette.             */
+.evt{ align-self:flex-start; max-width:var(--bubble-max); width:100%; }
+.evtline{
+  display:flex; align-items:center; gap:var(--s2);
+  width:100%; padding:7px var(--s3); border-radius:12px;
+  font:var(--t-meta); color:var(--text-2); text-align:left;
+  transition:background var(--dur-micro) linear;
+}
+.evtline:hover{ background:var(--tint-2); }
+.evtline__ico{ display:grid; place-items:center; width:20px; height:20px; border-radius:6px; flex:0 0 auto; color:var(--text-2); background:var(--tint-sunk); }
+.evtline__t{ font:var(--t-code); font-size:12.5px; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.evtline__sep{ color:var(--text-3); }
+.evtline__dur{ font:var(--t-code); font-size:12px; color:var(--text-3); margin-left:auto; flex:0 0 auto; }
+.evtline .chev{ flex:0 0 auto; color:var(--text-3); transition:transform var(--dur-fast) var(--ease-out); }
+.is-open > .evtline .chev{ transform:rotate(90deg); }
+
+.evt__card{
+  display:none; margin-top:6px; padding:var(--s3) var(--s4); border-radius:var(--r-card);
+  background:var(--glass-card);
+  -webkit-backdrop-filter:var(--blur-float); backdrop-filter:var(--blur-float);
+  box-shadow:var(--edge-soft), 0 0 0 1px var(--hair-soft), var(--sh-card);
+}
+.is-open > .evt__card{ display:block; animation:rise var(--dur-base) var(--ease-out) both; }
+@keyframes rise{ from{ opacity:0; transform:translateY(-4px) } to{ opacity:1; transform:none } }
+.evt__lbl{ font:var(--t-micro); letter-spacing:var(--track-micro); text-transform:uppercase; color:var(--text-3); margin-bottom:5px; }
+.evt__lbl + .well{ margin-bottom:var(--s3); }
+.well{
+  padding:var(--s2) var(--s3); border-radius:10px; overflow-x:auto;
+  font:var(--t-code); color:var(--text);
+  background:var(--tint-sunk); box-shadow:inset 0 0 0 1px var(--hair-soft);
+}
+.well pre{ margin:0; white-space:pre; }
+.well::-webkit-scrollbar{ height:8px }
+.well::-webkit-scrollbar-thumb{ background:var(--hair); border-radius:99px }
+
+/* diff */
+.diff{ border-radius:10px; overflow:hidden; box-shadow:inset 0 0 0 1px var(--hair-soft); font:var(--t-code); }
+.diff div{ display:flex; gap:var(--s2); padding:2px var(--s3); white-space:pre; }
+.diff .add{ background:rgba(28,133,71,.14); }
+.diff .del{ background:rgba(192,41,58,.13); }
+.diff .mark{ width:1ch; flex:0 0 auto; color:var(--text-3); }
+.diff .add .mark{ color:var(--ok); }
+.diff .del .mark{ color:var(--danger-text); }
+.diff .ctx{ color:var(--text-2); }
+
+/* error variant */
+.evt--error .evtline__ico{ color:var(--danger-text); background:var(--danger-soft); }
+.evt--error .evtline__t{ color:var(--danger-text); }
+.evt--error .evt__card{ box-shadow:var(--edge-soft), 0 0 0 1px var(--danger-soft), var(--sh-card); }
+.evt__err{ font:var(--t-preview); color:var(--danger-text); }
+
+/* thinking disclosure */
+.evt--think .evtline__t{ font:var(--t-meta); color:var(--text-2); }
+.evt--think .evt__card{ font:var(--t-preview); color:var(--text-2); }
+
+/* ---------- 5e. CRON DELIVERY CARD ---------- */
+.cron{
+  align-self:flex-start; width:100%; max-width:var(--bubble-max);
+  padding:var(--s3) var(--s4); border-radius:var(--r-card);
+  background:var(--glass-card);
+  -webkit-backdrop-filter:var(--blur-float); backdrop-filter:var(--blur-float);
+  box-shadow:var(--edge-soft), 0 0 0 1px var(--hair-soft), var(--sh-card);
+}
+.cron__top{ display:flex; align-items:center; gap:var(--s3); width:100%; text-align:left; }
+.cron__ico{ display:grid; place-items:center; width:32px; height:32px; border-radius:10px; flex:0 0 auto; color:var(--accent-text); background:var(--accent-soft); }
+.cron__id{ flex:1 1 auto; min-width:0; }
+.cron__kicker{ display:block; font:var(--t-micro); letter-spacing:var(--track-micro); text-transform:uppercase; color:var(--text-3); }
+.cron__name{ display:block; font:600 16px/21px var(--font); letter-spacing:-0.008em; }
+.cron__meta{ display:block; font:var(--t-meta); color:var(--text-2); margin-top:1px; }
+.cron__body{ display:none; margin-top:var(--s3); padding-top:var(--s3); border-top:1px solid var(--hair-soft); font:var(--t-preview); color:var(--text-2); }
+.is-open > .cron__body{ display:block; animation:rise var(--dur-base) var(--ease-out) both; }
+.cron__foot{ display:flex; gap:var(--s3); margin-top:var(--s3); }
+
+/* ---------- 5f. BOT-TO-BOT ----------
+   Collapsed is a quiet grey line in the ledger family — not a bubble,
+   not a pill — and it always shows whether a reply came back.
+   Expanding opens the exchange in place; nothing navigates away.     */
+.dms{ align-self:flex-start; width:100%; max-width:var(--bubble-max); display:flex; flex-direction:column; gap:9px; }
+.dm{ width:100%; }
+.dmline{
+  display:flex; align-items:center; gap:var(--s2);
+  width:100%; padding:4px var(--s3) 4px 6px; border-radius:10px;
+  text-align:left; font:var(--t-meta); color:var(--text-2);
+  transition:background var(--dur-micro) linear;
+}
+.dmline:hover{ background:var(--tint-2); }
+.dmline__arrow{ flex:0 0 auto; color:var(--text-3); }
+.dmline__to{ flex:0 0 auto; font-weight:600; color:var(--text-2); }
+.dmline__prev{ min-width:0; flex:1 1 auto; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--text-3); }
+.dmline__time{ flex:0 0 auto; font-size:12px; color:var(--text-3); }
+.dmline__state{ flex:0 0 auto; display:inline-flex; align-items:center; gap:4px; max-width:46%; }
+.dmline__state b{ font-weight:600; color:var(--text-2); }
+.dmline__state em{ font-style:normal; color:var(--text-3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.dmline__state--wait b{ color:var(--text-3); font-weight:400; }
+.dmline__state--fail b{ color:var(--danger-text); }
+.wait{ width:7px; height:7px; border-radius:50%; background:transparent; box-shadow:inset 0 0 0 1.6px var(--text-3); }
+
+.dm__thread{
+  display:none; margin:6px 0 var(--s2) var(--s5); padding:var(--s3) var(--s4);
+  border-left:2px solid var(--hair); border-radius:0 var(--r-card) var(--r-card) 0;
+  background:var(--glass-card);
+  -webkit-backdrop-filter:var(--blur-float); backdrop-filter:var(--blur-float);
+  box-shadow:0 0 0 1px var(--hair-soft), var(--sh-card);
+}
+.is-open > .dm__thread{ display:block; animation:rise var(--dur-base) var(--ease-out) both; }
+.dm__turn + .dm__turn{ margin-top:var(--s3); padding-top:var(--s3); border-top:1px solid var(--hair-soft); }
+.dm__who{ display:flex; align-items:center; gap:6px; margin-bottom:5px; font:var(--t-micro); letter-spacing:var(--track-micro); text-transform:uppercase; color:var(--text-3); }
+.dm__txt{ font:var(--t-preview); color:var(--text); }
+.dm__foot{ display:flex; align-items:center; gap:var(--s3); margin-top:var(--s3); }
+.dm__status{ font:var(--t-meta); color:var(--text-3); margin-right:auto; }
+/* more than three in a row roll up */
+.dmroll{
+  display:flex; align-items:center; gap:var(--s2); width:100%;
+  padding:5px var(--s3) 5px 6px; border-radius:10px; text-align:left;
+  font:var(--t-meta); color:var(--text-2);
+}
+.dmroll:hover{ background:var(--tint-2); }
+.dmroll b{ font-weight:600; color:var(--text); }
+.dmroll .chev{ margin-left:auto; color:var(--text-3); transition:transform var(--dur-fast) var(--ease-out); }
+.is-open > .dmroll .chev{ transform:rotate(90deg); }
+.dmroll__hidden{ display:none; flex-direction:column; gap:9px; padding-top:9px; }
+.is-open > .dmroll__hidden{ display:flex; }
+/* answered marker on an incoming bot bubble */
+.answered{ display:inline-flex; align-items:center; gap:4px; font:var(--t-meta); font-size:12px; color:var(--text-3); }
+
+/* jump to latest */
+.jump{
+  position:absolute; left:50%; bottom:96px; transform:translateX(-50%); z-index:6;
+  display:inline-flex; align-items:center; gap:var(--s2);
+  height:34px; padding:0 var(--s3) 0 var(--s2); border-radius:var(--r-pill);
+  font:600 13px/17px var(--font); color:var(--text);
+}
+
+/* ---------- 6. COMPOSER ---------- */
+.composer{ position:relative; margin:0 10px 10px; padding:var(--s2); border-radius:26px; }
+.composer__row{ display:flex; align-items:flex-end; gap:var(--s2); }
+.composer__field{
+  flex:1 1 auto; min-height:var(--ctl); padding:9px var(--s4);
+  border-radius:var(--r-pill); font:var(--t-body); color:var(--text);
+  background:var(--tint-sunk); box-shadow:inset 0 0 0 1px var(--hair-soft);
+}
+.composer__field.is-empty{ color:var(--text-3); }
+.composer__hint{ display:none; padding:6px var(--s3) 2px; font:var(--t-meta); font-size:12px; color:var(--text-3); }
+.composer__send[data-state="running"] .ico-send{ display:none; }
+.composer__send[data-state="idle"] .ico-stop{ display:none; }
+.composer__send[data-state="running"]{ background:linear-gradient(180deg,#E0505F,#B3202F); box-shadow:inset 0 1px 0 rgba(255,255,255,.28), 0 6px 14px -6px rgba(140,20,35,.6); }
+.tray{ display:flex; gap:var(--s2); padding:0 var(--s2) var(--s2); }
+.tray__item{ display:flex; align-items:center; gap:var(--s2); padding:5px var(--s3) 5px var(--s2); border-radius:12px; font:var(--t-meta); color:var(--text-2); }
+.tray__sw{ width:30px; height:30px; border-radius:8px; background:linear-gradient(160deg,#DCEBFF,#AFCDF5); flex:0 0 auto; }
+
+/* slash popover, above the composer */
+.slash{
+  position:absolute; inset:auto 10px calc(100% + 8px) 10px;
+  padding:6px; border-radius:20px; z-index:8;
+}
+.slash__hd{ padding:6px var(--s3) 4px; font:var(--t-micro); letter-spacing:var(--track-micro); text-transform:uppercase; color:var(--text-3); }
+.slash__it{ display:flex; align-items:center; gap:var(--s3); width:100%; padding:7px var(--s3); border-radius:12px; text-align:left; }
+.slash__it[aria-selected="true"]{ background:var(--chat-soft); }
+.slash__cmd{ font:var(--t-code); font-size:13px; color:var(--chat-accent-text); flex:0 0 auto; min-width:104px; }
+.slash__desc{ font:var(--t-meta); color:var(--text-2); }
+
+/* ---------- 6b. SHEETS, SCRIM, OVERLAY PANEL ---------- */
+.scrim{
+  position:absolute; inset:0; z-index:20; opacity:0; pointer-events:none;
+  background:rgba(8,20,44,.34);
+  -webkit-backdrop-filter:var(--blur-scrim); backdrop-filter:var(--blur-scrim);
+  transition:opacity var(--dur-base) var(--ease-out);
+}
+.is-up .scrim{ opacity:1; pointer-events:auto; }
+.sheet{
+  position:absolute; inset:auto 0 0 0; z-index:21;
+  padding:var(--s2) var(--s5) var(--s5);
+  border-radius:var(--r-sheet) var(--r-sheet) 0 0;
+  background:var(--glass-sheet);
+  -webkit-backdrop-filter:var(--blur-sheet); backdrop-filter:var(--blur-sheet);
+  box-shadow:var(--edge-soft), var(--sh-sheet);
+  transform:translateY(102%);
+  transition:transform var(--dur-sheet) var(--ease-spring);
+}
+.is-up .sheet{ transform:none; }
+/* on the wide layout a sheet is a centred card lifted off the bottom */
+.sheet--wide{
+  left:50%; right:auto; width:560px; bottom:var(--gap-window);
+  border-radius:var(--r-sheet);
+  transform:translate(-50%, calc(100% + 40px));
+}
+.is-up .sheet--wide{ transform:translate(-50%, 0); }
+.grabber{ width:38px; height:5px; margin:var(--s2) auto var(--s4); border-radius:99px; background:var(--hair); }
+.sheet h3{ font:var(--t-sheet); letter-spacing:-0.016em; }
+.sheet__sub{ font:var(--t-preview); color:var(--text-2); margin-top:6px; }
+.sheet__cmd{
+  margin:var(--s4) 0; padding:var(--s3) var(--s4); border-radius:var(--r-inset);
+  font:var(--t-code); font-size:15px; color:var(--text); overflow-x:auto;
+}
+.sheet__cmd::-webkit-scrollbar{ height:8px }
+.sheet__cmd::-webkit-scrollbar-thumb{ background:var(--hair); border-radius:99px }
+.sheet__acts{ display:grid; gap:var(--s2); }
+.sheet__esc{ margin-top:var(--s3); text-align:center; font:var(--t-meta); font-size:12px; color:var(--text-3); }
+
+/* The dim a destination panel lays over what it covers, INSIDE each panel.
+
+   Not one scrim over the window. That shape is wrong twice: it darkens the 14pt
+   wallpaper gap around and between the panels — a dark frame around two bright
+   objects — and, pushed off the sidebar to avoid dimming it, it leaves the list
+   bright and clickable beside a dimmed chat, which makes the dim mean nothing.
+   A child of each panel is the panel's own rounded rectangle, so its corners
+   cannot disagree with the panel's and it cannot reach the gap. The sidebar is
+   not interactive under it; Esc or a tap on either dim closes one level. */
+.panel__dim{
+  position:absolute; inset:0; z-index:19; opacity:0; pointer-events:none;
+  border-radius:inherit; overflow:hidden;
+  background:rgba(8,20,44,.34);
+  transition:opacity var(--dur-base) var(--ease-out);
+}
+.is-over .panel__dim{ opacity:1; pointer-events:auto; }
+
+/* overlay panel: EXACTLY the content panel's frame — same top, same bottom, same
+   right edge, same radius — sliding in from the right. Positioned from that
+   panel rather than from the window: arithmetic off the window's insets put it
+   past the chat panel's rounded bottom corner on a Mac, square against the
+   window's own edge. */
+.over{
+  position:absolute; inset:var(--gap-window) var(--gap-window) var(--gap-window) auto;
+  width:min(520px, calc(100% - 372px)); z-index:22;
+  display:flex; flex-direction:column; overflow:hidden;
+  transform:translateX(calc(100% + var(--gap-window)));
+  transition:transform var(--dur-sheet) var(--ease-out);
+}
+.is-over .over{ transform:none; }
+.over__hd{ display:flex; align-items:center; gap:var(--s3); padding:var(--s5) var(--s5) var(--s3); }
+.over__hd h3{ font:var(--t-title); letter-spacing:var(--track-title); margin-right:auto; }
+.over__body{ flex:1 1 auto; overflow-y:auto; padding:0 var(--s5) var(--s5); }
+.over__body::-webkit-scrollbar{ width:8px }
+.over__body::-webkit-scrollbar-thumb{ background:var(--hair-soft); border-radius:99px }
+.grp{ margin-top:var(--s5); }
+.grp__lbl{ padding:0 var(--s3) 6px; font:var(--t-micro); letter-spacing:var(--track-micro); text-transform:uppercase; color:var(--text-3); }
+.grp__box{ border-radius:var(--r-card); overflow:hidden; }
+.grp__row{ display:flex; align-items:center; gap:var(--s3); min-height:48px; padding:var(--s2) var(--s4); }
+.grp__row + .grp__row{ border-top:1px solid var(--hair-soft); }
+.grp__row .t{ flex:1 1 auto; min-width:0; font:400 16px/21px var(--font); }
+.grp__row .v{ font:var(--t-preview); color:var(--text-2); }
+.grp__note{ padding:6px var(--s3) 0; font:var(--t-meta); color:var(--text-3); }
+
+/* per-chat colour picker */
+.swatches{ display:flex; flex-wrap:wrap; gap:var(--s2); padding:var(--s3) var(--s4); }
+.sw8{ width:32px; height:32px; border-radius:50%; background:var(--chat-accent); box-shadow:inset 0 1px 0 rgba(255,255,255,.3), 0 2px 5px -2px rgba(10,30,70,.5); position:relative; }
+.sw8[aria-pressed="true"]::after{ content:""; position:absolute; inset:-4px; border-radius:50%; box-shadow:0 0 0 2px var(--chat-accent); }
+.sw8--default{ background:conic-gradient(from 210deg, #2A72DC, #7B3FC4, #0E7A84, #16783C, #2A72DC); }
+
+/* ---------- 7. FRAMES ---------- */
+.frame{
+  position:relative; isolation:isolate; overflow:hidden;
+  background:var(--wall);
+  box-shadow:var(--sh-frame);
+}
+.frame--wide{ width:1180px; height:820px; border-radius:var(--r-frame); }
+.win{ display:flex; gap:var(--gap-window); height:100%; padding:var(--gap-window); }
+.frame--wide .composer__hint{ display:block; }
+
+.phones{ display:flex; gap:var(--s6); }
+.frame--phone{
+  width:393px; height:852px; flex:0 0 auto; border-radius:var(--r-phone);
+  box-shadow:var(--sh-frame), 0 0 0 9px #14161C, 0 0 0 10px #303540;
+}
+.frame--phone .pscreen{ display:flex; flex-direction:column; height:100%; }
+.statusbar{ display:flex; align-items:center; padding:14px var(--s6) 2px; font:600 15px/20px var(--font); color:var(--text); }
+.statusbar .sig{ margin-left:auto; display:flex; align-items:center; gap:5px; }
+.homebar{ width:138px; height:5px; margin:0 auto var(--s2); border-radius:99px; background:var(--text); opacity:.32; }
+
+/* phone metrics */
+.frame--phone{ --bubble-max: min(78%, 300px); --ctl:var(--ctl-phone); --row-h:72px; --fold-h:300px; }
+.frame--phone .psheet{ position:relative; flex:1 1 auto; display:flex; flex-direction:column; min-height:0; }
+.frame--phone .sidebar{ width:100%; flex:1 1 auto; }
+.frame--phone .sidebar__head h2{ font:var(--t-title); }
+.frame--phone .chat{ flex:1 1 auto; }
+.frame--phone .chat__head{ margin:var(--s2) var(--s3) 0; }
+.frame--phone .scroll{ padding:var(--s2) var(--s4) var(--s4); }
+.frame--phone .composer{ margin:0 var(--s3) var(--s2); }
+.frame--phone .jump{ bottom:88px; }
+
+/* component board */
+.board{ padding:var(--s6); }
+.grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(300px,1fr)); gap:var(--s4); }
+.cell{ padding:var(--s4); border-radius:var(--r-card); }
+.cell--wide{ grid-column:1 / -1; }
+.cell > h3{
+  font:var(--t-micro); letter-spacing:var(--track-micro); text-transform:uppercase;
+  color:var(--text-3); margin-bottom:var(--s3);
+}
+.stack{ display:flex; flex-direction:column; gap:var(--s3); }
+.stack--tight{ gap:9px; }
+.rowset{ display:flex; flex-wrap:wrap; gap:var(--s2); align-items:center; }
+.note{ font:var(--t-meta); color:var(--text-3); }
+.demo{ position:relative; padding:var(--s3); border-radius:var(--r-card); background:var(--wall); box-shadow:inset 0 0 0 1px var(--hair-soft); isolation:isolate; }
+.demo--tall{ min-height:340px; display:flex; flex-direction:column; justify-content:flex-end; }
+
+/* presence legend */
+.legend{ display:grid; gap:var(--s3); }
+.legend__it{ display:flex; align-items:center; gap:var(--s3); }
+.legend__it .av{ --avatar-list:40px; font-size:15px; }
+.legend__t{ display:block; font:600 15px/19px var(--font); }
+.legend__d{ display:block; font:var(--t-meta); color:var(--text-2); }
+
+/* crons list */
+.cronrow{ display:flex; align-items:center; gap:var(--s3); padding:var(--s3); border-radius:var(--r-card); text-align:left; width:100%; }
+.cronrow:hover{ background:var(--tint-2); }
+.cronrow__id{ flex:1 1 auto; min-width:0; }
+.cronrow__n{ display:block; font:600 16px/21px var(--font); }
+.cronrow__s{ display:block; font:var(--t-meta); color:var(--text-2); margin-top:1px; }
+.cronrow__next{ text-align:right; flex:0 0 auto; font:var(--t-meta); color:var(--text-2); }
+.cronrow--paused .cronrow__n, .cronrow--paused .cronrow__s{ opacity:.6; }
+
+/* jump-to-latest only exists once the reader has left the bottom */
+.jump{ opacity:0; pointer-events:none; transform:translateX(-50%) translateY(8px); transition:opacity var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out); }
+.jump.is-visible{ opacity:1; pointer-events:auto; transform:translateX(-50%); }
+.jump .chip--count{ background:var(--chat-accent); }
+
+/* ---------- 6c. FILES AND IMAGES ----------
+   Bots take files, not only photos. A sent file is a compact chip
+   under the owner's bubble — never a raw token in the message text.  */
+.fchip{
+  display:inline-flex; align-items:center; gap:var(--s2);
+  max-width:100%; padding:7px var(--s3) 7px var(--s2); border-radius:12px;
+  font:var(--t-meta); color:var(--text-2); text-align:left;
+  background:var(--glass-card); box-shadow:var(--edge-soft), 0 0 0 1px var(--hair-soft), var(--sh-card);
+}
+.fchip__ico{ display:grid; place-items:center; width:28px; height:28px; border-radius:8px; flex:0 0 auto; color:var(--chat-accent-text); background:var(--chat-soft); }
+.fchip__id{ min-width:0; }
+.fchip__n{ display:flex; min-width:0; max-width:190px; font:600 13.5px/17px var(--font); color:var(--text); }
+.fchip__n i{ font-style:normal; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.fchip__n b{ font-weight:600; flex:0 0 auto; white-space:nowrap; }
+.fchip__sz{ display:block; font:var(--t-meta); font-size:12px; color:var(--text-3); }
+.fchip__x{ display:grid; place-items:center; width:22px; height:22px; border-radius:50%; flex:0 0 auto; color:var(--text-2); background:var(--tint-sunk); }
+.fchip--err{ box-shadow:var(--edge-soft), 0 0 0 1px var(--danger-soft), var(--sh-card); }
+.fchip--err .fchip__ico{ color:var(--danger-text); background:var(--danger-soft); }
+.fchip--err .fchip__sz{ color:var(--danger-text); }
+.ring{ flex:0 0 auto; transform:rotate(-90deg); }
+.ring circle{ fill:none; stroke-width:2.6; }
+.ring .trk{ stroke:var(--hair); }
+.ring .bar{ stroke:var(--chat-accent); stroke-linecap:round; }
+
+/* the "+" menu */
+.plusmenu{
+  position:absolute; inset:auto auto calc(100% + 8px) 0; z-index:9;
+  min-width:196px; padding:6px; border-radius:18px;
+}
+.plusmenu__it{ display:flex; align-items:center; gap:var(--s3); width:100%; padding:8px var(--s3); border-radius:12px; text-align:left; font:400 15px/20px var(--font); }
+.plusmenu__it:hover{ background:var(--tint-2); }
+.plusmenu__it svg{ color:var(--chat-accent-text); flex:0 0 auto; }
+
+/* ---------- 8. MOTION PREFERENCE ---------- */
+@media (prefers-reduced-motion: reduce){
+  *, *::before, *::after{
+    animation-duration:.001ms !important; animation-iteration-count:1 !important;
+    transition-duration:.001ms !important;
+  }
+  .pres--input::after{ animation:none; opacity:.5; transform:scale(1.1); }
+  .dots i{ animation:none; opacity:.75; }
+  .caret{ animation:none; }
+}
+</style>
+</head>
+<body>
+
+<header class="toolbar">
+  <p class="toolbar__brand">Hermie <span>— Liquid Glass direction</span></p>
+  <div class="switcher">
+    <span class="lbl">Theme</span>
+    <div class="seg" role="group" aria-label="Theme">
+      <button type="button" data-theme-set="light" aria-pressed="true">Light</button>
+      <button type="button" data-theme-set="dark" aria-pressed="false">Dark</button>
+    </div>
+  </div>
+  <div class="switcher">
+    <span class="lbl">Wallpaper</span>
+    <div class="seg" role="group" aria-label="Wallpaper">
+      <button type="button" data-wall-set="blue" aria-pressed="true">Blue</button>
+      <button type="button" data-wall-set="warm" aria-pressed="false">Warm</button>
+      <button type="button" data-wall-set="graphite" aria-pressed="false">Graphite</button>
+      <button type="button" data-wall-set="slate" aria-pressed="false">Slate</button>
+    </div>
+  </div>
+</header>
+
+<main class="page">
+  <div class="lede">
+    <h1>Liquid Glass</h1>
+    <p>Two floating glass panels over a soft wallpaper. Bots keep one canonical chat each; everything a bot does that is not speech — tool calls, cron deliveries, messages to other bots — reads as a quiet ledger in the bot's own gutter instead of borrowing a speech bubble. Switch theme and wallpaper above: body text holds AA on all six combinations.</p>
+  </div>
+
+  <!-- ============================ FRAME A ============================ -->
+  <section class="sec">
+    <div class="sec__head">
+      <span class="sec__id">A</span>
+      <h2>Wide layout · 1180 × 820</h2>
+      <p>Mac window running the iPad build, or iPad landscape. The sidebar ends at the tab strip — there is no gateway card. The global connection speaks from one line under the title, on every layout, and says nothing at all while it is healthy.</p>
+    </div>
+    <div class="scroller">
+    <div class="frame frame--wide">
+      <div class="win">
+
+        <!-- ---------------- sidebar ---------------- -->
+        <aside class="panel sidebar" id="sidebarA">
+          <div class="sidebar__head">
+            <h2>Chats</h2>
+            <button type="button" class="gbtn" aria-label="New cron" title="New cron">
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.6 9A6.6 6.6 0 1 1 9 2.4"/><path d="M9 5.4V9l2.4 1.6"/><path d="M13.4 2.6v3.2M11.8 4.2H15"/></svg>
+            </button>
+            <button type="button" class="sidebar__edit" data-edit-toggle aria-pressed="false">Edit</button>
+          </div>
+
+          <button type="button" class="connline connline--out" role="status">
+            <span class="pres pres--inline pres--offline"></span> Signed out
+          </button>
+
+          <div class="field">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.6"/><path d="M10.6 10.6 14 14"/></svg>
+            Search chats
+          </div>
+
+          <div class="chips" role="group" aria-label="Filter chats">
+            <button type="button" class="chip" aria-pressed="true">All</button>
+            <button type="button" class="chip" aria-pressed="false">Unread</button>
+            <button type="button" class="chip" aria-pressed="false">Working</button>
+            <button type="button" class="chip" aria-pressed="false">Needs input</button>
+          </div>
+
+          <div class="list" role="listbox" aria-label="Chats" data-rowgroup>
+
+            <div class="divider">
+              <span>Work</span>
+              <span class="divider__rule"></span>
+              <span class="divider__act">
+                <button type="button" class="btn btn--sm">Rename</button>
+                <button type="button" class="btn btn--sm">Remove</button>
+              </span>
+            </div>
+
+            <div class="row" role="option" tabindex="0" aria-selected="true">
+              <span class="row__grip" aria-hidden="true"><svg width="12" height="16" viewBox="0 0 12 16" fill="currentColor" aria-hidden="true"><circle cx="3" cy="4" r="1.3"/><circle cx="9" cy="4" r="1.3"/><circle cx="3" cy="8" r="1.3"/><circle cx="9" cy="8" r="1.3"/><circle cx="3" cy="12" r="1.3"/><circle cx="9" cy="12" r="1.3"/></svg></span>
+              <span class="av av--researcher av--ring">R<span class="pres pres--working"></span></span>
+              <span class="row__body">
+                <span class="row__top"><span class="row__name">Researcher</span><span class="row__time">09:14</span></span>
+                <span class="row__prev"><span>Checking the third certificate now…</span></span>
+              </span>
+            </div>
+
+            <div class="row row--unread" role="option" tabindex="0" aria-selected="false" data-accent="violet">
+              <span class="row__grip" aria-hidden="true"><svg width="12" height="16" viewBox="0 0 12 16" fill="currentColor" aria-hidden="true"><circle cx="3" cy="4" r="1.3"/><circle cx="9" cy="4" r="1.3"/><circle cx="3" cy="8" r="1.3"/><circle cx="9" cy="8" r="1.3"/><circle cx="3" cy="12" r="1.3"/><circle cx="9" cy="12" r="1.3"/></svg></span>
+              <span class="av av--writer av--ring">W<span class="pres pres--online"></span></span>
+              <span class="row__body">
+                <span class="row__top"><span class="row__name">Writer</span><span class="row__time">08:52</span></span>
+                <span class="row__prev"><span>Draft is ready for your read-through.</span></span>
+              </span>
+              <span class="row__tail"><span class="chip--count">2</span></span>
+            </div>
+
+            <div class="divider">
+              <span>Finance</span>
+              <span class="divider__rule"></span>
+              <span class="divider__act">
+                <button type="button" class="btn btn--sm">Rename</button>
+                <button type="button" class="btn btn--sm">Remove</button>
+              </span>
+            </div>
+
+            <div class="row" role="option" tabindex="0" aria-selected="false" data-accent="teal">
+              <span class="row__grip" aria-hidden="true"><svg width="12" height="16" viewBox="0 0 12 16" fill="currentColor" aria-hidden="true"><circle cx="3" cy="4" r="1.3"/><circle cx="9" cy="4" r="1.3"/><circle cx="3" cy="8" r="1.3"/><circle cx="9" cy="8" r="1.3"/><circle cx="3" cy="12" r="1.3"/><circle cx="9" cy="12" r="1.3"/></svg></span>
+              <span class="av av--bookkeeper av--ring">B<span class="pres pres--input"></span></span>
+              <span class="row__body">
+                <span class="row__top"><span class="row__name">Bookkeeper</span><span class="row__time">Yst.</span></span>
+                <span class="row__prev"><span>Approval needed before I move three invoices.</span></span>
+              </span>
+            </div>
+
+            <div class="row" role="option" tabindex="0" aria-selected="false">
+              <span class="row__grip" aria-hidden="true"><svg width="12" height="16" viewBox="0 0 12 16" fill="currentColor" aria-hidden="true"><circle cx="3" cy="4" r="1.3"/><circle cx="9" cy="4" r="1.3"/><circle cx="3" cy="8" r="1.3"/><circle cx="9" cy="8" r="1.3"/><circle cx="3" cy="12" r="1.3"/><circle cx="9" cy="12" r="1.3"/></svg></span>
+              <span class="av av--postman">P<span class="pres pres--offline"></span></span>
+              <span class="row__body">
+                <span class="row__top"><span class="row__name">Postman</span><span class="row__time">Tue</span></span>
+                <span class="row__prev"><span>Offline · last seen 21:09</span></span>
+              </span>
+            </div>
+
+            <div data-disc>
+              <button type="button" class="arch" data-toggle aria-expanded="false">
+                <svg class="chev" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3l4 4-4 4"/></svg>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 5.2h12v7.3a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/><path d="M1.6 2.6h12.8v2.6H1.6z"/><path d="M6.4 8.2h3.2"/></svg>
+                Archived (1)
+              </button>
+              <div class="arch__body">
+                <div class="row" role="option" tabindex="0" aria-selected="false">
+                  <span class="av av--default">D<span class="pres pres--offline"></span></span>
+                  <span class="row__body">
+                    <span class="row__top"><span class="row__name">Default</span><span class="row__time">Aug</span></span>
+                    <span class="row__prev"><span>Archived · no session attached</span></span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="editbar tint">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><circle cx="4" cy="3" r="1.1"/><circle cx="10" cy="3" r="1.1"/><circle cx="4" cy="7" r="1.1"/><circle cx="10" cy="7" r="1.1"/><circle cx="4" cy="11" r="1.1"/><circle cx="10" cy="11" r="1.1"/></svg>
+            Drag a row to reorder
+            <button type="button" class="btn btn--sm" style="margin-left:auto">Add divider</button>
+          </div>
+
+          <nav class="tabs" aria-label="Sections">
+            <a class="tab" href="#" aria-current="page">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 9.6c0 3.3-3.1 6-7 6-.8 0-1.6-.1-2.3-.3L4 16.6l1-2.8A5.7 5.7 0 0 1 3 9.6c0-3.3 3.1-6 7-6s7 2.7 7 6z"/></svg>
+              Chats
+            </a>
+            <a class="tab" href="#">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 10.5h3l2-5 2.6 9 2.4-6 1.5 2h3.5"/></svg>
+              Activity
+            </a>
+            <a class="tab" href="#">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10" cy="10.5" r="6.5"/><path d="M10 7v3.5l2.4 1.6"/><path d="M7.4 2.6h5.2"/></svg>
+              Crons
+            </a>
+            <a class="tab" href="#" data-open-over="settingsA">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h9M15 6h2M3 14h2M8 14h9"/><circle cx="13.5" cy="6" r="1.8"/><circle cx="6.5" cy="14" r="1.8"/></svg>
+              Settings
+            </a>
+          </nav>
+
+        </aside>
+
+        <!-- ---------------- chat ---------------- -->
+        <section class="panel chat" id="chatA">
+          <header class="chat__head float">
+            <button type="button" class="gbtn" aria-label="Back to chats">
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 3.5 5.5 9l5.5 5.5"/></svg>
+            </button>
+            <span class="av av--sm av--researcher av--ring">R</span>
+            <span class="chat__id">
+              <span class="chat__name">Researcher</span>
+              <span class="chat__sub"><span class="pres pres--inline pres--working"></span> <b>Working…</b> · session attached</span>
+            </span>
+            <span class="chat__acts">
+              <button type="button" class="gbtn" aria-label="Search in this chat">
+                <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.6"/><path d="M10.6 10.6 14 14"/></svg>
+              </button>
+              <button type="button" class="gbtn" aria-label="Crons for this bot">
+                <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="6.6"/><path d="M9 5v4l2.6 1.8"/></svg>
+              </button>
+              <button type="button" class="gbtn" aria-label="Chat options" data-open-sheet="optionsA">
+                <svg width="17" height="17" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3.2" cy="8" r="1.4"/><circle cx="8" cy="8" r="1.4"/><circle cx="12.8" cy="8" r="1.4"/></svg>
+              </button>
+            </span>
+          </header>
+
+          <div class="agents float">
+            <span class="agents__pips" aria-hidden="true"><i></i><i></i><i></i></span>
+            <b>3 agents working</b> · <time>0:42</time>
+            <button type="button" class="link" style="margin-left:auto">Show</button>
+          </div>
+
+          <div class="scroll" data-scroll>
+
+            <p class="stamp">Yesterday</p>
+
+            <div class="msg msg--in">
+              <div class="mstack">
+                <div class="bub bub--in bub--first">The nightly sweep is set up. I will report at 04:22 unless something breaks before then.</div>
+              </div>
+            </div>
+            <div class="msg msg--in">
+              <div class="mstack">
+                <div class="bub bub--in">Two of the three certificates renew on their own.
+                  <svg class="tail tail--in" viewBox="0 0 13 17" aria-hidden="true"><path d="M0 0 L5 0 C5 7 7.6 13.4 13 16 C8.4 17.7 3 16 0 12.4 Z"/></svg>
+                </div>
+                <p class="meta">21:04</p>
+              </div>
+            </div>
+
+            <div class="msg msg--out msg--gap">
+              <div class="mstack">
+                <div class="bub bub--out">Good. Keep the third one on your list.
+                  <svg class="tail tail--out" viewBox="0 0 13 17" aria-hidden="true"><path d="M0 0 L5 0 C5 7 7.6 13.4 13 16 C8.4 17.7 3 16 0 12.4 Z"/></svg>
+                </div>
+                <p class="meta meta--read">21:09 · Read
+                  <svg width="16" height="11" viewBox="0 0 16 11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 6.2 3.8 9 9.3 2.6"/><path d="M6.6 6.6 8.2 8.4 13.8 1.8"/></svg>
+                </p>
+              </div>
+            </div>
+
+            <p class="stamp">Today</p>
+
+            <!-- cron delivery: never the owner's own bubble -->
+            <div class="cron" data-disc>
+              <button type="button" class="cron__top" data-toggle aria-expanded="false">
+                <span class="cron__ico">
+                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="6.6"/><path d="M9 5v4l2.6 1.8"/></svg>
+                </span>
+                <span class="cron__id">
+                  <span class="cron__kicker">Cron</span>
+                  <span class="cron__name">Nightly domain scout</span>
+                  <span class="cron__meta">ran 04:22 · delivered to this chat</span>
+                </span>
+                <svg class="chev" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg>
+              </button>
+              <div class="cron__body">
+                <p>Three domains checked, all resolving. One registrar transfer detected on <code>docs.example.net</code>. One certificate inside the fourteen-day window.</p>
+                <div class="cron__foot">
+                  <button type="button" class="btn btn--sm">Open cron</button>
+                  <button type="button" class="btn btn--sm">Run now</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="msg msg--out msg--gap">
+              <div class="mstack">
+                <div class="bub bub--out">Check whether the three domains we track still resolve, then summarise the registrar changes since last month.
+                  <svg class="tail tail--out" viewBox="0 0 13 17" aria-hidden="true"><path d="M0 0 L5 0 C5 7 7.6 13.4 13 16 C8.4 17.7 3 16 0 12.4 Z"/></svg>
+                </div>
+                <p class="meta">09:12 · Delivered
+                  <svg width="16" height="11" viewBox="0 0 16 11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 6.2 3.8 9 9.3 2.6"/><path d="M6.6 6.6 8.2 8.4 13.8 1.8"/></svg>
+                </p>
+              </div>
+            </div>
+
+            <div class="evt evt--think" data-disc>
+              <button type="button" class="evtline" data-toggle aria-expanded="false">
+                <span class="evtline__ico">
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><circle cx="7" cy="7" r="5.4"/><circle cx="4.5" cy="7" r=".85" fill="currentColor" stroke="none"/><circle cx="7" cy="7" r=".85" fill="currentColor" stroke="none"/><circle cx="9.5" cy="7" r=".85" fill="currentColor" stroke="none"/></svg>
+                </span>
+                <span class="evtline__t">Thought for 8s</span>
+                <svg class="chev" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3l4 4-4 4"/></svg>
+              </button>
+              <div class="evt__card">Checked the cached sweep first. Two answers were older than an hour, so those two were re-run from the gateway host rather than trusted.</div>
+            </div>
+
+            <div class="evt" data-disc>
+              <button type="button" class="evtline" data-toggle aria-expanded="false">
+                <span class="evtline__ico">
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.2 4.4 5.6 7l-2.4 2.6"/><path d="M7.4 9.8h3.4"/></svg>
+                </span>
+                <span class="evtline__t">terminal</span><span class="evtline__sep">·</span>
+                <span class="evtline__t">whois status.example.org</span>
+                <span class="evtline__dur">1.2s</span>
+                <svg class="chev" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3l4 4-4 4"/></svg>
+              </button>
+              <div class="evt__card">
+                <p class="evt__lbl">Arguments</p>
+                <div class="well"><pre>{ "domain": "status.example.org", "timeout_ms": 4000 }</pre></div>
+                <p class="evt__lbl">Result</p>
+                <div class="well"><pre>Domain:     status.example.org
+Registrar:  Example Registrar
+Updated:    2026-08-02
+Expires:    2027-03-14
+Status:     clientTransferProhibited</pre></div>
+              </div>
+            </div>
+
+            <div class="evt is-open" data-disc>
+              <button type="button" class="evtline" data-toggle aria-expanded="true">
+                <span class="evtline__ico">
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.2 4.4 5.6 7l-2.4 2.6"/><path d="M7.4 9.8h3.4"/></svg>
+                </span>
+                <span class="evtline__t">terminal</span><span class="evtline__sep">·</span>
+                <span class="evtline__t">dig +short docs.example.net A</span>
+                <span class="evtline__dur">0.4s</span>
+                <svg class="chev" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3l4 4-4 4"/></svg>
+              </button>
+              <div class="evt__card">
+                <p class="evt__lbl">Result</p>
+                <div class="well"><pre>203.0.113.24
+203.0.113.25</pre></div>
+              </div>
+            </div>
+
+            <!-- long markdown report, folded -->
+            <div class="msg msg--in msg--gap">
+              <div class="mstack">
+                <div class="bub bub--in bub--read md" data-disc>
+                  <div class="fold__body">
+                    <h4>Domain watch — week 38</h4>
+                    <p><strong>All three domains resolve.</strong> One registrar moved, one certificate expires inside fourteen days. Nothing needs you before Monday.</p>
+                    <ol>
+                      <li><code>status.example.org</code> — registrar unchanged, certificate valid to 12 Nov.</li>
+                      <li><code>docs.example.net</code> — transferred to a new registrar on 14 Sep. The sixty-day lock is active, so <code>--transfer-out</code> will be refused until 13 Nov.</li>
+                      <li><code>mail.example.com</code> — certificate expires in <strong>11 days</strong> and renewal is not automated. I can fold it into the nightly scout.</li>
+                    </ol>
+                    <h5>What I checked</h5>
+                    <p>Each answer comes from the gateway host, so these are the records your own network sees rather than a public resolver's cache.</p>
+                    <pre><code>dig +short status.example.org A; openssl s_client -connect mail.example.com:443 -servername mail.example.com &lt;/dev/null 2&gt;/dev/null | openssl x509 -noout -enddate</code></pre>
+                    <p>The transfer lock is the only thing that blocks work this week: if you still want to consolidate all three under one registrar, the earliest safe date is 13 Nov and I can hold a reminder for it.</p>
+                    <p>Next sweep runs 04:22.</p>
+                  </div>
+                  <button type="button" class="fold__btn" data-toggle data-more="Show more" data-less="Show less" aria-expanded="false">
+                    <span data-label>Show more</span>
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5"/></svg>
+                  </button>
+                  <svg class="tail tail--in" viewBox="0 0 13 17" aria-hidden="true"><path d="M0 0 L5 0 C5 7 7.6 13.4 13 16 C8.4 17.7 3 16 0 12.4 Z"/></svg>
+                </div>
+                <p class="meta">09:14</p>
+              </div>
+            </div>
+
+            <div class="evt is-open" data-disc>
+              <button type="button" class="evtline" data-toggle aria-expanded="true">
+                <span class="evtline__ico">
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M2.6 4.4h5M5.1 1.9v5M2.6 10.4h5"/><path d="M10.4 2.6v8.8"/></svg>
+                </span>
+                <span class="evtline__t">edit</span><span class="evtline__sep">·</span>
+                <span class="evtline__t">watchlist.json</span>
+                <span class="evtline__dur">+1 −1</span>
+                <svg class="chev" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3l4 4-4 4"/></svg>
+              </button>
+              <div class="evt__card">
+                <div class="diff">
+                  <div class="ctx"><span class="mark"> </span>  "domains": [</div>
+                  <div class="del"><span class="mark">−</span>    { "host": "docs.example.net", "registrar": "old" },</div>
+                  <div class="add"><span class="mark">+</span>    { "host": "docs.example.net", "registrar": "new", "locked_until": "2026-11-13" },</div>
+                  <div class="ctx"><span class="mark"> </span>  ]</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="evt evt--error is-open" data-disc>
+              <button type="button" class="evtline" data-toggle aria-expanded="true">
+                <span class="evtline__ico">
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 2.2 12.8 12H1.2z"/><path d="M7 5.8v2.6M7 10.2v.2"/></svg>
+                </span>
+                <span class="evtline__t">terminal</span><span class="evtline__sep">·</span>
+                <span class="evtline__t">curl https://mail.example.com</span>
+                <span class="evtline__dur">failed</span>
+                <svg class="chev" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3l4 4-4 4"/></svg>
+              </button>
+              <div class="evt__card">
+                <p class="evt__err">Exit 6 · could not resolve host. The gateway's resolver answered SERVFAIL twice in a row.</p>
+                <div class="well" style="margin-top:10px"><pre>curl: (6) Could not resolve host: mail.example.com</pre></div>
+                <div class="cron__foot"><button type="button" class="btn btn--sm">Retry</button><button type="button" class="btn btn--sm">Copy output</button></div>
+              </div>
+            </div>
+
+            <!-- bot-to-bot: quiet grey ledger lines, reply always visible -->
+            <div class="dms">
+              <div class="dm" data-disc>
+                <button type="button" class="dmline" data-toggle aria-expanded="false">
+                  <svg class="dmline__arrow" width="14" height="12" viewBox="0 0 14 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.6 6h9.4"/><path d="M8 3l3 3-3 3"/></svg>
+                  <span class="dmline__to">Message to @writer</span>
+                  <span class="dmline__prev">Turn the week-38 domain report into two paragraphs…</span>
+                  <span class="dmline__time">09:15</span>
+                  <span class="dmline__state">
+                    <svg width="13" height="12" viewBox="0 0 13 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.4 2.4 1.6 5.2 4.4 8"/><path d="M1.6 5.2h6.2a3.2 3.2 0 0 1 3.2 3.2v1.4"/></svg>
+                    <b>replied</b> <em>“Two paragraphs are in the draft…”</em>
+                  </span>
+                </button>
+                <div class="dm__thread">
+                  <div class="dm__turn">
+                    <p class="dm__who">Sent to @writer · 09:15</p>
+                    <p class="dm__txt">Turn the week-38 domain report into two paragraphs for the status page. Keep the certificate warning in the first line.</p>
+                  </div>
+                  <div class="dm__turn">
+                    <p class="dm__who"><span class="av av--xs av--writer">W</span> @writer replied · 09:16</p>
+                    <p class="dm__txt md">Two paragraphs are in the draft. I led with the <strong>11-day certificate</strong> and kept the registrar lock as the second sentence. Want me to add the 13 Nov date as a line of its own?</p>
+                  </div>
+                  <div class="dm__foot">
+                    <span class="dm__status">Delivered · answered in 42s</span>
+                    <button type="button" class="link">Open @writer's chat</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="dm" data-disc>
+                <button type="button" class="dmline" data-toggle aria-expanded="false">
+                  <svg class="dmline__arrow" width="14" height="12" viewBox="0 0 14 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.6 6h9.4"/><path d="M8 3l3 3-3 3"/></svg>
+                  <span class="dmline__to">Message to @bookkeeper</span>
+                  <span class="dmline__prev">Does the registrar invoice still sit under hosting?</span>
+                  <span class="dmline__time">09:17</span>
+                  <span class="dmline__state dmline__state--wait">
+                    <span class="wait" aria-hidden="true"></span>
+                    <b>Delivered · waiting for reply</b>
+                  </span>
+                </button>
+                <div class="dm__thread">
+                  <div class="dm__turn">
+                    <p class="dm__who">Sent to @bookkeeper · 09:17</p>
+                    <p class="dm__txt">Does the registrar invoice still sit under hosting, or did it move to software this quarter?</p>
+                  </div>
+                  <div class="dm__foot">
+                    <span class="dm__status">Delivered 09:17 · no reply yet</span>
+                    <button type="button" class="link">Open @bookkeeper's chat</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="dm" data-disc>
+                <button type="button" class="dmline" data-toggle aria-expanded="false">
+                  <svg class="dmline__arrow" width="14" height="12" viewBox="0 0 14 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.6 6h9.4"/><path d="M8 3l3 3-3 3"/></svg>
+                  <span class="dmline__to">Message to @postman</span>
+                  <span class="dmline__prev">Send the sweep summary to the status mailbox.</span>
+                  <span class="dmline__time">09:18</span>
+                  <span class="dmline__state dmline__state--fail"><b>Failed</b> <em>· bot offline</em></span>
+                </button>
+                <div class="dm__thread">
+                  <div class="dm__turn">
+                    <p class="dm__who">Sent to @postman · 09:18</p>
+                    <p class="dm__txt">Send the sweep summary to the status mailbox.</p>
+                  </div>
+                  <div class="dm__foot">
+                    <span class="dm__status">Failed · @postman has no session attached</span>
+                    <button type="button" class="btn btn--sm">Retry</button>
+                  </div>
+                </div>
+              </div>
+
+              <div data-disc>
+                <button type="button" class="dmroll" data-toggle aria-expanded="false">
+                  <svg class="dmline__arrow" width="14" height="12" viewBox="0 0 14 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.6 6h9.4"/><path d="M8 3l3 3-3 3"/></svg>
+                  <b>5 messages to @writer</b> · 4 replies
+                  <svg class="chev" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3l4 4-4 4"/></svg>
+                </button>
+                <div class="dmroll__hidden">
+                  <button type="button" class="dmline">
+                    <svg class="dmline__arrow" width="14" height="12" viewBox="0 0 14 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.6 6h9.4"/><path d="M8 3l3 3-3 3"/></svg>
+                    <span class="dmline__to">Message to @writer</span>
+                    <span class="dmline__prev">Shorten the second paragraph by a sentence.</span>
+                    <span class="dmline__time">09:21</span>
+                    <span class="dmline__state"><svg width="13" height="12" viewBox="0 0 13 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.4 2.4 1.6 5.2 4.4 8"/><path d="M1.6 5.2h6.2a3.2 3.2 0 0 1 3.2 3.2v1.4"/></svg><b>replied</b> <em>“Done — 38 words…”</em></span>
+                  </button>
+                  <button type="button" class="dmline">
+                    <svg class="dmline__arrow" width="14" height="12" viewBox="0 0 14 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.6 6h9.4"/><path d="M8 3l3 3-3 3"/></svg>
+                    <span class="dmline__to">Message to @writer</span>
+                    <span class="dmline__prev">Use “certificate”, not “cert”, throughout.</span>
+                    <span class="dmline__time">09:23</span>
+                    <span class="dmline__state"><svg width="13" height="12" viewBox="0 0 13 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.4 2.4 1.6 5.2 4.4 8"/><path d="M1.6 5.2h6.2a3.2 3.2 0 0 1 3.2 3.2v1.4"/></svg><b>replied</b> <em>“Replaced four times.”</em></span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- owner message carrying a file -->
+            <div class="msg msg--out msg--gap">
+              <div class="mstack">
+                <div class="bub bub--out">Cross-check these against the invoice list.
+                  <svg class="tail tail--out" viewBox="0 0 13 17" aria-hidden="true"><path d="M0 0 L5 0 C5 7 7.6 13.4 13 16 C8.4 17.7 3 16 0 12.4 Z"/></svg>
+                </div>
+                <div class="fchip" style="margin-top:6px">
+                  <span class="fchip__ico">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 1.8H4.2a1.4 1.4 0 0 0-1.4 1.4v9.6a1.4 1.4 0 0 0 1.4 1.4h7.6a1.4 1.4 0 0 0 1.4-1.4V6z"/><path d="M9 1.8V6h4.2"/></svg>
+                  </span>
+                  <span class="fchip__id">
+                    <span class="fchip__n"><i>domain-watchlist-2026-week</i><b>38.csv</b></span>
+                    <span class="fchip__sz">CSV · 12 KB</span>
+                  </span>
+                </div>
+                <p class="meta meta--read">09:26 · Read
+                  <svg width="16" height="11" viewBox="0 0 16 11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 6.2 3.8 9 9.3 2.6"/><path d="M6.6 6.6 8.2 8.4 13.8 1.8"/></svg>
+                </p>
+              </div>
+            </div>
+
+            <!-- second report, already expanded -->
+            <div class="msg msg--in msg--gap">
+              <div class="mstack">
+                <div class="bub bub--in bub--read md is-open" data-disc>
+                  <div class="fold__body">
+                    <h4>Registrar change — what moved</h4>
+                    <p>The transfer touched one domain only. Everything below comes from the registrar's own WHOIS answer, not from the cached sweep.</p>
+                    <div class="tablewrap">
+                      <table>
+                        <thead><tr><th>Domain</th><th>Resolves</th><th>Certificate</th><th>Registrar</th></tr></thead>
+                        <tbody>
+                          <tr><td><code>status.example.org</code></td><td>Yes</td><td>12 Nov</td><td>unchanged</td></tr>
+                          <tr><td><code>docs.example.net</code></td><td>Yes</td><td>28 Dec</td><td>moved 14 Sep</td></tr>
+                          <tr><td><code>mail.example.com</code></td><td>Yes</td><td><strong>30 Sep</strong></td><td>unchanged</td></tr>
+                        </tbody>
+                      </table>
+                    </div>
+                    <p>The flags I compare between runs are <code>clientTransferProhibited</code>, <code>clientUpdateProhibited</code>, <code>clientDeleteProhibited</code> and <code>serverTransferProhibited</code>; only the first changed.</p>
+                    <pre><code>whois docs.example.net | grep -Ei '^(registrar|domain status|updated date):' | sed 's/  */ /g' | sort -u</code></pre>
+                  </div>
+                  <button type="button" class="fold__btn" data-toggle data-more="Show more" data-less="Show less" aria-expanded="true">
+                    <span data-label>Show less</span>
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5"/></svg>
+                  </button>
+                  <svg class="tail tail--in" viewBox="0 0 13 17" aria-hidden="true"><path d="M0 0 L5 0 C5 7 7.6 13.4 13 16 C8.4 17.7 3 16 0 12.4 Z"/></svg>
+                </div>
+                <span class="react">👍 1</span>
+                <p class="meta">09:28</p>
+              </div>
+            </div>
+
+            <div class="msg msg--in">
+              <div class="mstack">
+                <div class="bub bub--in">Latency for the two re-runs, if you want the picture:
+                  <span class="thumbs">
+                    <figure class="thumb">
+                      <svg viewBox="0 0 108 78" fill="none" aria-hidden="true"><path d="M6 60 24 44 42 50 60 28 78 34 102 14" stroke="#1B5FD0" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 70h96" stroke="#1B5FD0" stroke-opacity=".35" stroke-width="1.4"/></svg>
+                      <figcaption>latency.png</figcaption>
+                    </figure>
+                    <figure class="thumb thumb--2">
+                      <svg viewBox="0 0 108 78" fill="none" aria-hidden="true"><rect x="12" y="38" width="14" height="24" rx="3" fill="#C06A0A"/><rect x="34" y="26" width="14" height="36" rx="3" fill="#C06A0A" fill-opacity=".8"/><rect x="56" y="44" width="14" height="18" rx="3" fill="#C06A0A" fill-opacity=".6"/><rect x="78" y="18" width="14" height="44" rx="3" fill="#C06A0A"/></svg>
+                      <figcaption>ttl-spread.png</figcaption>
+                    </figure>
+                  </span>
+                  <svg class="tail tail--in" viewBox="0 0 13 17" aria-hidden="true"><path d="M0 0 L5 0 C5 7 7.6 13.4 13 16 C8.4 17.7 3 16 0 12.4 Z"/></svg>
+                </div>
+                <p class="meta">09:29</p>
+              </div>
+            </div>
+
+            <div class="msg msg--in">
+              <div class="mstack">
+                <div class="bub bub--in bub--typing" aria-label="Researcher is typing">
+                  <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                  <svg class="tail tail--in" viewBox="0 0 13 17" aria-hidden="true"><path d="M0 0 L5 0 C5 7 7.6 13.4 13 16 C8.4 17.7 3 16 0 12.4 Z"/></svg>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <button type="button" class="jump float" data-jump>
+            <span class="chip--count">3</span> Jump to latest
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 5.5 7 9l3.5-3.5"/></svg>
+          </button>
+
+          <div class="composer float">
+            <div class="composer__row">
+              <button type="button" class="gbtn" aria-label="Attach">
+                <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M9 3.6v10.8M3.6 9h10.8"/></svg>
+              </button>
+              <div class="composer__field is-empty">Message Researcher</div>
+              <button type="button" class="pbtn composer__send" data-sendtoggle data-state="running" aria-label="Stop the current turn">
+                <span class="ico-send" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14.4V4.2"/><path d="M4.6 8.6 9 4.2l4.4 4.4"/></svg></span>
+                <span class="ico-stop" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><rect x="5.4" y="5.4" width="7.2" height="7.2" rx="1.8" fill="currentColor"/></svg></span>
+              </button>
+            </div>
+            <p class="composer__hint">Enter to send · Shift+Enter for a new line</p>
+          </div>
+        </section>
+
+        <!-- chat options, where the per-chat colour is chosen -->
+        <div class="scrim" data-close-sheet></div>
+        <div class="sheet sheet--wide" id="optionsA" role="dialog" aria-modal="true" aria-label="Researcher options">
+          <span class="grabber" aria-hidden="true"></span>
+          <h3>Researcher</h3>
+          <p class="sheet__sub">Bot options for this chat. Colour applies to this chat only.</p>
+          <div class="grp">
+            <p class="grp__lbl">Chat colour</p>
+            <div class="grp__box tint">
+              <div class="swatches" role="group" aria-label="Chat colour">
+                <button type="button" class="sw8 sw8--default" aria-pressed="true" aria-label="Default"></button>
+                <button type="button" class="sw8" data-accent="indigo" aria-pressed="false" aria-label="Indigo"></button>
+                <button type="button" class="sw8" data-accent="violet" aria-pressed="false" aria-label="Violet"></button>
+                <button type="button" class="sw8" data-accent="magenta" aria-pressed="false" aria-label="Magenta"></button>
+                <button type="button" class="sw8" data-accent="red" aria-pressed="false" aria-label="Red"></button>
+                <button type="button" class="sw8" data-accent="orange" aria-pressed="false" aria-label="Orange"></button>
+                <button type="button" class="sw8" data-accent="teal" aria-pressed="false" aria-label="Teal"></button>
+                <button type="button" class="sw8" data-accent="green" aria-pressed="false" aria-label="Green"></button>
+                <button type="button" class="sw8" data-accent="graphite" aria-pressed="false" aria-label="Graphite"></button>
+                <button type="button" class="sw8" data-accent="slate" aria-pressed="false" aria-label="Slate"></button>
+              </div>
+              <p class="grp__note" style="padding:0 var(--s4) var(--s3)">Tints the avatar ring, the selected row, the header accent and your outgoing bubbles.</p>
+            </div>
+          </div>
+          <div class="grp">
+            <div class="grp__box tint">
+              <div class="grp__row"><span class="t">Move to section</span><span class="v">Work</span></div>
+              <div class="grp__row"><span class="t">Mute this chat</span><span class="sw" role="switch" aria-checked="false" tabindex="0"></span></div>
+              <div class="grp__row"><span class="t">Archive</span><span class="v">Hides it under Archived</span></div>
+            </div>
+          </div>
+          <div class="sheet__acts" style="margin-top:var(--s5)">
+            <button type="button" class="btn" data-close-sheet>Done</button>
+          </div>
+          <p class="sheet__esc">Esc closes</p>
+        </div>
+      </div>
+    </div>
+    </div>
+  </section>
+
+  <!-- ==================== FRAME A · COLLAPSED SIDEBAR ==================== -->
+  <section class="sec">
+    <div class="sec__head">
+      <span class="sec__id">A1</span>
+      <h2>Wide layout, sidebar hidden</h2>
+      <p>The same window with the chat list put away. Below 900px it starts like this, because the chat column has nothing left to give: at 834px portrait it keeps 492px and a bubble caps around 335px, roughly 38 characters. Above 900px it starts open. An explicit Hide or Show wins at either width and is remembered per gateway, and nothing flips itself while the window stays the size it was.</p>
+      <p>Exactly one sidebar control is on screen at a time. Here it is the rail's, and it always means <b>Show sidebar</b>; with the list open it is the round button in the chat header, and that always means <b>Hide sidebar</b>. Two of them, 90px apart, doing the same thing, is what the first build drew. ⌘⇧S and the Mac menu bar's Hide/Show Sidebar reach the same place.</p>
+      <p>Showing it again at this width lays the list <b>over</b> the chat behind a scrim, rather than pushing the chat aside a second time, and takes it away again as soon as a chat is picked. Esc closes one level. That slide is the one animation outside the needs-input pulse: 200ms, and none at all under Reduce Motion. The collapse itself is instant — there the panel is not arriving, it is resizing.</p>
+    </div>
+    <div class="scroller">
+    <div class="frame frame--wide" style="height:520px">
+      <div class="win">
+
+        <!-- ---------------- rail ---------------- -->
+        <aside class="panel sidebar sidebar--rail" aria-label="Sidebar, hidden">
+          <button type="button" class="rail__btn" aria-label="Show sidebar" title="Show sidebar">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="3"/><path d="M9.6 5v14"/></svg>
+            <span class="rail__badge">3</span>
+          </button>
+
+          <!-- The destinations sit at the FOOT of the rail because that is where the
+               strip they replace sits, so the reader's hand goes to the same corner. -->
+          <span class="rail__spacer"></span>
+
+          <button type="button" class="rail__btn" aria-label="Activity" title="Activity">
+            <svg width="19" height="19" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 10.5h3l2-5 2.6 9 2.4-6 1.5 2h3.5"/></svg>
+          </button>
+          <button type="button" class="rail__btn" aria-label="Crons" title="Crons">
+            <svg width="19" height="19" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10" cy="10.5" r="6.5"/><path d="M10 7v3.5l2.4 1.6"/><path d="M7.4 2.6h5.2"/></svg>
+          </button>
+          <button type="button" class="rail__btn" aria-label="Settings" title="Settings">
+            <svg width="19" height="19" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h9M15 6h2M3 14h2M8 14h9"/><circle cx="13.5" cy="6" r="1.8"/><circle cx="6.5" cy="14" r="1.8"/></svg>
+          </button>
+        </aside>
+
+        <!-- ---------------- chat, with the width the list gave up ---------------- -->
+        <section class="panel chat">
+          <header class="chat__head float">
+            <!-- No sidebar button here: the rail has it, and one control at a time
+                 is the rule. With the list open this slot carries Hide sidebar. -->
+            <span class="av av--sm av--researcher av--ring">R</span>
+            <span class="chat__id">
+              <span class="chat__name">Researcher</span>
+              <span class="chat__sub"><span class="pres pres--inline pres--working"></span> <b>Working…</b> · session attached</span>
+            </span>
+            <span class="chat__acts">
+              <button type="button" class="gbtn" aria-label="Chat options">
+                <svg width="17" height="17" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3.2" cy="8" r="1.4"/><circle cx="8" cy="8" r="1.4"/><circle cx="12.8" cy="8" r="1.4"/></svg>
+              </button>
+            </span>
+          </header>
+
+          <div class="scroll" data-scroll>
+            <div class="msg msg--in">
+              <div class="mstack">
+                <div class="bub bub--in bub--first">The chat column keeps every point the list gave up. The window gap is unchanged on both sides — only the first panel is narrower.</div>
+              </div>
+            </div>
+            <div class="msg msg--out msg--gap">
+              <div class="mstack">
+                <div class="bub bub--out">Good. Put it back when I need the list.
+                  <svg class="tail tail--out" viewBox="0 0 13 17" aria-hidden="true"><path d="M0 0 L5 0 C5 7 7.6 13.4 13 16 C8.4 17.7 3 16 0 12.4 Z"/></svg>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </div>
+    </div>
+  </section>
+
+  <!-- ======================= FRAME A2: SETTINGS OVER CHAT ======================= -->
+  <section class="sec">
+    <div class="sec__head">
+      <span class="sec__id">A2</span>
+      <h2>Settings over the chat column</h2>
+      <p>Activity, Crons and Settings slide in from the right; the sidebar stays put. Esc or the round close button dismisses.</p>
+    </div>
+    <div class="scroller">
+    <div class="frame frame--wide" style="height:620px">
+      <div class="win is-over">
+
+        <aside class="panel sidebar">
+          <div class="sidebar__head">
+            <h2>Chats</h2>
+            <button type="button" class="gbtn" aria-label="New cron">
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.6 9A6.6 6.6 0 1 1 9 2.4"/><path d="M9 5.4V9l2.4 1.6"/><path d="M13.4 2.6v3.2M11.8 4.2H15"/></svg>
+            </button>
+            <button type="button" class="sidebar__edit">Edit</button>
+          </div>
+          <div class="field">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.6"/><path d="M10.6 10.6 14 14"/></svg>
+            Search chats
+          </div>
+          <div class="chips">
+            <span class="chip" aria-pressed="true">All</span>
+            <span class="chip">Unread</span>
+            <span class="chip">Working</span>
+            <span class="chip">Needs input</span>
+          </div>
+          <div class="list">
+            <div class="divider"><span>Work</span><span class="divider__rule"></span></div>
+            <div class="row" aria-selected="true">
+              <span class="av av--researcher av--ring">R<span class="pres pres--working"></span></span>
+              <span class="row__body">
+                <span class="row__top"><span class="row__name">Researcher</span><span class="row__time">09:29</span></span>
+                <span class="row__prev"><span>Latency for the two re-runs, if you want…</span></span>
+              </span>
+            </div>
+            <div class="row row--unread" data-accent="violet">
+              <span class="av av--writer av--ring">W<span class="pres pres--online"></span></span>
+              <span class="row__body">
+                <span class="row__top"><span class="row__name">Writer</span><span class="row__time">08:52</span></span>
+                <span class="row__prev"><span>Draft is ready for your read-through.</span></span>
+              </span>
+              <span class="row__tail"><span class="chip--count">2</span></span>
+            </div>
+            <div class="divider"><span>Finance</span><span class="divider__rule"></span></div>
+            <div class="row" data-accent="teal">
+              <span class="av av--bookkeeper av--ring">B<span class="pres pres--input"></span></span>
+              <span class="row__body">
+                <span class="row__top"><span class="row__name">Bookkeeper</span><span class="row__time">Yst.</span></span>
+                <span class="row__prev"><span>Approval needed before I move three invoices.</span></span>
+              </span>
+            </div>
+          </div>
+          <nav class="tabs" aria-label="Sections">
+            <span class="tab">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 9.6c0 3.3-3.1 6-7 6-.8 0-1.6-.1-2.3-.3L4 16.6l1-2.8A5.7 5.7 0 0 1 3 9.6c0-3.3 3.1-6 7-6s7 2.7 7 6z"/></svg>
+              Chats
+            </span>
+            <span class="tab">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 10.5h3l2-5 2.6 9 2.4-6 1.5 2h3.5"/></svg>
+              Activity
+            </span>
+            <span class="tab">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10" cy="10.5" r="6.5"/><path d="M10 7v3.5l2.4 1.6"/><path d="M7.4 2.6h5.2"/></svg>
+              Crons
+            </span>
+            <span class="tab" aria-current="page">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h9M15 6h2M3 14h2M8 14h9"/><circle cx="13.5" cy="6" r="1.8"/><circle cx="6.5" cy="14" r="1.8"/></svg>
+              Settings
+            </span>
+          </nav>
+          <div class="panel__dim" data-close-over></div>
+        </aside>
+
+        <section class="panel chat">
+          <header class="chat__head float">
+            <span class="gbtn">
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 3.5 5.5 9l5.5 5.5"/></svg>
+            </span>
+            <span class="av av--sm av--researcher av--ring">R</span>
+            <span class="chat__id">
+              <span class="chat__name">Researcher</span>
+              <span class="chat__sub"><span class="pres pres--inline pres--working"></span> <b>Working…</b> · session attached</span>
+            </span>
+          </header>
+          <div class="scroll">
+            <p class="stamp">Today</p>
+            <div class="msg msg--in">
+              <div class="mstack">
+                <div class="bub bub--in">All three domains resolve. One registrar moved.
+                  <svg class="tail tail--in" viewBox="0 0 13 17" aria-hidden="true"><path d="M0 0 L5 0 C5 7 7.6 13.4 13 16 C8.4 17.7 3 16 0 12.4 Z"/></svg>
+                </div>
+                <p class="meta">09:14</p>
+              </div>
+            </div>
+            <div class="msg msg--out">
+              <div class="mstack">
+                <div class="bub bub--out">Noted. Hold a reminder for 13 Nov.
+                  <svg class="tail tail--out" viewBox="0 0 13 17" aria-hidden="true"><path d="M0 0 L5 0 C5 7 7.6 13.4 13 16 C8.4 17.7 3 16 0 12.4 Z"/></svg>
+                </div>
+                <p class="meta meta--read">09:30 · Read</p>
+              </div>
+            </div>
+          </div>
+          <div class="composer float">
+            <div class="composer__row">
+              <span class="gbtn"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M9 3.6v10.8M3.6 9h10.8"/></svg></span>
+              <div class="composer__field is-empty">Message Researcher</div>
+              <span class="pbtn"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14.4V4.2"/><path d="M4.6 8.6 9 4.2l4.4 4.4"/></svg></span>
+            </div>
+            <p class="composer__hint">Enter to send · Shift+Enter for a new line</p>
+          </div>
+          <div class="panel__dim" data-close-over></div>
+        </section>
+
+        <aside class="panel over" id="settingsA" role="dialog" aria-label="Settings">
+          <header class="over__hd">
+            <h3>Settings</h3>
+            <button type="button" class="gbtn" aria-label="Close settings" data-close-over>
+              <svg width="17" height="17" viewBox="0 0 17 17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4.4 4.4l8.2 8.2M12.6 4.4l-8.2 8.2"/></svg>
+            </button>
+          </header>
+          <div class="over__body">
+            <div class="grp" style="margin-top:0">
+              <p class="grp__lbl">Gateway</p>
+              <div class="grp__box tint">
+                <div class="grp__row"><span class="t">Host</span><span class="v">gateway.example.com</span></div>
+                <div class="grp__row"><span class="t">Status</span><span class="v"><span class="pres pres--inline pres--online" style="display:inline-block;vertical-align:-1px;margin-right:5px"></span>Connected · 12 ms</span></div>
+                <div class="grp__row"><span class="t">Reconnect on wake</span><span class="sw" role="switch" aria-checked="true" tabindex="0"></span></div>
+              </div>
+              <p class="grp__note">Four bots attached. One archived.</p>
+            </div>
+            <div class="grp">
+              <p class="grp__lbl">Appearance</p>
+              <div class="grp__box tint">
+                <div class="grp__row"><span class="t">Theme</span>
+                  <span class="seg"><span aria-pressed="true">Light</span><span>Dark</span><span>System</span></span>
+                </div>
+                <div class="grp__row"><span class="t">Wallpaper</span><span class="v">Blue</span></div>
+                <div class="grp__row"><span class="t">Reduce transparency</span><span class="sw" role="switch" aria-checked="false" tabindex="0"></span></div>
+              </div>
+              <p class="grp__note">Reduce transparency swaps every glass surface for a solid tint and keeps the same tokens.</p>
+            </div>
+            <div class="grp">
+              <p class="grp__lbl">Notifications</p>
+              <div class="grp__box tint">
+                <div class="grp__row"><span class="t">Needs your input</span><span class="sw" role="switch" aria-checked="true" tabindex="0"></span></div>
+                <div class="grp__row"><span class="t">Cron deliveries</span><span class="sw" role="switch" aria-checked="true" tabindex="0"></span></div>
+                <div class="grp__row"><span class="t">Messages between bots</span><span class="sw" role="switch" aria-checked="false" tabindex="0"></span></div>
+              </div>
+            </div>
+            <div class="grp">
+              <p class="grp__lbl">Approvals</p>
+              <div class="grp__box tint">
+                <div class="grp__row"><span class="t">Default policy</span><span class="v">Ask every time</span></div>
+                <div class="grp__row"><span class="t">Always allowed</span><span class="v">Three commands</span></div>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+    </div>
+  </section>
+
+  <!-- ============================ FRAME B ============================ -->
+  <section class="sec">
+    <div class="sec__head">
+      <span class="sec__id">B</span>
+      <h2>Phone · 393 × 852</h2>
+      <p>Chat list with a row mid-swipe, and the same conversation with an approval sheet over it.</p>
+    </div>
+    <div class="scroller">
+    <div class="phones">
+
+      <!-- ---- phone 1: list ---- -->
+      <div class="frame frame--phone">
+        <div class="pscreen">
+          <div class="panel" style="border-radius:0; flex:1 1 auto; display:flex; flex-direction:column; min-height:0">
+            <div class="statusbar">9:41
+              <span class="sig" aria-hidden="true">
+                <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="5" width="3" height="7" rx="1"/><rect x="10" y="2.5" width="3" height="9.5" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1"/></svg>
+                <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.7" y="1.4" width="20" height="9.2" rx="2.6" stroke="currentColor" stroke-opacity=".5"/><rect x="2.4" y="3.1" width="13" height="5.8" rx="1.4" fill="currentColor"/><path d="M22.4 4.6v2.8" stroke="currentColor" stroke-opacity=".5" stroke-width="1.6" stroke-linecap="round"/></svg>
+              </span>
+            </div>
+            <aside class="sidebar" style="flex:1 1 auto; min-height:0">
+              <div class="sidebar__head">
+                <h2>Chats</h2>
+                <button type="button" class="gbtn" aria-label="New cron">
+                  <svg width="19" height="19" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.6 9A6.6 6.6 0 1 1 9 2.4"/><path d="M9 5.4V9l2.4 1.6"/><path d="M13.4 2.6v3.2M11.8 4.2H15"/></svg>
+                </button>
+                <button type="button" class="sidebar__edit">Edit</button>
+              </div>
+              <div class="connline" role="status">
+                <span class="pres pres--inline pres--offline"></span> Reconnecting…
+              </div>
+              <div class="field" style="height:40px">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.6"/><path d="M10.6 10.6 14 14"/></svg>
+                Search chats
+              </div>
+              <div class="chips" role="group" aria-label="Filter chats">
+                <button type="button" class="chip" aria-pressed="true">All</button>
+                <button type="button" class="chip" aria-pressed="false">Unread</button>
+                <button type="button" class="chip" aria-pressed="false">Working</button>
+                <button type="button" class="chip" aria-pressed="false">Needs input</button>
+              </div>
+              <div class="list" role="listbox" aria-label="Chats" data-rowgroup>
+                <div class="divider"><span>Work</span><span class="divider__rule"></span></div>
+                <div class="row" role="option" tabindex="0" aria-selected="false">
+                  <span class="av av--researcher av--ring">R<span class="pres pres--working"></span></span>
+                  <span class="row__body">
+                    <span class="row__top"><span class="row__name">Researcher</span><span class="row__time">09:29</span></span>
+                    <span class="row__prev"><span>Latency for the two re-runs, if you want…</span></span>
+                  </span>
+                </div>
+                <div class="row row--unread" role="option" tabindex="0" aria-selected="false" data-accent="violet">
+                  <span class="av av--writer av--ring">W<span class="pres pres--online"></span></span>
+                  <span class="row__body">
+                    <span class="row__top"><span class="row__name">Writer</span><span class="row__time">08:52</span></span>
+                    <span class="row__prev"><span>Draft is ready for your read-through.</span></span>
+                  </span>
+                  <span class="row__tail"><span class="chip--count">2</span></span>
+                </div>
+                <div class="divider"><span>Finance</span><span class="divider__rule"></span></div>
+                <div class="row" role="option" tabindex="0" aria-selected="false" data-accent="teal">
+                  <span class="av av--bookkeeper av--ring">B<span class="pres pres--input"></span></span>
+                  <span class="row__body">
+                    <span class="row__top"><span class="row__name">Bookkeeper</span><span class="row__time">Yst.</span></span>
+                    <span class="row__prev"><span>Approval needed before I move three invoices.</span></span>
+                  </span>
+                </div>
+                <!-- mid-swipe: archive revealed -->
+                <div style="position:relative; overflow:hidden; border-radius:var(--r-card)">
+                  <div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:flex-end; gap:6px; padding-right:18px; border-radius:var(--r-card); background:var(--accent-soft); color:var(--accent-text); font:600 14px/18px var(--font)">
+                    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 5.2h12v7.3a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/><path d="M1.6 2.6h12.8v2.6H1.6z"/><path d="M6.4 8.2h3.2"/></svg>
+                    Archive
+                  </div>
+                  <div class="row" style="position:relative; transform:translateX(-104px); background:var(--glass-card)">
+                    <span class="av av--postman">P<span class="pres pres--offline"></span></span>
+                    <span class="row__body">
+                      <span class="row__top"><span class="row__name">Postman</span><span class="row__time">Tue</span></span>
+                      <span class="row__prev"><span>Offline · last seen 21:09</span></span>
+                    </span>
+                  </div>
+                </div>
+                <div data-disc>
+                  <button type="button" class="arch" data-toggle aria-expanded="false">
+                    <svg class="chev" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3l4 4-4 4"/></svg>
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 5.2h12v7.3a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/><path d="M1.6 2.6h12.8v2.6H1.6z"/><path d="M6.4 8.2h3.2"/></svg>
+                    Archived (1)
+                  </button>
+                  <div class="arch__body">
+                    <div class="row" role="option" tabindex="0" aria-selected="false">
+                      <span class="av av--default">D<span class="pres pres--offline"></span></span>
+                      <span class="row__body">
+                        <span class="row__top"><span class="row__name">Default</span><span class="row__time">Aug</span></span>
+                        <span class="row__prev"><span>Archived · no session attached</span></span>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <nav class="tabs" aria-label="Sections">
+                <span class="tab" aria-current="page">
+                  <svg width="21" height="21" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 9.6c0 3.3-3.1 6-7 6-.8 0-1.6-.1-2.3-.3L4 16.6l1-2.8A5.7 5.7 0 0 1 3 9.6c0-3.3 3.1-6 7-6s7 2.7 7 6z"/></svg>
+                  Chats
+                </span>
+                <span class="tab">
+                  <svg width="21" height="21" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 10.5h3l2-5 2.6 9 2.4-6 1.5 2h3.5"/></svg>
+                  Activity
+                </span>
+                <span class="tab">
+                  <svg width="21" height="21" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10" cy="10.5" r="6.5"/><path d="M10 7v3.5l2.4 1.6"/><path d="M7.4 2.6h5.2"/></svg>
+                  Crons
+                </span>
+                <span class="tab">
+                  <svg width="21" height="21" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h9M15 6h2M3 14h2M8 14h9"/><circle cx="13.5" cy="6" r="1.8"/><circle cx="6.5" cy="14" r="1.8"/></svg>
+                  Settings
+                </span>
+              </nav>
+            </aside>
+            <div class="homebar"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ---- phone 2: conversation + approval ---- -->
+      <div class="frame frame--phone">
+        <div class="pscreen">
+          <div class="panel" style="border-radius:0; flex:1 1 auto; display:flex; flex-direction:column; min-height:0">
+            <div class="statusbar">9:41
+              <span class="sig" aria-hidden="true">
+                <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="5" width="3" height="7" rx="1"/><rect x="10" y="2.5" width="3" height="9.5" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1"/></svg>
+                <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.7" y="1.4" width="20" height="9.2" rx="2.6" stroke="currentColor" stroke-opacity=".5"/><rect x="2.4" y="3.1" width="13" height="5.8" rx="1.4" fill="currentColor"/><path d="M22.4 4.6v2.8" stroke="currentColor" stroke-opacity=".5" stroke-width="1.6" stroke-linecap="round"/></svg>
+              </span>
+            </div>
+            <div class="psheet is-up" id="phoneB">
+              <section class="chat" style="flex:1 1 auto">
+                <header class="chat__head float">
+                  <button type="button" class="gbtn" aria-label="Back to chats">
+                    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 3.5 5.5 9l5.5 5.5"/></svg>
+                  </button>
+                  <span class="av av--sm av--researcher av--ring">R<span class="pres pres--input"></span></span>
+                  <span class="chat__id">
+                    <span class="chat__name">Researcher</span>
+                    <span class="chat__sub"><span class="pres pres--inline pres--input"></span> <b style="color:var(--warn-text)">Needs your input</b></span>
+                  </span>
+                  <span class="chat__acts">
+                    <button type="button" class="gbtn" aria-label="Chat options" data-open-sheet="approvalB">
+                      <svg width="17" height="17" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3.2" cy="8" r="1.4"/><circle cx="8" cy="8" r="1.4"/><circle cx="12.8" cy="8" r="1.4"/></svg>
+                    </button>
+                  </span>
+                </header>
+                <div class="scroll">
+                  <p class="stamp">Today</p>
+                  <div class="msg msg--out">
+                    <div class="mstack">
+                      <div class="bub bub--out">Clean the build folder before the next run.
+                        <svg class="tail tail--out" viewBox="0 0 13 17" aria-hidden="true"><path d="M0 0 L5 0 C5 7 7.6 13.4 13 16 C8.4 17.7 3 16 0 12.4 Z"/></svg>
+                      </div>
+                      <p class="meta meta--read">09:31 · Read</p>
+                    </div>
+                  </div>
+                  <div class="evt evt--think" data-disc>
+                    <button type="button" class="evtline" data-toggle aria-expanded="false">
+                      <span class="evtline__ico">
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><circle cx="7" cy="7" r="5.4"/><circle cx="4.5" cy="7" r=".85" fill="currentColor" stroke="none"/><circle cx="7" cy="7" r=".85" fill="currentColor" stroke="none"/><circle cx="9.5" cy="7" r=".85" fill="currentColor" stroke="none"/></svg>
+                      </span>
+                      <span class="evtline__t">Thought for 3s</span>
+                      <svg class="chev" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3l4 4-4 4"/></svg>
+                    </button>
+                    <div class="evt__card">The folder is not tracked, so removing it is safe, but it is a recursive delete and needs your word.</div>
+                  </div>
+                  <div class="msg msg--in">
+                    <div class="mstack">
+                      <div class="bub bub--in">I need permission for one command before I continue.
+                        <svg class="tail tail--in" viewBox="0 0 13 17" aria-hidden="true"><path d="M0 0 L5 0 C5 7 7.6 13.4 13 16 C8.4 17.7 3 16 0 12.4 Z"/></svg>
+                      </div>
+                      <p class="meta">09:32</p>
+                    </div>
+                  </div>
+                </div>
+                <div class="composer float">
+                  <div class="composer__row">
+                    <span class="gbtn"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M9 3.6v10.8M3.6 9h10.8"/></svg></span>
+                    <div class="composer__field is-empty">Message Researcher</div>
+                    <span class="pbtn"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14.4V4.2"/><path d="M4.6 8.6 9 4.2l4.4 4.4"/></svg></span>
+                  </div>
+                </div>
+              </section>
+
+              <div class="scrim" data-close-sheet></div>
+              <div class="sheet" id="approvalB" role="dialog" aria-modal="true" aria-labelledby="apvT">
+                <span class="grabber" aria-hidden="true"></span>
+                <h3 id="apvT">Approval request</h3>
+                <p class="sheet__sub">Researcher wants to run one command on the gateway host, in <code style="font:var(--t-code)">./web</code>.</p>
+                <div class="sheet__cmd sunk">rm -rf ./build</div>
+                <p class="sheet__sub" style="margin-bottom:var(--s5)">This removes the build output folder and everything inside it. It is not tracked by git, so the app cannot put it back.</p>
+                <div class="sheet__acts">
+                  <button type="button" class="btn btn--primary" data-close-sheet>Allow once</button>
+                  <button type="button" class="btn" data-close-sheet>Allow for this session</button>
+                  <button type="button" class="btn" data-close-sheet>Always allow</button>
+                  <button type="button" class="btn btn--danger" data-close-sheet>Deny</button>
+                </div>
+              </div>
+            </div>
+            <div class="homebar"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    </div>
+  </section>
+
+  <!-- ============================ FRAME C ============================ -->
+  <section class="sec">
+    <div class="sec__head">
+      <span class="sec__id">C</span>
+      <h2>Component sheet</h2>
+      <p>Every state the two frames draw from, on the live wallpaper.</p>
+    </div>
+    <div class="frame" style="border-radius:var(--r-frame)">
+      <div class="board">
+        <div class="grid">
+
+          <!-- presence -->
+          <div class="cell panel cell--wide" style="border-radius:var(--r-card)">
+            <h3>Presence — one bead, four states</h3>
+            <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(250px,1fr))">
+              <div class="legend">
+                <div class="legend__it">
+                  <span class="av av--researcher">R<span class="pres pres--online"></span></span>
+                  <span><span class="legend__t">Online</span><span class="legend__d">Gateway connected and the bot's session is attached. Filled green.</span></span>
+                </div>
+                <div class="legend__it">
+                  <span class="av av--writer">W<span class="pres pres--working"></span></span>
+                  <span><span class="legend__t">Working…</span><span class="legend__d">The bot is on a turn. Solid blue bead with a still inner mark.</span></span>
+                </div>
+              </div>
+              <div class="legend">
+                <div class="legend__it">
+                  <span class="av av--bookkeeper">B<span class="pres pres--input"></span></span>
+                  <span><span class="legend__t">Needs your input</span><span class="legend__d">An approval or a clarify question is waiting. Amber bead with a notch, pulsing slowly — the one presence state that moves.</span></span>
+                </div>
+                <div class="legend__it">
+                  <span class="av av--postman">P<span class="pres pres--offline"></span></span>
+                  <span><span class="legend__t">Offline · last seen 21:09</span><span class="legend__d">Gateway unreachable or no session. Hollow grey ring.</span></span>
+                </div>
+              </div>
+            </div>
+            <p class="note" style="margin-top:var(--s3)">The header subtitle mirrors the bead in words, so the state never depends on colour alone. The global connection state lives in the sidebar's gateway card, not on a bot. Motion is reserved for the one state that needs you: only the amber bead animates, and it holds still under reduced motion.</p>
+            <div class="rowset" style="margin-top:var(--s3)">
+              <span class="chip"><span class="pres pres--inline pres--online"></span> Online</span>
+              <span class="chip"><span class="pres pres--inline pres--working"></span> Working…</span>
+              <span class="chip"><span class="pres pres--inline pres--input"></span> Needs input</span>
+              <span class="chip"><span class="pres pres--inline pres--offline"></span> Offline</span>
+            </div>
+          </div>
+
+          <!-- bubbles -->
+          <div class="cell panel" style="border-radius:var(--r-card)">
+            <h3>Bubbles, grouping and tails</h3>
+            <div class="demo" style="--bubble-max:100%">
+              <div class="scroll" style="padding:0; overflow:visible">
+                <div class="msg msg--in"><div class="mstack"><div class="bub bub--in bub--first">First of a group.</div></div></div>
+                <div class="msg msg--in"><div class="mstack"><div class="bub bub--in bub--mid">Middle — no tail.</div></div></div>
+                <div class="msg msg--in"><div class="mstack">
+                  <div class="bub bub--in">Last of the group carries the tail.
+                    <svg class="tail tail--in" viewBox="0 0 13 17" aria-hidden="true"><path d="M0 0 L5 0 C5 7 7.6 13.4 13 16 C8.4 17.7 3 16 0 12.4 Z"/></svg>
+                  </div>
+                  <p class="meta">09:04</p>
+                </div></div>
+                <div class="msg msg--out msg--gap"><div class="mstack">
+                  <div class="bub bub--out">Outgoing, one tail, white on a vertical gradient.
+                    <svg class="tail tail--out" viewBox="0 0 13 17" aria-hidden="true"><path d="M0 0 L5 0 C5 7 7.6 13.4 13 16 C8.4 17.7 3 16 0 12.4 Z"/></svg>
+                  </div>
+                  <span class="react">👍 1</span>
+                  <p class="meta meta--read">09:05 · Read
+                    <svg width="16" height="11" viewBox="0 0 16 11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 6.2 3.8 9 9.3 2.6"/><path d="M6.6 6.6 8.2 8.4 13.8 1.8"/></svg>
+                  </p>
+                </div></div>
+              </div>
+            </div>
+            <p class="note" style="margin-top:var(--s3)">The tail is one path inside the bubble element, drawn only on the last bubble of a group — there is no separately positioned tail view to drift or render as a square.</p>
+          </div>
+
+          <!-- typing -->
+          <div class="cell panel" style="border-radius:var(--r-card)">
+            <h3>Typing → streaming (one bubble)</h3>
+            <div class="demo" style="--bubble-max:100%">
+              <div class="msg msg--in"><div class="mstack">
+                <div class="bub bub--in bub--typing"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                  <svg class="tail tail--in" viewBox="0 0 13 17" aria-hidden="true"><path d="M0 0 L5 0 C5 7 7.6 13.4 13 16 C8.4 17.7 3 16 0 12.4 Z"/></svg>
+                </div>
+              </div></div>
+              <div class="msg msg--in" style="margin-top:var(--s4)"><div class="mstack">
+                <div class="bub bub--in">All three domains resolve. One registrar<span class="caret" aria-hidden="true"></span>
+                  <svg class="tail tail--in" viewBox="0 0 13 17" aria-hidden="true"><path d="M0 0 L5 0 C5 7 7.6 13.4 13 16 C8.4 17.7 3 16 0 12.4 Z"/></svg>
+                </div>
+              </div></div>
+            </div>
+            <p class="note" style="margin-top:var(--s3)">Same bubble throughout: the dots are replaced by text and the bubble's width animates. No grey placeholder box is ever inserted.</p>
+          </div>
+
+          <!-- per-chat colour -->
+          <div class="cell panel cell--wide" style="border-radius:var(--r-card)">
+            <h3>Per-chat colour — eight swatches and Default</h3>
+            <div class="rowset">
+              <button type="button" class="sw8 sw8--default" aria-pressed="true" aria-label="Default"></button>
+              <button type="button" class="sw8" data-accent="indigo" aria-label="Indigo"></button>
+              <button type="button" class="sw8" data-accent="violet" aria-label="Violet"></button>
+              <button type="button" class="sw8" data-accent="magenta" aria-label="Magenta"></button>
+              <button type="button" class="sw8" data-accent="red" aria-label="Red"></button>
+              <button type="button" class="sw8" data-accent="orange" aria-label="Orange"></button>
+              <button type="button" class="sw8" data-accent="teal" aria-label="Teal"></button>
+              <button type="button" class="sw8" data-accent="green" aria-label="Green"></button>
+              <button type="button" class="sw8" data-accent="graphite" aria-label="Graphite"></button>
+              <button type="button" class="sw8" data-accent="slate" aria-label="Slate"></button>
+            </div>
+            <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); margin-top:var(--s4)">
+              <div class="demo" style="--bubble-max:100%">
+                <p class="note" style="margin-bottom:var(--s2)">Default</p>
+                <div class="row" aria-selected="true" style="margin-bottom:var(--s2)">
+                  <span class="av av--researcher av--ring">R<span class="pres pres--working"></span></span>
+                  <span class="row__body"><span class="row__top"><span class="row__name">Researcher</span></span><span class="row__prev"><span>Working on the sweep…</span></span></span>
+                </div>
+                <div class="msg msg--out"><div class="bub bub--out">Blue is the default.</div></div>
+              </div>
+              <div class="demo" data-accent="violet" style="--bubble-max:100%">
+                <p class="note" style="margin-bottom:var(--s2)">Violet — Writer</p>
+                <div class="row" aria-selected="true" style="margin-bottom:var(--s2)">
+                  <span class="av av--writer av--ring">W<span class="pres pres--online"></span></span>
+                  <span class="row__body"><span class="row__top"><span class="row__name">Writer</span></span><span class="row__prev"><span>Draft is ready.</span></span></span>
+                </div>
+                <div class="msg msg--out"><div class="bub bub--out">The ring, the row and my bubbles follow the chat.</div></div>
+              </div>
+              <div class="demo" data-accent="teal" style="--bubble-max:100%">
+                <p class="note" style="margin-bottom:var(--s2)">Teal — Bookkeeper</p>
+                <div class="row" aria-selected="true" style="margin-bottom:var(--s2)">
+                  <span class="av av--bookkeeper av--ring">B<span class="pres pres--input"></span></span>
+                  <span class="row__body"><span class="row__top"><span class="row__name">Bookkeeper</span></span><span class="row__prev"><span>Approval needed.</span></span></span>
+                </div>
+                <div class="msg msg--out"><div class="bub bub--out">Both gradient stops keep white text at AA.</div></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- chips, buttons, controls -->
+          <div class="cell panel" style="border-radius:var(--r-card)">
+            <h3>Chips, badges, controls</h3>
+            <div class="stack">
+              <div class="rowset">
+                <span class="chip" aria-pressed="true">All</span>
+                <span class="chip">Unread</span>
+                <span class="chip">Working</span>
+                <span class="chip">Needs input</span>
+              </div>
+              <div class="rowset">
+                <span class="chip--micro chip chip--bot">Writer · bot</span>
+                <span class="chip--count">2</span>
+                <span class="chip"><span class="pres pres--inline pres--online"></span> Connected</span>
+              </div>
+              <div class="rowset">
+                <span class="gbtn" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M9 3.6v10.8M3.6 9h10.8"/></svg></span>
+                <span class="gbtn gbtn--lg" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><circle cx="3.2" cy="8" r="1.4"/><circle cx="8" cy="8" r="1.4"/><circle cx="12.8" cy="8" r="1.4"/></svg></span>
+                <span class="pbtn" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14.4V4.2"/><path d="M4.6 8.6 9 4.2l4.4 4.4"/></svg></span>
+                <span class="pbtn" style="background:linear-gradient(180deg,#E0505F,#B3202F)" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 18 18"><rect x="5.4" y="5.4" width="7.2" height="7.2" rx="1.8" fill="currentColor"/></svg></span>
+              </div>
+              <div class="rowset">
+                <button type="button" class="btn btn--primary">Allow once</button>
+                <button type="button" class="btn">Always allow</button>
+              </div>
+              <div class="rowset">
+                <button type="button" class="btn btn--danger">Deny</button>
+                <button type="button" class="btn" disabled>Disabled</button>
+              </div>
+              <div class="rowset">
+                <span class="seg"><span aria-pressed="true">Light</span><span>Dark</span><span>System</span></span>
+                <span class="sw" role="switch" aria-checked="true" tabindex="0"></span>
+                <span class="sw" role="switch" aria-checked="false" tabindex="0"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- list rows -->
+          <div class="cell panel" style="border-radius:var(--r-card)">
+            <h3>List row states</h3>
+            <div class="demo">
+              <p class="note">Default</p>
+              <div class="row">
+                <span class="av av--researcher">R<span class="pres pres--online"></span></span>
+                <span class="row__body"><span class="row__top"><span class="row__name">Researcher</span><span class="row__time">09:29</span></span><span class="row__prev"><span>Two of three certificates renew…</span></span></span>
+              </div>
+              <p class="note">Hover</p>
+              <div class="row" style="background:var(--tint-2)">
+                <span class="av av--postman">P<span class="pres pres--offline"></span></span>
+                <span class="row__body"><span class="row__top"><span class="row__name">Postman</span><span class="row__time">Tue</span></span><span class="row__prev"><span>Offline · last seen 21:09</span></span></span>
+              </div>
+              <p class="note">Selected</p>
+              <div class="row" aria-selected="true">
+                <span class="av av--researcher av--ring">R<span class="pres pres--working"></span></span>
+                <span class="row__body"><span class="row__top"><span class="row__name">Researcher</span><span class="row__time">09:29</span></span><span class="row__prev"><span>Checking the third certificate…</span></span></span>
+              </div>
+              <p class="note">Unread</p>
+              <div class="row row--unread" data-accent="violet">
+                <span class="av av--writer av--ring">W<span class="pres pres--online"></span></span>
+                <span class="row__body"><span class="row__top"><span class="row__name">Writer</span><span class="row__time">08:52</span></span><span class="row__prev"><span>Draft is ready for your read-through.</span></span></span>
+                <span class="row__tail"><span class="chip--count">2</span></span>
+              </div>
+              <p class="note">Edit mode</p>
+              <div class="is-editing">
+                <div class="divider"><span>Work</span><span class="divider__act"><button type="button" class="btn btn--sm">Rename</button><button type="button" class="btn btn--sm">Remove</button></span></div>
+                <div class="row">
+                  <span class="row__grip"><svg width="12" height="16" viewBox="0 0 12 16" fill="currentColor" aria-hidden="true"><circle cx="3" cy="4" r="1.3"/><circle cx="9" cy="4" r="1.3"/><circle cx="3" cy="8" r="1.3"/><circle cx="9" cy="8" r="1.3"/><circle cx="3" cy="12" r="1.3"/><circle cx="9" cy="12" r="1.3"/></svg></span>
+                  <span class="av av--bookkeeper av--ring" data-accent="teal">B<span class="pres pres--input"></span></span>
+                  <span class="row__body"><span class="row__top"><span class="row__name">Bookkeeper</span></span><span class="row__prev"><span>Drag to move between sections</span></span></span>
+                </div>
+                <div class="editbar tint">Drag a row to reorder <button type="button" class="btn btn--sm" style="margin-left:auto">Add divider</button></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- composer states -->
+          <div class="cell panel cell--wide" style="border-radius:var(--r-card)">
+            <h3>Composer states</h3>
+            <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr))">
+              <div>
+                <p class="note" style="margin-bottom:6px">Idle</p>
+                <div class="demo">
+                  <div class="composer float" style="margin:0">
+                    <div class="composer__row">
+                      <span class="gbtn"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M9 3.6v10.8M3.6 9h10.8"/></svg></span>
+                      <div class="composer__field is-empty">Message Researcher</div>
+                      <span class="pbtn"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14.4V4.2"/><path d="M4.6 8.6 9 4.2l4.4 4.4"/></svg></span>
+                    </div>
+                    <p class="composer__hint" style="display:block">Enter to send · Shift+Enter for a new line</p>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <p class="note" style="margin-bottom:6px">Typing</p>
+                <div class="demo">
+                  <div class="composer float" style="margin:0">
+                    <div class="composer__row">
+                      <span class="gbtn"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M9 3.6v10.8M3.6 9h10.8"/></svg></span>
+                      <div class="composer__field">Cross-check these against the invoice list<span class="caret" aria-hidden="true"></span></div>
+                      <span class="pbtn"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14.4V4.2"/><path d="M4.6 8.6 9 4.2l4.4 4.4"/></svg></span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <p class="note" style="margin-bottom:6px">Turn running — send becomes stop</p>
+                <div class="demo">
+                  <div class="composer float" style="margin:0">
+                    <div class="composer__row">
+                      <span class="gbtn"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M9 3.6v10.8M3.6 9h10.8"/></svg></span>
+                      <div class="composer__field is-empty">Message Researcher</div>
+                      <button type="button" class="pbtn composer__send" data-sendtoggle data-state="running" aria-label="Stop the current turn">
+                        <span class="ico-send" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14.4V4.2"/><path d="M4.6 8.6 9 4.2l4.4 4.4"/></svg></span>
+                        <span class="ico-stop" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 18 18"><rect x="5.4" y="5.4" width="7.2" height="7.2" rx="1.8" fill="currentColor"/></svg></span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <p class="note" style="margin-bottom:6px">Attachment tray — images and files</p>
+                <div class="demo">
+                  <div class="composer float" style="margin:0">
+                    <div class="tray">
+                      <span class="tray__item tint"><span class="tray__sw"></span>latency.png
+                        <span class="fchip__x"><svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M2.6 2.6l5.8 5.8M8.4 2.6L2.6 8.4"/></svg></span>
+                      </span>
+                    </div>
+                    <div class="tray" style="flex-wrap:wrap">
+                      <span class="fchip">
+                        <span class="fchip__ico"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 1.8H4.2a1.4 1.4 0 0 0-1.4 1.4v9.6a1.4 1.4 0 0 0 1.4 1.4h7.6a1.4 1.4 0 0 0 1.4-1.4V6z"/><path d="M9 1.8V6h4.2"/></svg></span>
+                        <span class="fchip__id"><span class="fchip__n"><i>domain-watchlist-2026-week</i><b>38.csv</b></span><span class="fchip__sz">CSV · 12 KB</span></span>
+                        <span class="fchip__x"><svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M2.6 2.6l5.8 5.8M8.4 2.6L2.6 8.4"/></svg></span>
+                      </span>
+                      <span class="fchip">
+                        <span class="fchip__ico"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 1.8H4.2a1.4 1.4 0 0 0-1.4 1.4v9.6a1.4 1.4 0 0 0 1.4 1.4h7.6a1.4 1.4 0 0 0 1.4-1.4V6z"/><path d="M9 1.8V6h4.2"/></svg></span>
+                        <span class="fchip__id"><span class="fchip__n"><i>registrar-transfer-confirmation</i><b>.pdf</b></span><span class="fchip__sz">Uploading · 62%</span></span>
+                        <svg class="ring" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><circle class="trk" cx="12" cy="12" r="9"/><circle class="bar" cx="12" cy="12" r="9" stroke-dasharray="35 57"/></svg>
+                      </span>
+                      <span class="fchip fchip--err">
+                        <span class="fchip__ico"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.4 14.4 13H1.6z"/><path d="M8 6.4v3M8 11.2v.2"/></svg></span>
+                        <span class="fchip__id"><span class="fchip__n"><i>full-registry-export-september</i><b>.zip</b></span><span class="fchip__sz">Too large · 100 MB max</span></span>
+                        <span class="fchip__x"><svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M2.6 2.6l5.8 5.8M8.4 2.6L2.6 8.4"/></svg></span>
+                      </span>
+                    </div>
+                    <div class="composer__row">
+                      <span class="gbtn"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M9 3.6v10.8M3.6 9h10.8"/></svg></span>
+                      <div class="composer__field is-empty">Add a note for Researcher</div>
+                      <span class="pbtn"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14.4V4.2"/><path d="M4.6 8.6 9 4.2l4.4 4.4"/></svg></span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <p class="note" style="margin-bottom:6px">Attach menu</p>
+                <div class="demo demo--tall" style="min-height:220px">
+                  <div class="composer float" style="margin:0">
+                    <div class="plusmenu float">
+                      <button type="button" class="plusmenu__it">
+                        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.4" y="3.4" width="13.2" height="11.2" rx="2.4"/><circle cx="6.6" cy="7.4" r="1.4"/><path d="M2.8 12.6 7 9l3 2.4 2.6-2 2.4 2"/></svg>
+                        Photo library
+                      </button>
+                      <button type="button" class="plusmenu__it">
+                        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.2 2.2H4.8a1.6 1.6 0 0 0-1.6 1.6v10.4a1.6 1.6 0 0 0 1.6 1.6h8.4a1.6 1.6 0 0 0 1.6-1.6V6.6z"/><path d="M10.2 2.2v4.4h4.4"/></svg>
+                        Choose file
+                      </button>
+                    </div>
+                    <div class="composer__row">
+                      <span class="gbtn" style="background:var(--chat-soft); color:var(--chat-accent-text)"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M9 3.6v10.8M3.6 9h10.8"/></svg></span>
+                      <div class="composer__field is-empty">Message Researcher</div>
+                      <span class="pbtn"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14.4V4.2"/><path d="M4.6 8.6 9 4.2l4.4 4.4"/></svg></span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <p class="note" style="margin-bottom:6px">Slash commands</p>
+                <div class="demo demo--tall" style="min-height:220px">
+                  <div class="composer float" style="margin:0">
+                    <div class="slash float">
+                      <p class="slash__hd">Commands</p>
+                      <button type="button" class="slash__it" aria-selected="true"><span class="slash__cmd">/cron</span><span class="slash__desc">Schedule this prompt</span></button>
+                      <button type="button" class="slash__it"><span class="slash__cmd">/clear</span><span class="slash__desc">Start a fresh turn</span></button>
+                      <button type="button" class="slash__it"><span class="slash__cmd">/to @writer</span><span class="slash__desc">Send this to another bot</span></button>
+                    </div>
+                    <div class="composer__row">
+                      <span class="gbtn"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M9 3.6v10.8M3.6 9h10.8"/></svg></span>
+                      <div class="composer__field">/c<span class="caret" aria-hidden="true"></span></div>
+                      <span class="pbtn"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14.4V4.2"/><path d="M4.6 8.6 9 4.2l4.4 4.4"/></svg></span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- machine cards -->
+          <div class="cell panel cell--wide" style="border-radius:var(--r-card)">
+            <h3>Machine events — never a speech bubble</h3>
+            <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(330px,1fr))">
+              <div class="demo" style="--bubble-max:100%">
+                <div class="evt" data-disc>
+                  <button type="button" class="evtline" data-toggle aria-expanded="false">
+                    <span class="evtline__ico"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.2 4.4 5.6 7l-2.4 2.6"/><path d="M7.4 9.8h3.4"/></svg></span>
+                    <span class="evtline__t">terminal</span><span class="evtline__sep">·</span><span class="evtline__t">whois status.example.org</span>
+                    <span class="evtline__dur">1.2s</span>
+                    <svg class="chev" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3l4 4-4 4"/></svg>
+                  </button>
+                  <div class="evt__card">
+                    <p class="evt__lbl">Arguments</p>
+                    <div class="well"><pre>{ "domain": "status.example.org" }</pre></div>
+                    <p class="evt__lbl">Result</p>
+                    <div class="well"><pre>Registrar: Example Registrar</pre></div>
+                  </div>
+                </div>
+                <div class="evt evt--think" style="margin-top:9px" data-disc>
+                  <button type="button" class="evtline" data-toggle aria-expanded="false">
+                    <span class="evtline__ico"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><circle cx="7" cy="7" r="5.4"/><circle cx="4.5" cy="7" r=".85" fill="currentColor" stroke="none"/><circle cx="7" cy="7" r=".85" fill="currentColor" stroke="none"/><circle cx="9.5" cy="7" r=".85" fill="currentColor" stroke="none"/></svg></span>
+                    <span class="evtline__t">Thought for 8s</span>
+                    <svg class="chev" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3l4 4-4 4"/></svg>
+                  </button>
+                  <div class="evt__card">Checked the cached sweep first, then re-ran the two stale answers.</div>
+                </div>
+              </div>
+              <div class="demo" style="--bubble-max:100%">
+                <div class="evt is-open" data-disc>
+                  <button type="button" class="evtline" data-toggle aria-expanded="true">
+                    <span class="evtline__ico"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M2.6 4.4h5M5.1 1.9v5M2.6 10.4h5"/><path d="M10.4 2.6v8.8"/></svg></span>
+                    <span class="evtline__t">edit</span><span class="evtline__sep">·</span><span class="evtline__t">watchlist.json</span>
+                    <span class="evtline__dur">+1 −1</span>
+                    <svg class="chev" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3l4 4-4 4"/></svg>
+                  </button>
+                  <div class="evt__card">
+                    <div class="diff">
+                      <div class="del"><span class="mark">−</span>"registrar": "old"</div>
+                      <div class="add"><span class="mark">+</span>"registrar": "new"</div>
+                    </div>
+                  </div>
+                </div>
+                <div class="evt evt--error is-open" style="margin-top:9px" data-disc>
+                  <button type="button" class="evtline" data-toggle aria-expanded="true">
+                    <span class="evtline__ico"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 2.2 12.8 12H1.2z"/><path d="M7 5.8v2.6M7 10.2v.2"/></svg></span>
+                    <span class="evtline__t">terminal</span><span class="evtline__sep">·</span><span class="evtline__t">curl https://mail.example.com</span>
+                    <span class="evtline__dur">failed</span>
+                    <svg class="chev" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3l4 4-4 4"/></svg>
+                  </button>
+                  <div class="evt__card"><p class="evt__err">Exit 6 · could not resolve host.</p></div>
+                </div>
+              </div>
+              <div class="demo" style="--bubble-max:100%">
+                <div class="cron" data-disc>
+                  <button type="button" class="cron__top" data-toggle aria-expanded="false">
+                    <span class="cron__ico"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="9" r="6.6"/><path d="M9 5v4l2.6 1.8"/></svg></span>
+                    <span class="cron__id"><span class="cron__kicker">Cron</span><span class="cron__name">Nightly domain scout</span><span class="cron__meta">ran 04:22 · delivered to this chat</span></span>
+                    <svg class="chev" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg>
+                  </button>
+                  <div class="cron__body">
+                    <p>Three domains checked, all resolving. One registrar transfer.</p>
+                    <div class="cron__foot"><button type="button" class="btn btn--sm">Open cron</button><button type="button" class="btn btn--sm">Run now</button></div>
+                  </div>
+                </div>
+                <div class="agents float" style="margin:9px 0 0">
+                  <span class="agents__pips" aria-hidden="true"><i></i><i></i><i></i></span>
+                  <b>3 agents working</b> · <time>0:42</time>
+                </div>
+                <div style="margin-top:9px; text-align:center">
+                  <span class="jump float is-visible" style="position:static; transform:none; display:inline-flex">
+                    <span class="chip--count">3</span> Jump to latest
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 5.5 7 9l3.5-3.5"/></svg>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- bot to bot -->
+          <div class="cell panel cell--wide" style="border-radius:var(--r-card)">
+            <h3>Bot to bot — collapsed lines, expanded in place</h3>
+            <div class="demo" style="--bubble-max:100%">
+              <div class="dms">
+                <div class="dm" data-disc>
+                  <button type="button" class="dmline" data-toggle aria-expanded="false">
+                    <svg class="dmline__arrow" width="14" height="12" viewBox="0 0 14 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.6 6h9.4"/><path d="M8 3l3 3-3 3"/></svg>
+                    <span class="dmline__to">Message to @writer</span>
+                    <span class="dmline__prev">Turn the week-38 domain report into two paragraphs…</span>
+                    <span class="dmline__time">09:15</span>
+                    <span class="dmline__state">
+                      <svg width="13" height="12" viewBox="0 0 13 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.4 2.4 1.6 5.2 4.4 8"/><path d="M1.6 5.2h6.2a3.2 3.2 0 0 1 3.2 3.2v1.4"/></svg>
+                      <b>replied</b> <em>“Two paragraphs are in the draft…”</em>
+                    </span>
+                  </button>
+                  <div class="dm__thread">
+                    <div class="dm__turn">
+                      <p class="dm__who">Sent to @writer · 09:15</p>
+                      <p class="dm__txt">Turn the week-38 domain report into two paragraphs for the status page.</p>
+                    </div>
+                    <div class="dm__turn">
+                      <p class="dm__who"><span class="av av--xs av--writer">W</span> @writer replied · 09:16</p>
+                      <p class="dm__txt md">Two paragraphs are in the draft. I led with the <strong>11-day certificate</strong>.</p>
+                    </div>
+                    <div class="dm__foot">
+                      <span class="dm__status">Delivered · answered in 42s</span>
+                      <button type="button" class="link">Open @writer's chat</button>
+                    </div>
+                  </div>
+                </div>
+                <button type="button" class="dmline">
+                  <svg class="dmline__arrow" width="14" height="12" viewBox="0 0 14 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.6 6h9.4"/><path d="M8 3l3 3-3 3"/></svg>
+                  <span class="dmline__to">Message to @bookkeeper</span>
+                  <span class="dmline__prev">Does the registrar invoice still sit under hosting?</span>
+                  <span class="dmline__time">09:17</span>
+                  <span class="dmline__state dmline__state--wait"><span class="wait" aria-hidden="true"></span><b>Delivered · waiting for reply</b></span>
+                </button>
+                <button type="button" class="dmline">
+                  <svg class="dmline__arrow" width="14" height="12" viewBox="0 0 14 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.6 6h9.4"/><path d="M8 3l3 3-3 3"/></svg>
+                  <span class="dmline__to">Message to @postman</span>
+                  <span class="dmline__prev">Send the sweep summary to the status mailbox.</span>
+                  <span class="dmline__time">09:18</span>
+                  <span class="dmline__state dmline__state--fail"><b>Failed</b> <em>· bot offline</em></span>
+                </button>
+                <div data-disc>
+                  <button type="button" class="dmroll" data-toggle aria-expanded="false">
+                    <svg class="dmline__arrow" width="14" height="12" viewBox="0 0 14 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.6 6h9.4"/><path d="M8 3l3 3-3 3"/></svg>
+                    <b>5 messages to @writer</b> · 4 replies
+                    <svg class="chev" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3l4 4-4 4"/></svg>
+                  </button>
+                  <div class="dmroll__hidden">
+                    <button type="button" class="dmline">
+                      <svg class="dmline__arrow" width="14" height="12" viewBox="0 0 14 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.6 6h9.4"/><path d="M8 3l3 3-3 3"/></svg>
+                      <span class="dmline__to">Message to @writer</span>
+                      <span class="dmline__prev">Shorten the second paragraph by a sentence.</span>
+                      <span class="dmline__time">09:21</span>
+                      <span class="dmline__state"><b>replied</b> <em>“Done — 38 words…”</em></span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div class="msg msg--in" style="margin-top:var(--s4)">
+                <div class="mstack">
+                  <div class="bub bub--dm">
+                    <span class="chip chip--micro chip--bot" style="margin-bottom:6px">Writer · bot</span>
+                    <span style="display:block">The status page draft is ready. It leads with the certificate warning, as you asked.</span>
+                    <svg class="tail tail--dm" viewBox="0 0 13 17" aria-hidden="true"><path d="M0 0 L5 0 C5 7 7.6 13.4 13 16 C8.4 17.7 3 16 0 12.4 Z"/></svg>
+                  </div>
+                  <p class="meta">09:33 · <span class="answered"><svg width="13" height="12" viewBox="0 0 13 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.4 2.4 1.6 5.2 4.4 8"/><path d="M1.6 5.2h6.2a3.2 3.2 0 0 1 3.2 3.2v1.4"/></svg> answered</span></p>
+                </div>
+              </div>
+            </div>
+            <p class="note" style="margin-top:var(--s3)">An incoming bot message keeps a tinted bubble because it starts a turn in this chat, and gains an “answered” marker once this bot has replied. Outgoing messages are ledger lines, spaced 9px apart, and expanding one never moves the transcript.</p>
+          </div>
+
+          <!-- crons list -->
+          <div class="cell panel" style="border-radius:var(--r-card)">
+            <h3>Crons</h3>
+            <div class="demo">
+              <button type="button" class="cronrow">
+                <span class="pres pres--online" style="box-shadow:none"></span>
+                <span class="cronrow__id"><span class="cronrow__n">Nightly domain scout</span><span class="cronrow__s">Every day at 04:22 · Researcher</span></span>
+                <span class="cronrow__next">next<br>tomorrow 04:22</span>
+              </button>
+              <button type="button" class="cronrow">
+                <span class="pres pres--working" style="box-shadow:none"></span>
+                <span class="cronrow__id"><span class="cronrow__n">Weekly invoice sweep</span><span class="cronrow__s">Mondays at 07:00 · Bookkeeper</span></span>
+                <span class="cronrow__next">running<br>started 07:00</span>
+              </button>
+              <p class="divider" style="padding:var(--s4) var(--s3) 6px"><span>Paused</span><span class="divider__rule"></span></p>
+              <button type="button" class="cronrow cronrow--paused">
+                <span class="pres pres--offline" style="box-shadow:none"></span>
+                <span class="cronrow__id"><span class="cronrow__n">Status page refresh</span><span class="cronrow__s">Every hour · Writer</span></span>
+                <span class="cronrow__next">paused<br>since 14 Sep</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- sheet + elevation -->
+          <div class="cell panel" style="border-radius:var(--r-card)">
+            <h3>Approval sheet</h3>
+            <div class="demo demo--tall is-up" style="overflow:hidden">
+              <div class="sheet" style="position:relative; transform:none; padding:var(--s2) var(--s4) var(--s4)">
+                <span class="grabber" aria-hidden="true"></span>
+                <h3 style="font:var(--t-sheet); text-transform:none; letter-spacing:-0.016em; color:var(--text)">Approval request</h3>
+                <p class="sheet__sub">Researcher wants to run one command on the gateway host.</p>
+                <div class="sheet__cmd sunk">rm -rf ./build</div>
+                <div class="sheet__acts">
+                  <button type="button" class="btn btn--primary">Allow once</button>
+                  <button type="button" class="btn">Allow for this session</button>
+                  <button type="button" class="btn">Always allow</button>
+                  <button type="button" class="btn btn--danger">Deny</button>
+                </div>
+                <p class="sheet__esc">Esc closes</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="cell panel cell--wide" style="border-radius:var(--r-card)">
+            <h3>Elevation ladder — the rungs every surface sits on</h3>
+            <div class="rowset">
+              <span class="chip" style="background:var(--e0)">e0 wallpaper</span>
+              <span class="chip" style="background:var(--e1)">e1 panel</span>
+              <span class="chip" style="background:var(--e2)">e2 row</span>
+              <span class="chip" style="background:var(--e2s)">e2s selected</span>
+              <span class="chip" style="background:var(--e3)">e3 bubble</span>
+              <span class="chip" style="background:var(--e3c)">e3c card</span>
+              <span class="chip" style="background:var(--e3f)">e3f composer</span>
+              <span class="chip" style="background:var(--e4)">e4 control</span>
+            </div>
+            <p class="note" style="margin-top:var(--s3)">Switch to Dark above: each rung is a measurable step lighter than the one below it and carries a hairline stroke, so a card on a panel on a wallpaper never reads as one flat field.</p>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+(function () {
+  var root = document.documentElement;
+
+  function press(group, attr, value) {
+    group.forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b.getAttribute(attr) === value));
+    });
+  }
+
+  var themeBtns = Array.prototype.slice.call(document.querySelectorAll('[data-theme-set]'));
+  themeBtns.forEach(function (b) {
+    b.addEventListener('click', function () {
+      root.setAttribute('data-theme', b.getAttribute('data-theme-set'));
+      press(themeBtns, 'data-theme-set', b.getAttribute('data-theme-set'));
+    });
+  });
+
+  var wallBtns = Array.prototype.slice.call(document.querySelectorAll('[data-wall-set]'));
+  wallBtns.forEach(function (b) {
+    b.addEventListener('click', function () {
+      root.setAttribute('data-wall', b.getAttribute('data-wall-set'));
+      press(wallBtns, 'data-wall-set', b.getAttribute('data-wall-set'));
+    });
+  });
+
+  /* disclosure: folds, tool rows, cron cards, bot-to-bot threads, archive */
+  document.addEventListener('click', function (e) {
+    var t = e.target.closest ? e.target.closest('[data-toggle]') : null;
+    if (!t) return;
+    var host = t.closest('[data-disc]');
+    if (!host) return;
+    host.classList.toggle('is-open');
+    var open = host.classList.contains('is-open');
+    t.setAttribute('aria-expanded', String(open));
+    var label = t.querySelector('[data-label]');
+    if (label) label.textContent = open ? (t.getAttribute('data-less') || 'Show less') : (t.getAttribute('data-more') || 'Show more');
+  });
+
+  /* row selection */
+  Array.prototype.forEach.call(document.querySelectorAll('[data-rowgroup]'), function (group) {
+    function select(row) {
+      Array.prototype.forEach.call(group.querySelectorAll('.row'), function (r) {
+        r.setAttribute('aria-selected', String(r === row));
+      });
+    }
+    group.addEventListener('click', function (e) {
+      var row = e.target.closest ? e.target.closest('.row') : null;
+      if (row && group.contains(row)) select(row);
+    });
+    group.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      var row = e.target.closest ? e.target.closest('.row') : null;
+      if (row && group.contains(row)) { e.preventDefault(); select(row); }
+    });
+  });
+
+  /* edit mode */
+  Array.prototype.forEach.call(document.querySelectorAll('[data-edit-toggle]'), function (b) {
+    b.addEventListener('click', function () {
+      var side = b.closest('.sidebar');
+      if (!side) return;
+      var on = side.classList.toggle('is-editing');
+      b.setAttribute('aria-pressed', String(on));
+      b.textContent = on ? 'Done' : 'Edit';
+    });
+  });
+
+  /* send becomes stop while a turn runs */
+  Array.prototype.forEach.call(document.querySelectorAll('[data-sendtoggle]'), function (b) {
+    b.addEventListener('click', function () {
+      var running = b.getAttribute('data-state') === 'running';
+      b.setAttribute('data-state', running ? 'idle' : 'running');
+      b.setAttribute('aria-label', running ? 'Send message' : 'Stop the current turn');
+    });
+  });
+
+  /* switches */
+  Array.prototype.forEach.call(document.querySelectorAll('[role="switch"]'), function (s) {
+    function flip() { s.setAttribute('aria-checked', s.getAttribute('aria-checked') === 'true' ? 'false' : 'true'); }
+    s.addEventListener('click', flip);
+    s.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flip(); } });
+  });
+
+  /* sheets */
+  function closeSheets() {
+    Array.prototype.forEach.call(document.querySelectorAll('.is-up'), function (h) {
+      if (h.querySelector('.sheet')) h.classList.remove('is-up');
+    });
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('[data-open-sheet]'), function (b) {
+    b.addEventListener('click', function () {
+      var sheet = document.getElementById(b.getAttribute('data-open-sheet'));
+      if (sheet && sheet.parentNode) sheet.parentNode.classList.add('is-up');
+    });
+  });
+  document.addEventListener('click', function (e) {
+    var c = e.target.closest ? e.target.closest('[data-close-sheet]') : null;
+    if (!c) return;
+    var host = c.closest('.is-up');
+    if (host) host.classList.remove('is-up');
+  });
+
+  /* overlay panels */
+  Array.prototype.forEach.call(document.querySelectorAll('[data-open-over]'), function (b) {
+    b.addEventListener('click', function (e) {
+      e.preventDefault();
+      var over = document.getElementById(b.getAttribute('data-open-over'));
+      if (over && over.parentNode) over.parentNode.classList.add('is-over');
+    });
+  });
+  document.addEventListener('click', function (e) {
+    var c = e.target.closest ? e.target.closest('[data-close-over]') : null;
+    if (!c) return;
+    var host = c.closest('.is-over');
+    if (host) host.classList.remove('is-over');
+  });
+
+  /* Esc closes every sheet, popover and overlay — the Mac expects it */
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    closeSheets();
+    Array.prototype.forEach.call(document.querySelectorAll('.is-over'), function (h) { h.classList.remove('is-over'); });
+  });
+
+  /* chat colour */
+  Array.prototype.forEach.call(document.querySelectorAll('.sw8'), function (b) {
+    b.addEventListener('click', function () {
+      var group = b.parentNode;
+      Array.prototype.forEach.call(group.querySelectorAll('.sw8'), function (s) { s.setAttribute('aria-pressed', String(s === b)); });
+      if (!b.closest('#optionsA')) return;
+      var chat = document.getElementById('chatA');
+      var accent = b.getAttribute('data-accent');
+      if (!chat) return;
+      if (accent) chat.setAttribute('data-accent', accent); else chat.removeAttribute('data-accent');
+    });
+  });
+
+  /* transcript opens at the bottom; the jump pill appears once you leave it */
+  Array.prototype.forEach.call(document.querySelectorAll('[data-scroll]'), function (sc) {
+    var chat = sc.closest('.chat');
+    var pill = chat ? chat.querySelector('[data-jump]') : null;
+    function sync() {
+      if (!pill) return;
+      var atBottom = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 40;
+      pill.classList.toggle('is-visible', !atBottom);
+    }
+    sc.scrollTop = sc.scrollHeight;
+    sc.addEventListener('scroll', sync);
+    if (pill) pill.addEventListener('click', function () { sc.scrollTop = sc.scrollHeight; });
+    sync();
+  });
+})();
+</script>
+</body>
+</html>

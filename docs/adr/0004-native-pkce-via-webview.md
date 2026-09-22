@@ -98,6 +98,8 @@ without shared cookies so a sign-in never reuses or leaves browser state.
   mapping names this explicitly when `/api/status` answers 401 or 403.
 - Tokens live in the app's secret store and never in a cookie jar, so signing out is deleting three
   keys rather than clearing a web view's storage.
-- macOS is the weak spot: if the web view proves unusable there, the fallback is the system browser
-  plus pasting the failed loopback URL back into the app. The parser is shared, so the fallback costs
-  a text field and no new protocol code.
+- Android is the weak spot, and not because of rendering: its WebView re-sends `source.headers` on a
+  cross-origin redirect, so a gateway configured with extra request headers would leak them to the
+  identity provider. There the fallback is the system browser plus pasting the failed loopback URL
+  back into the app. The parser is shared, so the fallback costs a text field and no new protocol
+  code, and it is reachable deliberately on every platform in case a web view cannot render.

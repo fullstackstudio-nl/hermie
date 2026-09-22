@@ -8,12 +8,16 @@ export default config(
   {
     ignores: [
       '**/node_modules/**',
+      // Scratch worktrees checked out inside the repo (any hidden tool
+      // directory). They hold another commit of this same tree, so linting
+      // them lints every file twice and reports whatever that other commit
+      // happened to be mid-change on.
+      '.*/worktrees/**',
       '**/dist/**',
       '**/coverage/**',
       '**/.expo/**',
       'apps/hermie/ios/**',
       'apps/hermie/android/**',
-      'apps/hermie/macos/**',
       // Vendored upstream sources are linted by their own project, not by ours.
       'packages/hermes-shared/src/**'
     ]
@@ -57,6 +61,14 @@ export default config(
       'scripts/**/*.mjs',
       'apps/*/scripts/**/*.mjs',
       'apps/*/plugins/**/*.js',
+      // A config plugin that lives inside the local module it installs, rather
+      // than in apps/hermie/plugins/ with the three that only patch the app's
+      // own project. Same runtime, same rules.
+      'apps/*/modules/*/plugin/**/*.js',
+      // The published entry point of @hermie/web. It is CommonJS on purpose —
+      // it has to run before anything is bundled, from a package with no build
+      // step of its own — so `require` is the only import it can use.
+      'packages/hermie-web/bin/*.js',
       '**/*.config.js',
       '**/*.config.mjs',
       '**/*.config.ts',
@@ -73,7 +85,7 @@ export default config(
   {
     // Test suites and their setup run under Jest, which supplies `jest` and a
     // CommonJS `require` that mock factories are expected to use.
-    files: ['apps/*/jest.setup.js', '**/__tests__/**', '**/*.test.ts', '**/*.test.tsx'],
+    files: ['apps/*/jest.setup.js', 'apps/*/jest.after-env.js', '**/__tests__/**', '**/*.test.ts', '**/*.test.tsx'],
     languageOptions: {
       globals: { ...globals.node, ...globals.jest }
     },

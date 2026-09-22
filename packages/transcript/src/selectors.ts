@@ -90,14 +90,46 @@ export function visibleItems(state: ChatState, options: VisibilityOptions): Visi
         break
 
       case 'bot_dm_in':
-        out.push({ item, presentation: showBotToBot ? 'full' : 'chip' })
+      case 'bot_dm_out':
+        /*
+          ONE rule for both directions, `collapsed` and never `full`, at every
+          level.
+
+          A bot-to-bot row is drawn as an ASIDE — the silhouette a reply's
+          thoughts have — and an aside starts closed whatever the verbosity. The
+          reader opens one by tapping it, and the tap is remembered per row.
+          `verbose` used to open the inbound ones, which put a teammate's whole
+          message on screen for a reader who had turned verbosity up to see tool
+          calls.
+
+          The two used to have a case each, and they disagreed. `quiet` — the
+          DEFAULT level — demoted a dispatch to a chip reading `Message to
+          @writer` while the answer to it stayed an aside beside it, so the
+          owner's report was about the one shape the shared design had not
+          reached. A direction is not a verbosity: the same traffic gets the same
+          row whichever way it went.
+
+          The toggle still demotes rather than hides (ADR-0009): a DM the reader
+          cannot see at all makes the bot's own reply unexplainable.
+        */
+        out.push({ item, presentation: showBotToBot ? 'collapsed' : 'chip' })
         break
 
-      case 'bot_dm_out':
-        out.push({
-          item,
-          presentation: !showBotToBot || level === 'quiet' ? 'chip' : level === 'verbose' ? 'full' : 'collapsed'
-        })
+      case 'cron_delivery':
+        /**
+         * A cron delivery survives `quiet`, and the bot-to-bot toggle does not
+         * touch it.
+         *
+         * It is the RESULT of something the owner scheduled — the reason they
+         * opened the chat — so dropping it at `quiet` would hide the one row they
+         * came for, which is the same rule that keeps `user` and `assistant`
+         * visible at every level. `quiet` folds the report instead of losing it.
+         *
+         * And it is not bot-to-bot traffic: the scheduler is not a peer bot, so
+         * `showBotToBot: false` — which exists to quieten agents talking amongst
+         * themselves — has no business demoting it to a chip.
+         */
+        out.push({ item, presentation: level === 'quiet' ? 'collapsed' : 'full' })
         break
 
       case 'subagent_group':
@@ -108,7 +140,16 @@ export function visibleItems(state: ChatState, options: VisibilityOptions): Visi
         break
 
       case 'assistant': {
-        const shown = showThinking ? item : { ...item, reasoning: undefined, reasoningVerbose: undefined }
+        /*
+          The copy is made only when there is a thought to take away. Stripping
+          unconditionally rebuilt every assistant row in the transcript on every
+          call — and this runs on every version bump, so on a four-hundred-row
+          conversation that is four hundred allocations per streamed frame for
+          rows that never had a `reasoning` to lose.
+        */
+        const hasThought = item.reasoning !== undefined || item.reasoningVerbose !== undefined
+        const shown =
+          showThinking || !hasThought ? item : { ...item, reasoning: undefined, reasoningVerbose: undefined }
         const empty = !item.text.trim() && !item.error
 
         if (empty && (!showThinking || !item.reasoning?.trim() || level === 'quiet')) {
@@ -156,7 +197,18 @@ export function visibleItems(state: ChatState, options: VisibilityOptions): Visi
         break
 
       case 'notice':
-        if (item.noticeKind === 'error') {
+        /*
+          An error and a command answer are the two kinds no level may fold or
+          drop.
+
+          An error because a reader must not skim past it. A command answer
+          because the owner TYPED the thing it answers: it is the payload of a
+          request, in the same sense as the cron card below and the fan-out
+          report further down (ADR-0013, amended), and a request whose answer is
+          invisible at the level people leave the app on reads as a command that
+          did nothing. `full` at every level, including `quiet`.
+        */
+        if (item.noticeKind === 'error' || item.noticeKind === 'command') {
           out.push({ item, presentation: 'full' })
           break
         }
@@ -164,6 +216,25 @@ export function visibleItems(state: ChatState, options: VisibilityOptions): Visi
         if (level === 'quiet') {
           if (item.noticeKind === 'reclaimed') {
             out.push({ item, presentation: 'chip' })
+            break
+          }
+
+          /*
+            Work the owner dispatched, reporting back.
+
+            Same rule as the cron card above, for the same reason (ADR-0013,
+            amended 2026-09-21): a fan-out's results and a background process's
+            output are not the machine narrating itself — they are the PAYLOAD of
+            something the owner started and then walked away from, which is
+            usually the row they reopened the chat for. `quiet` folds the report
+            rather than losing it.
+
+            The rest of the family stays hidden, because the rest of the family is
+            narration: a model switch, a compaction handoff, a kanban event, the
+            roster refreshing. Nobody asked for those.
+          */
+          if (item.noticeKind === 'async_delegation_complete' || item.noticeKind === 'process_complete') {
+            out.push({ item, presentation: 'collapsed' })
           }
 
           break
@@ -175,6 +246,28 @@ export function visibleItems(state: ChatState, options: VisibilityOptions): Visi
   }
 
   return out
+}
+
+/**
+ * Is a question waiting on a person in this chat?
+ *
+ * The predicate on its own, because THREE surfaces answer with it and they have
+ * to agree: the chat list's bead, the widget file's `needsInput`, and the chat
+ * header. It used to be written out three times — the same `.some(...)` over
+ * `order`, byte for byte, in `BotsScreen`, `widgets/snapshot.ts` and, as a
+ * length check, in `ChatScreen`. Three copies of a predicate is three places a
+ * new request kind has to be remembered, and the one that is forgotten is a
+ * chat that quietly stops asking for attention.
+ *
+ * It stops at the first open request rather than building the list, which is
+ * what makes it cheap enough for a roster of forty on every store notification.
+ */
+export function hasOpenRequest(state: ChatState): boolean {
+  return state.order.some(id => {
+    const item = state.items[id]
+
+    return Boolean(item) && (item!.kind === 'approval' || item!.kind === 'clarify') && item!.state === 'open'
+  })
 }
 
 /** Every unanswered question, oldest first — the bottom sheets read this. */
@@ -265,9 +358,9 @@ export const UNREAD_BADGE_CAP = 99
 /**
  * How many messages arrived in this chat since the user last looked at it.
  *
- * Only the two kinds a reader would call "a message" count: the bot's own
- * replies and inbound teammate DMs. Tool rows, notices and the user's own turns
- * are not unread mail, and counting them would make a badge that never settles.
+ * Only what a reader would call "a message" counts: the bot's own replies to
+ * them. Tool rows, notices, the user's own turns and bot-to-bot traffic are not
+ * unread mail, and counting them would make a badge that never settles.
  *
  * `since` is the watermark the roster keeps (unix seconds). A chat the app has
  * not loaded has nothing to count, which is why the list still falls back to a
@@ -279,21 +372,71 @@ export function unreadCountSince(state: ChatState, since: number): number {
   for (const id of state.order) {
     const item = state.items[id]
 
-    if (!item || (item.kind !== 'assistant' && item.kind !== 'bot_dm_in')) {
-      continue
-    }
-
-    if (item.kind === 'assistant' && (item.interim || !item.text.trim())) {
-      // An empty or interim bubble is the turn in progress, not a message.
-      continue
-    }
-
-    if ((item.ts ?? 0) > since) {
+    if (item && countsAsMessage(item) && (item.ts ?? 0) > since) {
       count += 1
     }
   }
 
   return count
+}
+
+/**
+ * Is this row a message, for the purposes of a badge?
+ *
+ * One predicate rather than two copies of the same list: `unreadCountSince`
+ * counts what is past the watermark and `lastMessageAt` says where the watermark
+ * has to go to leave nothing behind it. If the two ever disagreed about what a
+ * message is, a chat the reader is looking at would count one for ever.
+ */
+function countsAsMessage(item: TranscriptItem): boolean {
+  /*
+    Bot-to-bot traffic is NOT mail, so it never moves a badge.
+
+    The owner's rule, in his words: *bot-to-bot must also not bump the
+    notification badge.* `bot_dm_in` used to count — it is a message, and it is
+    even addressed to this bot — but a badge answers one question, "is there
+    something here for ME", and two agents working out a delivery between
+    themselves is not. A bot that dispatches to a teammate every few seconds
+    produced a chat list that was permanently shouting about work nobody had to
+    look at, and a reader who opened it found nothing they had to do.
+
+    `bot_dm_out` and `subagent_group` never counted, and this is where that
+    stays written down: the three kinds are one rule, not one rule and two
+    accidents of an `if` that happened to exclude them.
+
+    It is only the COUNT. The rows are still in the transcript, still drawn, and
+    `hasOpenRequest` is untouched: a question a teammate's work raised still asks
+    for the reader, because somebody asked THEM.
+  */
+  if (item.kind !== 'assistant') {
+    return false
+  }
+
+  // An empty or interim bubble is the turn in progress, not a message.
+  return !item.interim && item.text.trim() !== ''
+}
+
+/**
+ * When the newest message in this chat arrived, in unix seconds, or 0.
+ *
+ * Read backwards, because the answer is almost always the last row and walking
+ * a whole transcript for it on every delta is a cost a long chat would feel.
+ *
+ * What it is FOR: a chat that is open and scrolled to the bottom is read, and
+ * "read" has to be written as a watermark the unread count will then find
+ * nothing past. Writing `now` alone is not enough — a gateway whose clock runs
+ * ahead stamps a message in the reader's future, and the badge comes back.
+ */
+export function lastMessageAt(state: ChatState): number {
+  for (let index = state.order.length - 1; index >= 0; index -= 1) {
+    const item = state.items[state.order[index] ?? '']
+
+    if (item && countsAsMessage(item)) {
+      return item.ts ?? 0
+    }
+  }
+
+  return 0
 }
 
 /** `3`, `99+` — the badge label, or an empty string when nothing is unread. */

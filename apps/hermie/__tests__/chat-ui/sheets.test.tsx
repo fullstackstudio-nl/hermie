@@ -1,7 +1,7 @@
 /**
  * The bottom sheets, and the three rules that matter more than their looks:
- * a tap guard, exactly the server's choices, and a backdrop that answers
- * nothing while a question is open.
+ * a tap guard, exactly the server's choices, and a dismissal that answers
+ * nothing.
  */
 import { act, fireEvent, screen } from '@testing-library/react-native'
 import { Modal, Text } from 'react-native'
@@ -9,7 +9,6 @@ import { Modal, Text } from 'react-native'
 import { AgentsSheet } from '../../src/chat-ui'
 import { approvalItem, clarifyItem, subagentTree } from '../../src/chat-ui/fixtures'
 import { BottomSheet } from '../../src/ui/BottomSheet'
-import { BottomSheet as MacosBottomSheet } from '../../src/ui/BottomSheet.macos'
 import { ApprovalSheet, ChatOptionsSheet, ClarifySheet } from '../../src/ui/sheets'
 import { renderScreen, withProviders } from '../support/render'
 
@@ -37,17 +36,20 @@ describe('BottomSheet', () => {
     expect(onRequestClose).toHaveBeenCalledTimes(1)
   })
 
-  it('ignores the backdrop while blocking', () => {
+  it('asks to close rather than answering, which is what a question can allow', () => {
+    // Every sheet takes a backdrop tap now, including one carrying an agent's
+    // question. ADR-0010 is about ANSWERING — an explicit tap on a named choice
+    // — and this is not one: the caller puts the question aside.
     const onRequestClose = jest.fn()
 
     renderScreen(
-      <BottomSheet blocking onRequestClose={onRequestClose} testID="sheet" visible>
+      <BottomSheet onRequestClose={onRequestClose} testID="sheet" visible>
         <Text>Body</Text>
       </BottomSheet>
     )
 
     fireEvent.press(screen.getByTestId('sheet-backdrop'))
-    expect(onRequestClose).not.toHaveBeenCalled()
+    expect(onRequestClose).toHaveBeenCalledTimes(1)
   })
 
   it('renders nothing while closed', () => {
@@ -60,7 +62,7 @@ describe('BottomSheet', () => {
     expect(view.queryByTestId('sheet')).toBeNull()
   })
 
-  it('presents through a Modal on the platforms that have one', () => {
+  it('presents through a Modal, which is what puts it above the navigator', () => {
     const view = renderScreen(
       <BottomSheet onRequestClose={jest.fn()} testID="sheet" visible>
         <Text>Body</Text>
@@ -80,61 +82,6 @@ describe('BottomSheet', () => {
     expect(screen.queryByLabelText('Drag handle')).toBeNull()
     // The way out IS announced.
     expect(screen.getByLabelText('Dismiss')).toBeTruthy()
-  })
-})
-
-/**
- * react-native-macos has no `RCTModalHostView` — the class is wrapped in
- * `#if !TARGET_OS_OSX` — so a `Modal` red-boxes on a Mac and every sheet in the
- * app went with it. The macOS variant paints the same body into an absolutely
- * positioned overlay instead, and this is the assertion that keeps a `Modal`
- * from creeping back into it.
- */
-describe('BottomSheet.macos', () => {
-  it('paints the sheet without a Modal anywhere in it', () => {
-    const view = renderScreen(
-      <MacosBottomSheet onRequestClose={jest.fn()} testID="sheet" visible>
-        <Text>Body</Text>
-      </MacosBottomSheet>
-    )
-
-    expect(view.UNSAFE_queryAllByType(Modal)).toHaveLength(0)
-    expect(screen.getByText('Body')).toBeTruthy()
-    expect(screen.getByTestId('sheet-backdrop')).toBeTruthy()
-  })
-
-  it('still dismisses on a backdrop tap, and still refuses while blocking', () => {
-    const onRequestClose = jest.fn()
-
-    const view = renderScreen(
-      <MacosBottomSheet onRequestClose={onRequestClose} testID="sheet" visible>
-        <Text>Body</Text>
-      </MacosBottomSheet>
-    )
-
-    fireEvent.press(screen.getByTestId('sheet-backdrop'))
-    expect(onRequestClose).toHaveBeenCalledTimes(1)
-
-    view.rerender(
-      withProviders(
-        <MacosBottomSheet blocking onRequestClose={onRequestClose} testID="sheet" visible>
-          <Text>Body</Text>
-        </MacosBottomSheet>
-      )
-    )
-
-    fireEvent.press(screen.getByTestId('sheet-backdrop'))
-    expect(onRequestClose).toHaveBeenCalledTimes(1)
-  })
-
-  it('renders nothing while closed', () => {
-    const view = renderScreen(
-      <MacosBottomSheet onRequestClose={jest.fn()} testID="sheet" visible={false}>
-        <Text>Body</Text>
-      </MacosBottomSheet>
-    )
-
-    expect(view.queryByTestId('sheet')).toBeNull()
   })
 })
 
@@ -284,12 +231,13 @@ describe('ClarifySheet', () => {
   it('steps through a batch and submits every answer at once', () => {
     const { onSubmit } = renderSheet()
 
-    expect(screen.getByTestId('clarify-step').props.children).toBe('Question 1 of 2')
+    // The step count rides beside the eyebrow, in the same uppercase micro style.
+    expect(screen.getByTestId('clarify-step').props.children).toBe('QUESTION 1 OF 2')
 
     fireEvent.press(screen.getByTestId('clarify-choice-Warm and direct'))
     fireEvent.press(screen.getByTestId('clarify-next'))
 
-    expect(screen.getByTestId('clarify-step').props.children).toBe('Question 2 of 2')
+    expect(screen.getByTestId('clarify-step').props.children).toBe('QUESTION 2 OF 2')
 
     // The second question is multi-select: both choices stay selected.
     fireEvent.press(screen.getByTestId('clarify-choice-Recovery'))
@@ -510,7 +458,10 @@ describe('AgentsSheet', () => {
     })
 
     expect(screen.getByTestId('agent-transcript-text')).toHaveTextContent(/read_file\(README\.md\)/u)
-    expect(screen.getByText('The child’s own transcript, read-only.')).toBeTruthy()
+    // The transcript is a PAGE of the sheet now, with the same back control every
+    // other sheet page has, and the source line is its eyebrow.
+    expect(screen.getByText('THE CHILD’S OWN TRANSCRIPT, READ-ONLY.')).toBeTruthy()
+    expect(screen.getByTestId('agent-transcript-back')).toBeTruthy()
     expect(screen.queryByTestId('agent-row-sa-1')).toBeNull()
   })
 

@@ -1,15 +1,24 @@
 name: Release
 
 # Everything here is the part of a release a machine can do on its own: build
-# the two artefacts that do not need a store account, and publish them against
+# the artefacts that do not need a store account, and publish them against
 # the tag with the CHANGELOG section for that version.
 #
 # The store halves — TestFlight, Play internal testing — are deliberately not
 # here. They need an EAS project and credentials that belong to a person, and
-# docs/release.md is the runbook for them.
+# docs/release.md is the runbook for them. That now includes the Mac: since
+# ADR-0011 it is the iOS build, which Apple offers on Apple Silicon Macs from
+# the same App Store listing, so there is no downloadable .app to sign and
+# notarise here any more.
 #
-# Signing and notarisation run only when the secrets exist, so a fork of this
-# repository can tag a release and get working unsigned artefacts out of it.
+# The web variant is built here too: `hermie-web.zip` is the whole server plus
+# the exported browser bundle, and `SHA256SUMS` beside it is what the running
+# server checks a self-update against (ADR-0015).
+#
+# Android signing is optional and guarded on the secrets being set, the way the
+# macOS Developer ID signing used to be. With them, this produces a release APK
+# and an app bundle signed with the Play upload key; without them, the debug APK
+# a fork gets and nothing else fails. docs/release.md lists the four secrets.
 
 on:
   push:
@@ -21,9 +30,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  macos:
-    name: macOS app
-    runs-on: macos-15
+  web:
+    name: Hermie Web
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -35,122 +44,31 @@ jobs:
       - name: Install
         run: npm ci
 
-      # The `secrets` context cannot be read from a step's `if:`, so the answer
-      # is computed once here and every later step keys off the output.
-      - name: Look for signing secrets
-        id: signing
-        env:
-          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
-          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-        run: |
-          if [ -n "$MACOS_CERTIFICATE_P12" ] && [ -n "$MACOS_CERTIFICATE_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
-            echo 'sign=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'sign=false' >> "$GITHUB_OUTPUT"
-            echo '::notice::No Developer ID certificate in secrets — building unsigned.'
-          fi
-          if [ -n "$APPLE_ID" ] && [ -n "$APPLE_TEAM_ID" ] && [ -n "$APPLE_APP_SPECIFIC_PASSWORD" ]; then
-            echo 'notarise=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'notarise=false' >> "$GITHUB_OUTPUT"
-            echo '::notice::No notarisation credentials in secrets — skipping notarisation.'
-          fi
+      # Both halves: `dist/server` is the compiled Node server, `dist/web` the
+      # exported browser build. The zip is what `npx hermie-web` and the release
+      # instructions install, so it carries the package manifest and the bin
+      # shim beside them — and no node_modules, because the package has no
+      # runtime dependencies.
+      - name: Build the server and the browser bundle
+        run: npm run web:build
 
-      - name: Import the Developer ID certificate
-        if: steps.signing.outputs.sign == 'true'
-        env:
-          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
-          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      - name: Zip it
         run: |
-          keychain="$RUNNER_TEMP/signing.keychain-db"
-          password="$(openssl rand -base64 24)"
-          security create-keychain -p "$password" "$keychain"
-          security set-keychain-settings -lut 3600 "$keychain"
-          security unlock-keychain -p "$password" "$keychain"
-          printf '%s' "$MACOS_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
-          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" \
-            -T /usr/bin/codesign -T /usr/bin/security
-          rm -f "$RUNNER_TEMP/certificate.p12"
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" > /dev/null
-          security list-keychain -d user -s "$keychain" login.keychain-db
-
-      - name: Pods
-        run: pod install
-        working-directory: apps/hermie/macos
-
-      - name: Build
-        working-directory: apps/hermie/macos
-        env:
-          SIGN: ${{ steps.signing.outputs.sign }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          if [ "$SIGN" = 'true' ]; then
-            signing=(
-              CODE_SIGNING_ALLOWED=YES
-              CODE_SIGNING_REQUIRED=YES
-              CODE_SIGN_STYLE=Manual
-              CODE_SIGN_IDENTITY='Developer ID Application'
-              DEVELOPMENT_TEAM="$APPLE_TEAM_ID"
-              OTHER_CODE_SIGN_FLAGS='--timestamp --options runtime'
-            )
-          else
-            signing=(CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=)
-          fi
-          xcodebuild \
-            -workspace Hermie.xcworkspace \
-            -scheme Hermie-macOS \
-            -configuration Release \
-            -derivedDataPath build/DerivedData \
-            "${signing[@]}" \
-            build
-
-      # ditto, not zip: a .app is a bundle with symlinks, and notarytool rejects
-      # an archive that did not preserve them.
-      - name: Package
-        working-directory: apps/hermie/macos
-        run: |
-          ditto -c -k --sequesterRsrc --keepParent \
-            build/DerivedData/Build/Products/Release/Hermie.app \
-            Hermie-macos.zip
-
-      - name: Notarise and staple
-        if: steps.signing.outputs.sign == 'true' && steps.signing.outputs.notarise == 'true'
-        working-directory: apps/hermie/macos
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-        run: |
-          xcrun notarytool submit Hermie-macos.zip \
-            --apple-id "$APPLE_ID" \
-            --team-id "$APPLE_TEAM_ID" \
-            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
-            --wait
-          # The ticket is stapled to the app, so the zip has to be rebuilt from
-          # the stapled bundle or the download still asks the user to trust it.
-          xcrun stapler staple build/DerivedData/Build/Products/Release/Hermie.app
-          rm -f Hermie-macos.zip
-          ditto -c -k --sequesterRsrc --keepParent \
-            build/DerivedData/Build/Products/Release/Hermie.app \
-            Hermie-macos.zip
-
-      - name: Say what came out
-        working-directory: apps/hermie/macos
-        run: |
-          codesign --display --verbose=2 build/DerivedData/Build/Products/Release/Hermie.app 2>&1 || true
-          spctl --assess --type execute --verbose build/DerivedData/Build/Products/Release/Hermie.app 2>&1 || true
+          mkdir -p artifacts
+          cd packages/hermie-web
+          zip -qr "$GITHUB_WORKSPACE/artifacts/hermie-web.zip" \
+            package.json bin dist Dockerfile
+          cd "$GITHUB_WORKSPACE"
+          unzip -l artifacts/hermie-web.zip | tail -3
 
       - uses: actions/upload-artifact@v4
         with:
-          name: hermie-macos
-          path: apps/hermie/macos/Hermie-macos.zip
+          name: hermie-web
+          path: artifacts/*
           if-no-files-found: error
 
   android:
-    name: Android APK
+    name: Android artefacts
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -175,28 +93,80 @@ jobs:
         run: npx expo prebuild --platform android --no-install
         working-directory: apps/hermie
 
-      # A debug APK, and deliberately: a release APK would need an upload key
-      # this workflow does not have, and an unsigned one cannot be installed at
-      # all. The Play track is built by EAS — see docs/release.md.
-      - name: Assemble
+      # `secrets` is not available in a job-level `if`, so the presence of a key
+      # becomes a step output that the steps below condition on. Only whether the
+      # keystore secret is empty is ever tested; nothing is echoed.
+      - name: Is there an upload key
+        id: signing
+        env:
+          HERMIE_UPLOAD_KEYSTORE_BASE64: ${{ secrets.HERMIE_UPLOAD_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$HERMIE_UPLOAD_KEYSTORE_BASE64" ]; then
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+            echo 'No upload key secret set; building the debug APK only.'
+          fi
+
+      # $RUNNER_TEMP, never the workspace: a keystore inside the checkout could be
+      # picked up by a later step, and `actions/upload-artifact` takes paths by glob.
+      - name: Decode the upload keystore
+        if: steps.signing.outputs.available == 'true'
+        env:
+          HERMIE_UPLOAD_KEYSTORE_BASE64: ${{ secrets.HERMIE_UPLOAD_KEYSTORE_BASE64 }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/signing"
+          printf '%s' "$HERMIE_UPLOAD_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/signing/upload.jks"
+
+      # The debug APK is what a fork and a person sideloading get, and it is built
+      # whether or not there is a key. Signed or not, an unsigned APK cannot be
+      # installed at all, so there is never an unsigned artefact here.
+      - name: Assemble the debug APK
         run: ./gradlew assembleDebug --no-daemon
         working-directory: apps/hermie/android
 
-      - name: Name it after the tag
+      # `ORG_GRADLE_PROJECT_<name>` is how Gradle takes a project property from the
+      # environment, so these four arrive as the properties
+      # plugins/with-android-release-signing.js reads. An unquoted secret is
+      # important: a properties file keeps quote characters and Gradle does not
+      # strip them, which is the trap the plugin's error message names.
+      - name: Assemble and bundle the signed release
+        if: steps.signing.outputs.available == 'true'
+        working-directory: apps/hermie/android
+        env:
+          ORG_GRADLE_PROJECT_HERMIE_UPLOAD_STORE_FILE: ${{ runner.temp }}/signing/upload.jks
+          ORG_GRADLE_PROJECT_HERMIE_UPLOAD_STORE_PASSWORD: ${{ secrets.HERMIE_UPLOAD_STORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_HERMIE_UPLOAD_KEY_ALIAS: ${{ secrets.HERMIE_UPLOAD_KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_HERMIE_UPLOAD_KEY_PASSWORD: ${{ secrets.HERMIE_UPLOAD_KEY_PASSWORD }}
+        run: ./gradlew bundleRelease assembleRelease --no-daemon
+
+      # Whatever else happens, the key does not outlive the job.
+      - name: Remove the keystore
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/signing"
+
+      - name: Name them after the tag
         run: |
           mkdir -p artifacts
           cp apps/hermie/android/app/build/outputs/apk/debug/app-debug.apk \
             "artifacts/Hermie-android-debug.apk"
+          if [ '${{ steps.signing.outputs.available }}' = 'true' ]; then
+            cp apps/hermie/android/app/build/outputs/apk/release/app-release.apk \
+              "artifacts/Hermie-android-release.apk"
+            cp apps/hermie/android/app/build/outputs/bundle/release/app-release.aab \
+              "artifacts/Hermie-android-release.aab"
+          fi
+          ls -l artifacts
 
       - uses: actions/upload-artifact@v4
         with:
           name: hermie-android
-          path: artifacts/Hermie-android-debug.apk
+          path: artifacts/*
           if-no-files-found: error
 
   publish:
     name: GitHub release
-    needs: [macos, android]
+    needs: [android, web]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -216,6 +186,17 @@ jobs:
       - name: Release notes from the CHANGELOG
         run: node scripts/changelog-section.mjs "${GITHUB_REF_NAME#v}" > release-notes.md
 
+      # Hermie Web's self-update refuses to install an artefact this file does
+      # not list, so it is generated from whatever actually reached the release
+      # rather than written by hand.
+      - name: Checksums
+        working-directory: artifacts
+        run: |
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      # Whatever the build produced, rather than a fixed list: the release APK and
+      # the app bundle are there only when the signing secrets were.
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
@@ -223,5 +204,4 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --title "$GITHUB_REF_NAME" \
             --notes-file release-notes.md \
-            artifacts/Hermie-macos.zip \
-            artifacts/Hermie-android-debug.apk
+            artifacts/*
