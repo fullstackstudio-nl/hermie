@@ -534,14 +534,40 @@ two places, and which one signed a given upload is worth knowing before Play
 rejects one. Pick one — the local properties for builds from this machine and from
 CI, EAS if releases move to EAS entirely — and if both are in use, make sure both
 hold the _same_ upload key.
-The listing's images are in the repository:
-[design/store/screenshots/](../design/store/screenshots/) holds a phone set at
-1080×1920 and 10" and 7" tablet sets at 2560×1600 and 1920×1200, which is the
-three sections Play asks for.
+The listing's images are in the repository, both halves of it.
+
+**Play.** [design/store/screenshots/](../design/store/screenshots/) holds a phone
+set at 1080×1920 and 10" and 7" tablet sets at 2560×1600 and 1920×1200, which is
+the three sections Play asks for.
 [design/store/README.md](../design/store/README.md) says what each one shows and
 how to make them again — including the trap that a 1080×2400 phone capture is
-2.22:1 and Play refuses anything wider than 2:1. **There is no iOS set**, so App
-Store Connect still needs its screenshots made by hand.
+2.22:1 and Play refuses anything wider than 2:1.
+
+**App Store.**
+[design/store/screenshots/ios/](../design/store/screenshots/ios/) holds the two
+sizes App Store Connect actually requires, captured from simulators whose native
+size IS the accepted one, so nothing is resized on the way to the upload:
+
+| Section         | Device                | Files | Size      |
+| --------------- | --------------------- | ----- | --------- |
+| 6.9-inch iPhone | iPhone 17 Pro Max     | 7     | 1320×2868 |
+| 13-inch iPad    | iPad Pro 13-inch (M5) | 8     | 2064×2752 |
+
+Both sets are plain device screenshots, no marketing frame, which the store
+accepts. Six scenes per device and then some: the chat list, a conversation
+carrying a Mermaid diagram and typeset mathematics, the chat options, the memory
+graph, the crons, Settings → Appearance, the Conversations page, and — on the
+iPad only — a Kanban board with its columns side by side. Dark leads and light is
+represented; [the set's own README](../design/store/screenshots/ios/README.md)
+lists scene → file → measured size and how to make them again, and
+`npm run screenshots:ios` walks the whole list.
+
+**Two things that set does not have.** There is no 6.5-inch iPhone set
+(1284×2778 / 1242×2688): Apple has not required it since the 6.9-inch set began
+standing in for every iPhone size, and producing it needs an iOS 16-era runtime
+this machine does not have. And there is no voice-overlay scene, because voice
+mode is drawn only where a real speech recognizer and synthesiser exist — **that
+one needs a device**, not a simulator.
 
 ## Before the first store submission
 

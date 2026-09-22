@@ -432,6 +432,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Boards gets the whole column on an iPad, a Mac and a wide browser window.** Opening it from
+  Settings, or from the chat list's **Boards**, used to leave it inside whichever panel the door
+  was in — the 520pt settings overlay, or the sidebar, which is 300 to 340. The board needs 700 to
+  put its columns side by side, so nobody with a big screen had ever seen the side-by-side layout
+  or the card drag that goes with it: they were there, and no window could reach them. The board
+  now opens where a chat opens, beside the list and edge to edge, which is past 700 on every device
+  wide enough to have two columns at all. The way back is one step and it is the step you came by —
+  from Settings it puts Settings back, from the chat list it hands the column to the chat. A phone
+  is unchanged: there is no second column to move into, so the board still replaces the page it was
+  opened from, stacked, with Back where it always was.
+
 - **Hermie Web's tests are type-checked.** That package is the one workspace that emits JavaScript
   rather than only declarations — the release zip and the Docker image both run `dist/server` — so
   its `tsconfig.json` excludes `*.test.ts`, or the tests would be published with it. The side effect

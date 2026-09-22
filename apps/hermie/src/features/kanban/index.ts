@@ -1,4 +1,5 @@
 export { KanbanScreen, type KanbanScreenProps } from './KanbanScreen'
+export { BoardsHost, useBoardsOpener, useHasBoardsHost } from './boards-host'
 export {
   BOARD_COLUMNS,
   KANBAN_BASE,

@@ -25,7 +25,7 @@ import { useEscapeKey } from '../../ui/useEscapeKey'
 import { useHardwareBack } from '../../ui/useHardwareBack'
 import { FORM_MAX_WIDTH } from '../../ui/tokens'
 import { ConnectorsScreen, connectorStrings } from '../connectors'
-import { KanbanScreen, kanbanStrings } from '../kanban'
+import { KanbanScreen, kanbanStrings, useBoardsOpener } from '../kanban'
 import { LogsScreen, logStrings } from '../logs'
 import { McpScreen, mcpStrings } from '../mcp'
 import { NewBotFlow, profileStrings } from '../profiles'
@@ -92,6 +92,13 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
   const [showLogs, setShowLogs] = useState(false)
   const [showBoards, setShowBoards] = useState(false)
   const [showNewBot, setShowNewBot] = useState(false)
+  /*
+    Boards is the one page here that does NOT belong inside Settings' 520pt
+    panel: its columns need 700pt. A shell with a content column takes it
+    instead, and `showBoards` above is what happens where there is none — see
+    `features/kanban/boards-host.tsx`.
+  */
+  const openBoards = useBoardsOpener(() => setShowBoards(true))
 
   // Escape goes back ONE level: out of a screen Settings opened and into
   // Settings, and only then out of whatever is holding Settings.
@@ -457,7 +464,7 @@ export function SettingsScreen({ initialPage }: SettingsScreenProps = {}) {
           />
           <InsetButtonRow
             detail={kanbanStrings.settings.hint}
-            onPress={() => setShowBoards(true)}
+            onPress={openBoards}
             title={kanbanStrings.settings.row}
           />
         </InsetGroup>

@@ -9845,3 +9845,103 @@ than about the board. Two candidates, neither taken here:
   carried a card to the right edge and the board scrolled under it, which is why
   the drop landed on Review rather than the Scheduled that was aimed at. That it
   scrolls is shown; the rate and the band are not measured.
+
+## Round R20: the board found a door, and iOS got a store set (2026-09-22)
+
+### The board had a home all along; nobody had given it the keys
+
+R18 ended with the open item that `WIDE_BOARD_PX` is 700 and no door in the app
+was wider than 520. The fix turned out not to be about the board at all. Both
+doors — Settings' row and the chat list's (…) — rendered `KanbanScreen` **in
+place**, by returning it instead of themselves, so the board inherited whatever
+box its door happened to live in: the 520pt overlay panel, or a 300–340pt
+sidebar. Neither door had any way to ask for something bigger, because neither
+knew what shell it was in.
+
+`features/kanban/boards-host.tsx` is the whole change: a context whose value is
+"here is how to open a board", provided by `RegularShell` and by nothing else.
+`useBoardsOpener(fallback)` hands a door one callback and hides which case it
+got. The compact shell needed **no edit at all** — a missing provider IS the
+phone's answer — and `SettingsScreen` needed two lines, which was the point of
+doing it this way while another round held `strings.ts` and `AppearanceSection`.
+
+Measured on the iPad Pro 13-inch in portrait: the content column is about 730pt
+beside a 300pt sidebar, so Triage, To do and Scheduled draw side by side with the
+prose wrapping under them — the R18 layout, and the R18 drag with it, on screen
+for the first time in the shipped app. In landscape the column is past 1050.
+`design/store/screenshots/ios/ipad13-06-board-dark.png` is that screen.
+
+**The way out is one step and it is the step you came by.** The board remembers
+which section opened it, so Settings → Boards → back puts Settings back — which
+is what the phone's native stack does with the same two screens — and the chat
+list's door hands the column to the chat. The panel is closed on the way IN,
+because leaving it up would put the 520pt overlay straight back over the column
+the board was just moved into. That reopened panel is a fresh mount at its root:
+`OverlayPanel` returns `null` when it is not present, so Settings does not come
+back scrolled where it was. Judged acceptable; the alternative is keeping a
+panel mounted behind a board for the sake of a scroll offset.
+
+### Producing an App Store set, and the four things that got in the way
+
+Sizes are **measured from the files**, not assumed: iPhone 17 Pro Max captures
+1320×2868 and iPad Pro 13-inch (M5) captures 2064×2752, which are exactly the
+6.9-inch and 13-inch sizes App Store Connect accepts. Nothing is scaled or
+cropped, and `scripts/screenshots-ios.mjs` refuses a capture whose size is not
+the one its device entry declares.
+
+- **`CODE_SIGNING_ALLOWED=NO` breaks the gateway seed, and does not look like
+  it.** An unsigned simulator build has no entitlements, the keychain then
+  refuses every write with `-34018`, and `seedDevGateway` fails — so the app
+  opens the onboarding wizard and the screenshot recipe that has worked for
+  three rounds appears to have stopped working. `CODE_SIGN_IDENTITY="-"` with
+  `CODE_SIGNING_REQUIRED=NO` and `CODE_SIGNING_ALLOWED=YES` is the fix. The R18
+  note that recommended `CODE_SIGNING_ALLOWED=NO` is wrong for any launch that
+  seeds a gateway; it is only safe for a build nobody signs into.
+- **`simctl io screenshot` will not overwrite.** It fails with
+  `NSCocoaErrorDomain 513` and the words "You don't have permission", which is
+  not a permission problem. Every capture therefore goes through a fresh
+  temporary file and is renamed into place — without that the script works
+  exactly once and fails on every rerun, which is the one thing it exists to
+  prevent.
+- **CocoaPods 1.17 on Ruby 4 cannot `pod install`** without `LANG=en_US.UTF-8`:
+  it raises `Unicode Normalization not appropriate for ASCII-8BIT` from
+  `Config#installation_root` before it has read anything.
+- **A hardware keyboard eats the first characters after a field is focused.**
+  Twice in this round a 43-character prompt arrived as `Draw.` and a 29-character
+  one as `Do.`; a third attempt with the same call typed the whole string. Read
+  the composer before sending. The on-screen ⌫ deletes, and a long press on it
+  deletes a word, which is how the two stubs were cleared.
+
+### The one fixture that could not be published, and now can
+
+The memory graph draws every topic it mints as a **labelled node**, and the
+seeded entries named this repository's owner, his company, his city and a
+colleague. That is fine in a dev fixture and not fine on the most-read surface
+the project has, so the proper nouns were replaced one for one — same counts,
+same capitalised organisation, same `@handle`, same ISO date, so the graph has
+the identical shape. No test asserted the old strings.
+
+This is worth stating as a rule rather than an incident: **a fixture is publish
+-able only if every name in it is invented**, because any fixture can end up in
+a listing, and the memory graph is the screen that puts them all on one page.
+
+### Verified, and not
+
+- **Verified by hand on both simulators:** every scene in
+  `design/store/screenshots/ios/` — fifteen files, each opened and read before it
+  was kept — plus the four README images, and the board routing end to end on the
+  iPad (list → (…) → Boards → a board with side-by-side columns).
+- **The voice overlay was not captured and cannot be here.** `useVoiceMode`
+  reports `available` only when `engine.available && speech.available`, so on a
+  simulator the microphone is absent from the composer entirely. **Device only.**
+- **No 6.5-inch iPhone set.** No iOS 16-era runtime is installed for an
+  iPhone 11 Pro Max or XS Max, and Apple no longer requires that size.
+- **Not measured: whether the reopened Settings panel loses anything a reader
+  cares about.** It remounts at its root by construction; nobody drove a long
+  scroll into Settings and came back to check how that feels.
+- **The dev-launch back button has nothing under it.** Launching straight onto
+  `--hermieOpen chat:<bot>` makes Chat the only route in the stack, so the chat
+  header's back button logs `The action 'GO_BACK' was not handled by any
+navigator`. A real launch always has the list underneath; this is an artefact
+  of the screenshot door, not a defect in the app.
+- **Nothing was verified on Android, on the Mac or in a browser this round.**

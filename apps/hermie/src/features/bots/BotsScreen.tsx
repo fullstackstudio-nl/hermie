@@ -73,7 +73,7 @@ import { useChatRuntime } from '../chats/ChatRuntime'
 import { type MessageMatch, useMessageSearch } from '../search'
 import { BotRow } from './BotRow'
 import { NewBotFlow } from '../profiles/NewBotFlow'
-import { KanbanScreen, kanbanStrings } from '../kanban'
+import { KanbanScreen, kanbanStrings, useBoardsOpener } from '../kanban'
 import { profileStrings } from '../profiles/strings'
 import { ConnectionLine } from './ConnectionLine'
 import { GatewayNameLine } from './GatewayNameLine'
@@ -238,6 +238,14 @@ export function BotsScreen({
   /* The memory browser REPLACES this screen, the way Settings' pages do. */
   const [memoryFor, setMemoryFor] = useState<string | null>(null)
   const [showBoards, setShowBoards] = useState(false)
+  /*
+    The (…) menu's way into the boards. This list IS the sidebar on a wide
+    window — 300 to 340pt — so a board rendered in place here could never reach
+    the 700pt its side-by-side layout needs. Where the shell offers a content
+    column the board goes there instead; `showBoards` above is the phone's
+    answer. See `features/kanban/boards-host.tsx`.
+  */
+  const openBoards = useBoardsOpener(() => setShowBoards(true))
 
   /*
     The profile sheet's connection. Built from the live socket rather than taken
@@ -1037,7 +1045,7 @@ export function BotsScreen({
           setAddedFolderId(null)
         }}
         sidebar={sidebar}
-        onBoards={() => setShowBoards(true)}
+        onBoards={openBoards}
         onNewBot={() => setCreatingBot(true)}
         {...(onOpenSection ? { onNewCron: () => onOpenSection('cron', { create: true }) } : {})}
       />
