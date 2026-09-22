@@ -102,46 +102,141 @@ export interface ConversationGroups {
 
 const str = (value: unknown): string => (typeof value === 'string' ? value : '')
 const num = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0)
+const collapse = (value: unknown): string => str(value).replace(/\s+/gu, ' ').trim()
 
 /**
- * The title a branch is born with.
+ * Cuts `text` down to at most `maxWords` words and `maxChars` characters,
+ * breaking on a WORD boundary rather than mid-word.
  *
- * `Branch · <first words>` of the row it was taken from, so six branches off one
- * conversation read as six different thoughts rather than six copies of one
- * name. Whitespace is collapsed first — a branch taken from a fenced code block
- * would otherwise carry a newline into a title — and the cut is on a WORD
- * boundary, because a name ending mid-word reads as a truncation bug rather than
- * as a summary.
+ * Shared by `branchTitle` below and `labelFromText` (`conversation-list.ts`) so
+ * the two generated-title families cut a first line of text the same way.
+ * Whitespace is collapsed first — text taken from a fenced code block would
+ * otherwise carry a newline into a title — and a word alone longer than the
+ * whole budget is cut TO the budget rather than dropped, because
+ * `Reticulatingsplines…` says more than nothing.
  *
- * A row with no words at all (a tool card, an empty turn) falls back to the bare
- * prefix, which is still a legal, findable title.
+ * A text with no words at all (a tool card, an empty turn) answers `''`; the
+ * caller decides what a title with nothing to say becomes.
  */
-export function branchTitle(text: string): string {
-  const words = str(text).replace(/\s+/gu, ' ').trim().split(' ').filter(Boolean)
+export function cutToWords(text: string, maxWords: number, maxChars: number): string {
+  const words = collapse(text).split(' ').filter(Boolean)
 
   if (!words.length) {
-    return BRANCH_TITLE_PREFIX
+    return ''
   }
 
   let out = ''
 
-  for (const word of words.slice(0, BRANCH_TITLE_WORDS)) {
+  for (const word of words.slice(0, maxWords)) {
     const next = out ? `${out} ${word}` : word
 
-    if (next.length > BRANCH_TITLE_MAX) {
+    if (next.length > maxChars) {
       break
     }
 
     out = next
   }
 
-  // One word longer than the whole budget: take the budget rather than the bare
-  // prefix, because `Branch · Reticulatingsplines…` says more than `Branch`.
-  if (!out) {
-    out = words[0]!.slice(0, BRANCH_TITLE_MAX)
+  return out || words[0]!.slice(0, maxChars)
+}
+
+/**
+ * The title a branch is born with.
+ *
+ * `Branch · <first words>` of the row it was taken from, so six branches off one
+ * conversation read as six different thoughts rather than six copies of one
+ * name.
+ *
+ * A row with no words at all (a tool card, an empty turn) falls back to the bare
+ * prefix, which is still a legal, findable title.
+ */
+export function branchTitle(text: string): string {
+  const cut = cutToWords(text, BRANCH_TITLE_WORDS, BRANCH_TITLE_MAX)
+
+  return cut ? `${BRANCH_TITLE_PREFIX} · ${cut}` : BRANCH_TITLE_PREFIX
+}
+
+/**
+ * ## The own-chat title family
+ *
+ * A reader's own chats with a bot are not one session but any number of them,
+ * and — exactly as `Bot Chat` and `Branch · …` are — the title is the only
+ * signal a listing carries that says so (see the module note above). The
+ * family is one separator deeper than a branch's:
+ *
+ *     Chat · Ada                 ← the lead: whose chats these are
+ *     Chat · Ada · Trip planning ← one of them, labelled
+ *
+ * `lead` is `userChatTitle(identity)` (`features/user-chats/user-chat.ts`),
+ * unchanged: `Chat · <display name, else user id>`. `ownChatTitle` builds a
+ * full title from a lead and a label; `isOwnChatTitle` recognises one;
+ * `ownChatLabel` reads the label back out. The three are one round trip and
+ * are kept together for that reason.
+ */
+
+/** The separator every generated title in this app joins its parts with. */
+export const TITLE_SEPARATOR = ' · '
+
+/**
+ * The title for one of this reader's own chats with a bot.
+ *
+ * An empty `label` answers the bare `lead` itself — the legacy first chat's
+ * title, from before a reader could have more than one (ADR-0007's amendment).
+ * It is still a legal member of the family and is still found, but `label` is
+ * not typed and titled with a dangling separator: `ownChatTitle('Chat · Ada',
+ * '')` is `'Chat · Ada'`, not `'Chat · Ada · '`.
+ *
+ * An empty `lead` (a gateway that named nobody) answers `''` throughout: there
+ * is no chat to title.
+ */
+export function ownChatTitle(lead: string, label: string): string {
+  const head = collapse(lead)
+  const tail = collapse(label)
+
+  if (!head) {
+    return ''
   }
 
-  return `${BRANCH_TITLE_PREFIX} · ${out}`
+  return tail ? `${head}${TITLE_SEPARATOR}${tail}` : head
+}
+
+/**
+ * Is this title one of THIS reader's own chats?
+ *
+ * Exactly the bare lead, or the lead followed by the separator — never a bare
+ * `startsWith`, which is what keeps `Chat · Ada` from also matching
+ * `Chat · Adam`'s chats. The separator is doing real work here, not
+ * decoration.
+ */
+export function isOwnChatTitle(title: unknown, lead: string): boolean {
+  const head = collapse(lead)
+
+  if (!head) {
+    return false
+  }
+
+  const value = collapse(title)
+
+  return value === head || value.startsWith(`${head}${TITLE_SEPARATOR}`)
+}
+
+/**
+ * The part of the title the reader named, or `''` for the bare lead.
+ *
+ * The empty answer is not a failure: the bare lead's whole title IS the lead,
+ * so there is no label to show, and the surface names that chat in the
+ * reader's own language instead ("My chat") rather than this module inventing
+ * an English word for it.
+ */
+export function ownChatLabel(title: unknown, lead: string): string {
+  const head = collapse(lead)
+  const value = collapse(title)
+
+  if (!head || !value.startsWith(`${head}${TITLE_SEPARATOR}`)) {
+    return ''
+  }
+
+  return value.slice(head.length + TITLE_SEPARATOR.length)
 }
 
 /**
@@ -226,7 +321,9 @@ export interface ClassifyInput {
    */
   userChatId?: string
   /**
-   * The title this reader's private chat carries.
+   * The lead of this reader's own-chat title family (`userChatTitle`,
+   * `Chat · <name>`) — matched via `isOwnChatTitle`, so a row labelled
+   * `Chat · Ada · Trip planning` is `mine` here too, not just the bare lead.
    *
    * Read when no id is known yet — the first listing of a bot whose chat has
    * never been opened — and ignored when it is. Empty on a gateway that named
@@ -281,7 +378,7 @@ export function classifyConversations({
     */
     const isMine = userChatId
       ? id === userChatId || resolvedId === userChatId
-      : Boolean(userChatTitle) && title === userChatTitle
+      : isOwnChatTitle(title, userChatTitle ?? '')
 
     const isCanonical =
       !isMine &&
@@ -388,6 +485,20 @@ export function conversationActions(conversation: Conversation): ConversationAct
  */
 export function conversationKey(botName: string, storedId: string): string {
   return `${botName}#${storedId}`
+}
+
+/**
+ * The disk-cache key for one conversation (`platform/chat-cache.ts`).
+ *
+ * The group chat keeps the bare bot name — the cache has always been the
+ * bot's one transcript, and every existing reader of it should go on finding
+ * it there. One of the reader's own chats gets `conversationKey`'s scheme:
+ * a second transcript belonging to the same bot, keyed the same way a branch
+ * already is. Painting from the right key on a switch is what lets the
+ * reader's own chats come back instantly from disk instead of cold.
+ */
+export function cacheKeyFor(botName: string, storedId: string, isGroup: boolean): string {
+  return isGroup ? botName : conversationKey(botName, storedId)
 }
 
 /** The bot a conversation key belongs to, canonical or not. */
