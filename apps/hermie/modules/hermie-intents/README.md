@@ -52,6 +52,14 @@ Plenty of real prompts take longer than 45 seconds. One that does returns a
 sentence saying so and pointing at **Send to a bot**, which does not wait at
 all. Raising the number would trade a clear message for a spinner.
 
+The two sides do not start spending the budget at the same moment: the Swift side
+begins polling the instant it writes the request, and the JavaScript side only
+reaches the send after a launch, a dial and a hydration. So `IntentRunner` hands
+the reply watch what is LEFT of the 45 seconds rather than the whole of it, and
+the app therefore gives up a moment before Shortcuts does — which is the right
+way round, because the alternative writes an answer into a file nobody is reading
+any more.
+
 ## Things that fail silently, and what guards them
 
 - **A phrase with no `.applicationName` in it.** Siri matches a phrase only when
