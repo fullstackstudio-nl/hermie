@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A chat opened the next morning no longer shows yesterday twice.** An approval you
+  answered yesterday is kept in the offline cache, and the transcript is painted from that
+  cache before the history comes back. Folding the history in put the answered card
+  *behind* every row it brought — including this morning's — so the thread read `Today`,
+  two messages, `Yesterday`, the old "Allowed once" card, and `Today` again above the next
+  message. A settled question is now put back into the moment it was answered in. A question
+  still waiting on you is not: it stays at the bottom, where it is being asked.
+- **The chat header's pill no longer clips a name that fits.** The pill grew a second
+  line — the bot's other name beside what it is doing — and was still being sized to the
+  first one alone, so `Juno Marsh` over `techsupport · Online` was drawn as `Juno Mar…`
+  over `techsupport · …` with most of the header empty beside it. It now takes the width of
+  whichever line is longer, up to the room actually left between the header's buttons, and
+  still does not move while the bot cycles through Thinking, Working and Online. When there
+  genuinely is not enough room it is the state that gives way, not the name.
+
 - **The microphone purpose string ships.** The image-picker plugin was told
   `microphonePermission: false`, which deletes `NSMicrophoneUsageDescription` from the plist
   after the app's own sentence was written — so a build that dictates carried no explanation

@@ -13,11 +13,17 @@
  * — the name and the box around it — is identical across four different statuses,
  * and the status itself is inside an absolutely positioned view, which Yoga leaves
  * out of its parent's intrinsic size.
+ *
+ * The second report is further down. The pill grew a second line and was still
+ * being sized to the first, so a name and a handle that both fitted the header
+ * were both truncated; those tests hand in BOTH rulers and the room between the
+ * buttons, because with no layout engine a measurement is the only honest way to
+ * ask which line won.
  */
 import { act, render } from '@testing-library/react-native'
 
-import { ChatHeader, PILL_MIN_TEXT_WIDTH, pillTextWidth } from '../src/chat-ui/ChatHeader'
-import type { PresenceState } from '../src/ui/tokens'
+import { ChatHeader, PILL_MIN_TEXT_WIDTH, pillTextWidth, widestStatus } from '../src/chat-ui/ChatHeader'
+import { AVATAR_SIZE, type PresenceState } from '../src/ui/tokens'
 import { shortToolName, TOOL_NAME_MAX } from '../src/chat-ui/tool-label'
 import { ThemeProvider, useTheme, type Theme } from '../src/ui/theme'
 
@@ -212,6 +218,171 @@ describe('the pill takes one number and stops asking', () => {
     expect(pillTextWidth(0)).toBe(PILL_MIN_TEXT_WIDTH)
     expect(pillTextWidth(12)).toBe(PILL_MIN_TEXT_WIDTH)
     expect(pillTextWidth(200.1)).toBe(201)
+  })
+})
+
+/**
+ * The pill grew a second line — `handle · state` — and kept being sized to the
+ * first one. The owner's header showed `Juno Mar…` over `techsupport · …` with
+ * most of the row empty beside it: two truncations that had nothing to do with
+ * the space available and everything to do with which line was measured.
+ */
+describe('a pill with two lines takes the width of the longer one', () => {
+  function pill(subtitle: string, presence: PresenceState = 'online', name = 'Juno Marsh') {
+    return render(
+      <ThemeProvider>
+        <ThemeProbe />
+        <ChatHeader
+          name={name}
+          onOpenOptions={() => undefined}
+          presence={presence}
+          secondaryName="techsupport"
+          subtitle={subtitle}
+        />
+      </ThemeProvider>
+    )
+  }
+
+  /** The second ruler, laid out the same way the first one is. */
+  function measureSecondary(tree: ReturnType<typeof pill>, width: number) {
+    const ruler = tree.getByTestId('chat-header-ruler-secondary', { includeHiddenElements: true })
+    const onLayout = ruler.props.onLayout as (event: { nativeEvent: { layout: { width: number } } }) => void
+
+    act(() => {
+      onLayout({ nativeEvent: { layout: { width } } })
+    })
+  }
+
+  /** The centring column between the header's buttons: how much room there is. */
+  function measureRoom(tree: ReturnType<typeof pill>, width: number) {
+    const room = tree.getByTestId('chat-header-room', { includeHiddenElements: true })
+    const onLayout = room.props.onLayout as (event: { nativeEvent: { layout: { width: number } } }) => void
+
+    act(() => {
+      onLayout({ nativeEvent: { layout: { width } } })
+    })
+  }
+
+  it('sizes to the second line when the second line is the long one', () => {
+    const tree = pill('Online')
+
+    measure(tree, 86)
+    measureSecondary(tree, 152.2)
+
+    expect(columnStyle(tree).width).toBe(153)
+  })
+
+  it('still sizes to the name when the NAME is the long one', () => {
+    const tree = pill('Online')
+
+    measure(tree, 204)
+    measureSecondary(tree, 120)
+
+    expect(columnStyle(tree).width).toBe(204)
+  })
+
+  it('reserves room for the widest state rather than the one the bot is in', () => {
+    const ruler = pill('Online').getByTestId('chat-header-ruler-secondary', { includeHiddenElements: true })
+    const [text] = ruler.children as { props: { children: string } }[]
+
+    expect(text?.props.children).toBe('techsupport · Waiting for you')
+  })
+
+  it('keeps that width equal across three states', () => {
+    const widths = (['online', 'working', 'needsInput'] as PresenceState[]).map(presence => {
+      const tree = pill('', presence)
+
+      measure(tree, 86)
+      measureSecondary(tree, 152.2)
+
+      return columnStyle(tree).width
+    })
+
+    expect(new Set(widths).size).toBe(1)
+    expect(widths[0]).toBe(153)
+  })
+
+  it('keeps it equal across the statuses a working bot cycles through', () => {
+    const widths = STATUSES.map(status => {
+      const tree = pill(status, 'working')
+
+      measure(tree, 86)
+      measureSecondary(tree, 152.2)
+
+      return columnStyle(tree).width
+    })
+
+    expect(new Set(widths).size).toBe(1)
+  })
+
+  it('never asks for more than the header has left between its buttons', () => {
+    const tree = pill('Online')
+
+    measure(tree, 86)
+    measureSecondary(tree, 400)
+    measureRoom(tree, 240)
+
+    // The room the TEXT has is the column less the pill's own furniture: the
+    // avatar, the gap in front of it and the padding either side.
+    const chrome = seen!.space.xs + AVATAR_SIZE.header + seen!.space.sm + seen!.space.md
+
+    expect(columnStyle(tree).width).toBe(240 - chrome)
+    expect(columnStyle(tree).width).toBeLessThan(400)
+  })
+
+  it('leaves the width alone while nothing has measured the room yet', () => {
+    const tree = pill('Online')
+
+    measure(tree, 86)
+    measureSecondary(tree, 400)
+
+    expect(columnStyle(tree).width).toBe(400)
+  })
+
+  it('gives the status all the give, so the handle is never the half that elides', () => {
+    const tree = pill('Running an extremely long tool name that could never fit…', 'working')
+    const handle = tree.getByTestId('chat-header-handle')
+    const fade = tree.getByTestId('chat-header-status-fade')
+
+    const handleStyle = Object.assign(
+      {},
+      ...(handle.props.style as Record<string, unknown>[]).filter(Boolean)
+    ) as Record<string, unknown>
+
+    expect(handle.props.numberOfLines).toBe(1)
+    expect(handleStyle).toMatchObject({ flexShrink: 0, maxWidth: '100%' })
+    expect(fade.props.style).toMatchObject({ flexShrink: 1 })
+  })
+
+  it('draws the two halves as one line, separated', () => {
+    const tree = pill('Online')
+
+    expect(tree.getByTestId('chat-header-handle').props.children).toBe('techsupport')
+    expect(tree.getByText(/^· Online$/)).toBeTruthy()
+  })
+})
+
+describe('the status a ruler reserves room for', () => {
+  it('is the longest of the ones offered', () => {
+    expect(widestStatus(['Online', 'Waiting for you', 'Running'])).toBe('Waiting for you')
+  })
+
+  it('is the empty string when nothing is offered, so no room is reserved', () => {
+    expect(widestStatus([])).toBe('')
+  })
+})
+
+describe('a width that has two measurements to take', () => {
+  it('takes the larger, and the floor when both are small', () => {
+    expect(pillTextWidth(40, 60)).toBe(PILL_MIN_TEXT_WIDTH)
+    expect(pillTextWidth(120, 60)).toBe(120)
+    expect(pillTextWidth(60, 120.2)).toBe(121)
+  })
+
+  it('never exceeds the room it was given, and ignores a room nobody measured', () => {
+    expect(pillTextWidth(300, 0, 200)).toBe(200)
+    expect(pillTextWidth(300, 0, 0)).toBe(300)
+    expect(pillTextWidth(150, 0, 220.8)).toBe(150)
   })
 })
 

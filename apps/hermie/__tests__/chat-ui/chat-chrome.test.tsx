@@ -59,7 +59,11 @@ describe('the chat header', () => {
     // presence line; moving the header out of the layout must not lose it.
     render()
 
-    // The second line is the bot's OTHER name beside what it is doing.
-    expect(screen.getByText(/Researcher · /)).toBeTruthy()
+    // The second line is the bot's OTHER name beside what it is doing. Two
+    // texts, not one: the handle is outside the fade and outside the shrink,
+    // so it neither flickers when the status changes nor loses its letters
+    // when the status is long (`ChatHeader`'s second-line rule).
+    expect(screen.getByTestId('chat-header-handle').props.children).toBe('Researcher')
+    expect(screen.getByText(/^· /)).toBeTruthy()
   })
 })

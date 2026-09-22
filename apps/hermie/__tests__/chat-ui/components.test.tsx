@@ -229,7 +229,8 @@ describe('ChatHeader', () => {
 
     renderScreen(<ChatHeader name="researcher" onOpenOptions={onOpenOptions} running secondaryName="Researcher" />)
 
-    expect(screen.getByText(/Researcher · /)).toBeTruthy()
+    expect(screen.getByTestId('chat-header-handle').props.children).toBe('Researcher')
+    expect(screen.getByText(/^· /)).toBeTruthy()
 
     fireEvent.press(screen.getByTestId('chat-header-options'))
     expect(onOpenOptions).toHaveBeenCalled()

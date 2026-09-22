@@ -9945,3 +9945,115 @@ a listing, and the memory graph is the screen that puts them all on one page.
 navigator`. A real launch always has the list underneath; this is an artefact
   of the screenshot door, not a defect in the app.
 - **Nothing was verified on Android, on the Mac or in a browser this round.**
+
+## Round R21: a card from yesterday, and a pill measured on the wrong line (2026-09-22)
+
+### `Today · Yesterday · Today`, and the sequence that produces it
+
+The report was a screenshot: a divider reading **TODAY**, a message at 09:32 and
+its reply, then a divider reading **YESTERDAY** over an answered approval row
+(`Allowed once · sudo -n docker compose down …`), then **TODAY** again over the
+09:33 message. One day, two stamps, with the day before wedged between them.
+
+`layoutRows` was not the culprit and could not have been. It stamps a date
+wherever the day changes between NEIGHBOURS, which is the only thing a single
+pass over a list can honestly say — hand it an order that goes forwards,
+backwards and forwards again and it will report exactly that, twice. The bug was
+the order, and it is reproduced from the real sequence in
+`packages/transcript/src/request-order.test.ts`:
+
+1. **Day 1.** A turn runs, an approval is asked and answered. `applyServerRequest`
+   stamps the card `ts: now/1000`, so it carries yesterday's clock.
+2. **The cache takes it.** `snapshotForCache` keeps everything but an _open_
+   request, so an ANSWERED card is cached like any other row — correctly: it is
+   part of what was said.
+3. **Day 2, cold open.** `paintFromCache` puts the thread on screen with the card
+   at the end of it, which is where it belongs, because it is still the end.
+4. **The resume's history lands.** `reconcile` folds in every persisted row —
+   day 1's, and this morning's new turn. The card is not persisted and never can
+   be (`isEphemeral`), so it is _kept_ — and kept was implemented as
+   `[...merged, ...kept]`, which appends it behind every row the hydration
+   brought back, this morning's included.
+5. **The owner types.** `beginLocalTurn` appends after that.
+
+Order: day 1, this morning, yesterday's card, 09:33. Two `TODAY`s with a
+`YESTERDAY` in the middle, precisely.
+
+**The fix is a distinction, not a sort.** An OPEN request and an ANSWERED one are
+different objects. An open one is being asked _now_: it belongs at the tail
+whatever timestamp it carries, because that is where the reader is looking and
+what the turn is waiting on. A settled one is a line in the transcript like any
+other and belongs in the moment it happened. So `reconcile` splits its kept
+items, and a settled request with a `ts` is placed in front of the first item
+strictly newer than it (`placeByTimestamp`); everything else keeps the behaviour
+it had.
+
+Deliberately **not** a sort of the transcript by `ts`. Streaming bubbles, interim
+notes and optimistic submits each have ordering rules of their own that a
+timestamp knows nothing about — the duplicate-turn tests are those rules written
+down — and re-sorting the whole list would overrule every one of them. Items
+with no timestamp are stepped over rather than moved, for the same reason
+`inRowOrder` lets them inherit the position their neighbours gave them.
+
+### The pill was measured on the line that no longer decides its width
+
+R4 pinned the pill's width to a ruler that measures the NAME, because the name
+was the only line in the pill that stood still while the status cycled. That
+argument was right and still is. What changed underneath it is that the pill
+grew a **second line** — the bot's other name, then the state, as
+`techsupport · Online` — and a column sized to the first line has no idea how
+wide the second one is. The owner's header drew `Juno Mar…` over
+`techsupport · …` with most of the row empty.
+
+Three things, in `apps/hermie/src/chat-ui/ChatHeader.tsx`:
+
+- **A second ruler**, and the column takes the wider of the two. `pillTextWidth`
+  now reads both.
+- **A measured cap.** How much room there is between the header's buttons depends
+  on the window, on which shell is drawing it and on which buttons that shell
+  put in the row, so it is read off the centring column's own `onLayout`
+  (`chat-header-room`) rather than written down. The text's share is that width
+  less the pill's furniture: the avatar, the gap in front of it, the padding
+  either side.
+- **A reserved status, so R4's rule survives.** A ruler carrying the CURRENT
+  status would hand the width straight back to the thing that changes forty times
+  a turn. It carries the widest state the bot can reach instead (`widestStatus`,
+  longest by characters — a proxy, but a STABLE one, and a ruler that is
+  occasionally a few points generous is better than a ruler that moves). A
+  `subtitle` — `Running terminal…` — is never a candidate; it elides inside the
+  room reserved for it.
+
+**Truncation order falls out of the layout rather than out of a rule.** The
+second line is a row with two children: the handle, `flexShrink: 0` with
+`maxWidth: '100%'`, and the status, `flexShrink: 1`. The status is the only child
+with any give, so it is the half that loses its letters; the handle only
+ellipsises once it is alone and still too long. The handle is also _outside_ the
+cross-fade, which it was not before: fading a word out and back every time a tool
+starts is a flicker the reader has to explain to themselves.
+
+### Verified, and not
+
+- **Gates:** `npm run typecheck`, `npx eslint .`, `npx prettier --check .`,
+  `npx vitest run` (84 files, 1618 tests) and `apps/hermie` Jest (231 suites,
+  2972 tests) all green.
+- **Item 1 is verified against the real sequence, not against a hand-built
+  state.** The test goes through `reconcile` → `applyServerRequest` →
+  `answerRequest` → `snapshotForCache` → `stateFromCache` → `reconcile` →
+  `beginLocalTurn`, and asserts both the card's position and that every item
+  carrying a gateway timestamp is in ascending order.
+- **Item 2's widths are asserted from handed-in measurements.** The test renderer
+  has no layout engine, so the rulers and the room are called rather than laid
+  out. That is the mechanism being tested — the pill is supposed to take numbers
+  from named views and ask nothing else — but it is not a rendering check.
+- **Nothing was run on a device, a simulator, Android or a browser this round.**
+  The pill's real widths under a native glass surface, and under the web
+  target's line-clamped `-webkit-box`, are unmeasured.
+- **The character-count proxy in `widestStatus` is unmeasured against a
+  proportional font.** A state label that is shorter but wider than another would
+  reserve slightly too little room; with the four labels in use nothing suggests
+  that happens, and nobody measured it.
+- **Not addressed: `applyServerRequest` still mints a fresh card when an
+  ANSWERED one is replayed under the same `srq-N`.** That is deliberate — the
+  gateway restarts that counter per process, and the guard that dropped the new
+  question was itself a bug — but it means a replayed request can stand beside
+  the answered card it resembles.

@@ -30,7 +30,7 @@
  * The agents bar pins under it (§6.8), which is why the two are siblings in the
  * chat screen rather than one component.
  *
- * ## The pill has ONE width, and the bot's name is what decides it
+ * ## The pill has ONE width, and its LONGER line is what decides it
  *
  * The status line changes several times a second while a turn runs — `Thinking…`,
  * `Typing…`, `Running terminal…`, `Online` — and a pill that hugs its content is a
@@ -61,6 +61,28 @@
  * (`pillTextWidth`). After that the only thing in the world that can move the
  * pill is the bot being renamed. Not a status, not a font fallback, not a
  * native surface re-measuring itself between two frames.
+ *
+ * ## …which means the OTHER line has to be measured too
+ *
+ * R4 measured the name because the name was the only line that stood still. The
+ * pill has since grown a second line — the bot's other name, then the state, as
+ * `handle · Online` — and sizing the column to the first line alone clipped it:
+ * the owner reported `Juno Mar…` over `techsupport · …` with most of the header
+ * empty beside it.
+ *
+ * So there are two rulers and the column takes the WIDER of them, capped at the
+ * room actually left between the header's buttons — measured off the centring
+ * column, because how much room there is depends on the window, the shell and
+ * which buttons this surface put in the row, and a number written here would be
+ * wrong on three of the four.
+ *
+ * R4's rule survives intact, and it is what decides what the second ruler says.
+ * A ruler that carried the CURRENT status would move the pill on every frame of
+ * a running turn, so it carries the widest status the bot can cycle through
+ * (`widestStatus`) and reserves room for that once. Anything longer — a tool
+ * name arriving as a `subtitle` — is elided inside the room reserved for it, and
+ * the status is the half that gives way: it is the only shrinkable child of the
+ * second line, so the handle is never the thing that loses its letters.
  *
  * Changing it cross-fades rather than cutting, over `motion.press`, which is short
  * enough that a reader who is watching the words reads a change and a reader who is
@@ -208,30 +230,70 @@ export const PILL_MIN_TEXT_WIDTH = 96
  * another of which draws it as a line-clamped `-webkit-box`. An argument that
  * has to be re-made per platform is not an invariant.
  *
- * So the width stops being derived at all. The name is measured once, off a
- * copy nothing constrains, and the column is given that measurement as an
- * EXPLICIT width. From then on the only thing that can change it is the bot
- * being renamed — not a status, not a font fallback, not a native surface
- * re-measuring itself between frames.
+ * So the width stops being derived at all. Both lines are measured off copies
+ * nothing constrains, and the column is given the wider of them as an EXPLICIT
+ * width. From then on the only things that can change it are the bot being
+ * renamed and the header changing size — not a status, not a font fallback, not
+ * a native surface re-measuring itself between frames.
  *
- * `floor` is the minimum a pill may be, for a bot called `Al`. Before the
+ * `measuredSecondary` is the second line's ruler and is 0 until it answers,
+ * which is also the whole of the case where the bot has no second name: there
+ * is no second ruler, so the name decides alone, exactly as R4 had it.
+ *
+ * `available` is how much room the text column actually has — the space left
+ * between the header's buttons, less the pill's own furniture. 0 means nobody
+ * has measured yet, and an unmeasured cap is no cap: a column briefly wider
+ * than its header is a frame of overflow, while a column clamped to 0 is a pill
+ * with no words in it.
+ *
+ * `floor` is the minimum a pill may be, for a bot called `Al`. Before any
  * measurement lands the answer is the floor, which is what the column already
  * did.
  */
-export function pillTextWidth(measuredName: number, floor: number = PILL_MIN_TEXT_WIDTH): number {
-  return Math.max(Math.ceil(measuredName), floor)
+export function pillTextWidth(
+  measuredName: number,
+  measuredSecondary: number = 0,
+  available: number = 0,
+  floor: number = PILL_MIN_TEXT_WIDTH
+): number {
+  const wanted = Math.max(Math.ceil(measuredName), Math.ceil(measuredSecondary), floor)
+
+  return available > 0 ? Math.min(wanted, Math.floor(available)) : wanted
 }
 
 /**
- * One line of status, faded out and back when the words change.
+ * The status the second line reserves room for: the longest one, once.
  *
- * The value shown is state rather than the prop, because the swap has to happen at
- * the bottom of the fade and not when the render arrives. Under Reduce Motion both
+ * R4's rule is that the pill does not move while the bot works, and the second
+ * line now carries the thing that changes. Measuring whichever status is current
+ * would hand that change straight back to the width, so the ruler is given the
+ * widest of the labels the bot cycles through and the real line is elided inside
+ * it. Longest is counted in CHARACTERS, which is a proxy — but a stable one, and
+ * a ruler that is occasionally a few points generous is a pill that is
+ * occasionally a few points wide. A ruler that moves is the bug.
+ */
+export function widestStatus(candidates: readonly string[]): string {
+  return candidates.reduce((widest, candidate) => (candidate.length > widest.length ? candidate : widest), '')
+}
+
+/** Between the two halves of the second line, and inside the ruler that measures it. */
+const SEPARATOR = ' · '
+
+/**
+ * The pill's second line: the bot's other name, then what it is doing.
+ *
+ * The status half is faded out and back when the words change, and the value
+ * shown is state rather than the prop, because the swap has to happen at the
+ * bottom of the fade and not when the render arrives. Under Reduce Motion both
  * halves are zero-length and the completion still runs, so the words still change —
  * which is the rule `motion.ts` states about a skipped animation being a skipped
  * callback.
+ *
+ * The `lead` — the handle — is deliberately OUTSIDE the animated view. It does
+ * not change when the status does, and fading a word out and back every time a
+ * tool starts is a flicker the reader has to explain to themselves.
  */
-function StatusLine({ line, reduceMotion }: { line: string; reduceMotion: boolean }) {
+function StatusLine({ lead, line, reduceMotion }: { lead?: string; line: string; reduceMotion: boolean }) {
   const theme = useTheme()
   const [shown, setShown] = useState(line)
   const fade = useRef(new Animated.Value(1)).current
@@ -254,17 +316,38 @@ function StatusLine({ line, reduceMotion }: { line: string; reduceMotion: boolea
 
   return (
     /*
-      A row as tall as one `meta` line, holding a text that is absolutely
+      A row as tall as one `meta` line, holding a row that is absolutely
       positioned inside it. That is what keeps the status out of the pill's width:
       an absolutely positioned child does not contribute to its parent's intrinsic
       size, so the longest tool name in the world cannot widen this.
     */
     <View style={{ height: theme.type.meta.lineHeight }} testID="chat-header-status">
-      <Animated.View style={{ left: 0, opacity: fade, position: 'absolute', right: 0, top: 0 }}>
-        <Text color="textFaint" numberOfLines={1} variant="meta">
-          {shown}
-        </Text>
-      </Animated.View>
+      <View style={{ alignItems: 'center', flexDirection: 'row', left: 0, position: 'absolute', right: 0, top: 0 }}>
+        {/*
+          The handle does not shrink, and the status does. That is the whole of
+          the truncation order: the status is the only child with any give, so a
+          line too long for its room loses the end of `Running terminal…` and
+          keeps `techsupport` whole. `maxWidth` is what stops a handle longer
+          than the pill from running out of it — it ellipsises at the rim
+          instead, having already taken every point there was.
+        */}
+        {lead ? (
+          <Text
+            color="textFaint"
+            numberOfLines={1}
+            style={{ flexShrink: 0, maxWidth: '100%' }}
+            testID="chat-header-handle"
+            variant="meta"
+          >
+            {lead}
+          </Text>
+        ) : null}
+        <Animated.View style={{ flexShrink: 1, opacity: fade }} testID="chat-header-status-fade">
+          <Text color="textFaint" numberOfLines={1} variant="meta">
+            {lead && shown ? `${SEPARATOR}${shown}` : shown}
+          </Text>
+        </Animated.View>
+      </View>
     </View>
   )
 }
@@ -295,6 +378,22 @@ export function ChatHeader({
     Nothing else resets it, which is the whole point — see `pillTextWidth`.
   */
   const [nameWidth, setNameWidth] = useState(0)
+  /*
+    The second line's own width, measured the same way — and 0 for a bot with no
+    second name, which is also how the pill behaved before it had one.
+  */
+  const [secondaryWidth, setSecondaryWidth] = useState(0)
+  /*
+    How much room the text column has, which is not a constant.
+
+    The centring column sits between the leading group and the trailing one and
+    takes what is left, so its width IS "the space between the buttons" — for
+    this window, this shell, and whichever buttons this surface put in the row.
+    Less the pill's own furniture, which is the only part that can be written
+    down: the avatar plus the gap in front of it and the padding either side.
+  */
+  const [roomWidth, setRoomWidth] = useState(0)
+  const chrome = theme.space.xs + AVATAR_SIZE.header + theme.space.sm + theme.space.md
   const measuredFor = useRef(name)
 
   if (measuredFor.current !== name) {
@@ -310,7 +409,20 @@ export function ChatHeader({
     is what it was always describing, and the name in front of it survives.
   */
   const status = subtitle ?? state
-  const line = secondaryName ? `${secondaryName} · ${status}` : status
+  /*
+    What the second ruler carries: the handle, and room for the widest state the
+    bot can reach rather than the one it is in. `subtitle` is deliberately not a
+    candidate — it is the half that elides.
+  */
+  const rulerLine = secondaryName
+    ? `${secondaryName}${SEPARATOR}${widestStatus([
+        chatStrings.header.idle,
+        chatStrings.header.running,
+        chatStrings.header.needsInput,
+        stateLabel('offline', lastSeenAt)
+      ])}`
+    : ''
+  const measured = nameWidth > 0 || secondaryWidth > 0
 
   return (
     <View
@@ -360,17 +472,22 @@ export function ChatHeader({
         inside it, and the pill's own horizontal padding is a full `space.md` on the
         trailing side so the name is not against the rim.
       */}
-      <View pointerEvents="box-none" style={{ alignItems: 'center', flex: 1 }}>
+      <View
+        onLayout={event => setRoomWidth(event.nativeEvent.layout.width)}
+        pointerEvents="box-none"
+        style={{ alignItems: 'center', flex: 1 }}
+        testID={`${testID}-room`}
+      >
         {/*
-          The ruler: the name at the same type token, laid out with nothing
-          around it and nothing to shrink against, so what it reports is the
-          name's OWN width rather than the width it was given.
+          The rulers: each line at the same type token, laid out with nothing
+          around it and nothing to shrink against, so what they report is each
+          line's OWN width rather than the width it was given.
 
           Absolutely positioned inside the centring column and not inside the
           pill, because a measurement taken inside the box it decides the size
           of is a measurement that measures itself. Invisible, inert and hidden
-          from assistive technology: the real name two lines down is the one
-          that gets read out.
+          from assistive technology: the real lines two levels down are the ones
+          that get read out.
         */}
         <View
           accessibilityElementsHidden
@@ -384,6 +501,21 @@ export function ChatHeader({
         >
           <Text variant="chatName">{name}</Text>
         </View>
+
+        {rulerLine ? (
+          <View
+            accessibilityElementsHidden
+            aria-hidden
+            importantForAccessibility="no-hide-descendants"
+            key={rulerLine}
+            onLayout={event => setSecondaryWidth(event.nativeEvent.layout.width)}
+            pointerEvents="none"
+            style={{ left: 0, opacity: 0, position: 'absolute', top: 0 }}
+            testID={`${testID}-ruler-secondary`}
+          >
+            <Text variant="meta">{rulerLine}</Text>
+          </View>
+        ) : null}
 
         {/*
           The pill is the way into the bot's profile, which is why the whole of
@@ -452,24 +584,32 @@ export function ChatHeader({
             </View>
 
             {/*
-            The name is the only child that contributes a width here, which is the
-            whole of the rule above. `minWidth` is the floor under a short one.
+            Neither line contributes a width here, which is the whole of the rule
+            above: the name is clamped to one line and the second line is
+            absolutely positioned. The rulers decide, and `minWidth` is the floor
+            under a bot whose two lines are both short.
           */}
             <View
               style={{
                 flexShrink: 1,
                 minWidth: PILL_MIN_TEXT_WIDTH,
-                // Once the ruler has answered, the column stops being sized by
-                // its contents at all. A status can no longer reach the width
-                // by any route on any platform.
-                ...(nameWidth > 0 ? { width: pillTextWidth(nameWidth) } : {})
+                // Once a ruler has answered, the column stops being sized by its
+                // contents at all. A status can no longer reach the width by any
+                // route on any platform.
+                ...(measured
+                  ? { width: pillTextWidth(nameWidth, secondaryWidth, roomWidth > 0 ? roomWidth - chrome : 0) }
+                  : {})
               }}
               testID={`${testID}-text`}
             >
               <Text accessibilityRole="header" aria-level={1} numberOfLines={1} variant="chatName">
                 {name}
               </Text>
-              <StatusLine line={line} reduceMotion={theme.reduceMotion} />
+              <StatusLine
+                line={status}
+                reduceMotion={theme.reduceMotion}
+                {...(secondaryName ? { lead: secondaryName } : {})}
+              />
             </View>
           </GlassSurface>
         </Pressable>

@@ -150,6 +150,25 @@ describe('layoutRows', () => {
     expect(layout.c?.dateStamp).toBeTruthy()
     expect(layout.a?.dateStamp).not.toBe(layout.c?.dateStamp)
   })
+
+  /**
+   * The owner's `TODAY … YESTERDAY … TODAY` report, reproduced from the list's
+   * side so the blame lands where it belongs.
+   *
+   * A stamp marks a change of day between NEIGHBOURS, which is the only thing a
+   * single pass over a list can honestly say. Hand it an order that goes
+   * forwards, backwards and forwards again and it will say so twice — correctly.
+   * The invariant that keeps one day to one stamp is the ORDER, and it is
+   * `reconcile`'s to hold (`packages/transcript/src/request-order.test.ts`).
+   */
+  it('says the day changed twice when the order it was handed doubles back', () => {
+    const day = 86_400
+    const layout = layoutRows([user('a', AT), user('b', AT - day), user('c', AT + 60)], AT)
+
+    expect(layout.a?.dateStamp).toBe('Today')
+    expect(layout.b?.dateStamp).toBe('Yesterday')
+    expect(layout.c?.dateStamp).toBe('Today')
+  })
 })
 
 describe('dateStampFor', () => {
