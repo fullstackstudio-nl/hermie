@@ -73,6 +73,20 @@ export type AuthEventName =
    * fix it, so saying so at the moment it is knowable is the whole remedy.
    */
   | 'signin.no_refresh'
+  /**
+   * The launch read of the stored gateway threw, and the app opened the wizard.
+   *
+   * Recorded because the alternative was what shipped: the provider's startup
+   * `reload()` caught everything, switched to onboarding and kept the reason to
+   * itself, so a device that could not write its keychain looked exactly like a
+   * device nobody had set up yet. This is the event that tells those two apart
+   * afterwards, on a screen the owner can reach.
+   *
+   * It is the one event here that is not about a token, and it is on this ring
+   * anyway: the ring is where "why am I being asked to sign in again" is
+   * answered, and a failed launch read is one of the answers.
+   */
+  | 'startup.failed'
 
 /**
  * Why the session ended, in the terms the UI turns into one calm sentence.

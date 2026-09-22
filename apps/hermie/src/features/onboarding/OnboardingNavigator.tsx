@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 
-import type { StoredGatewayConfig } from '../../gateway/config'
+import { isSecretStoreWriteError, type StoredGatewayConfig } from '../../gateway/config'
 import { describeConnectionError } from '../../gateway/errors'
 import { saveGatewayAndRegister } from '../../gateway/registry'
 import { WEB_GATEWAY_BASE_URL } from '../../gateway/web-config'
@@ -208,7 +208,21 @@ export function OnboardingNavigator({
       })
       await onComplete()
     } catch (error) {
-      setSaveError(strings.onboarding.done.saveFailed(describeConnectionError(error, draft.baseUrl ?? '')))
+      /*
+        The keychain refusing is its own sentence, not a variant of "the
+        settings could not be saved".
+
+        It is also the only failure here that leaves NOTHING on disk —
+        `saveGatewaySetup` rolls its secrets back and writes no configuration —
+        so pressing the button again is a clean retry rather than a second
+        attempt on top of a half-written gateway. That is what makes it worth
+        offering as one.
+      */
+      setSaveError(
+        isSecretStoreWriteError(error)
+          ? strings.onboarding.done.credentialsNotStored(error.reason)
+          : strings.onboarding.done.saveFailed(describeConnectionError(error, draft.baseUrl ?? ''))
+      )
       setSaving(false)
     }
   }, [draft, gatewayId, onComplete])
@@ -241,7 +255,12 @@ export function OnboardingNavigator({
       : step === 'done'
         ? saving
           ? strings.onboarding.done.saving
-          : strings.onboarding.done.finish
+          : saveError
+            ? // The button after a failure is a retry, and a button that still
+              // says "Start chatting" under a red line asks the reader to work
+              // out for themselves that pressing it again is allowed.
+              strings.onboarding.done.retry
+            : strings.onboarding.done.finish
         : strings.common.continue
 
   const authMode = authModeOf(draft.probe)

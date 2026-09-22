@@ -169,6 +169,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Setting a gateway up now either happens completely or leaves nothing behind — and never fails
+  silently.** The credentials go to the secret store first and the address and the list entry only
+  once they have landed; before, the address was written first, and a device whose keychain refused
+  — an unsigned developer build, a locked device — was left with a gateway it could not sign in to,
+  under an id nothing had recorded. Every launch minted another one: fifty of them had collected on
+  one simulator and thirty-nine on another, while the app returned to the Welcome screen saying
+  nothing about why. A refusal now rolls back what it wrote, writes no address, and reaches the
+  wizard as its own sentence with the platform's reason on the end — "Hermie could not store the
+  credentials securely on this device: …" — under a button that says **Try again**. A launch read
+  that throws is recorded on the auth timeline, which Settings → Connection prints, instead of
+  quietly becoming a fresh-install wizard. The configurations already stranded are reclaimed once,
+  on the first launch after this, and only those: a stored address that no entry in the list claims
+  and that nothing can ever open again.
+
 - **Reduce Motion, checked over every surface that moves.** Eighteen of them, against three rules:
   the duration collapses to zero rather than the animation being skipped — a skipped animation is a
   skipped completion callback, which is how a reader ends up with a panel that never goes away —

@@ -433,4 +433,39 @@ describe('the Done step', () => {
     await waitFor(() => expect(screen.getByTestId('done-error')).toHaveTextContent(/keychain is locked/))
     expect(onComplete).not.toHaveBeenCalled()
   })
+
+  it('names the secret store as the thing that refused, and writes no configuration', async () => {
+    /*
+      The sentence matters as much as the state behind it. "The settings could
+      not be saved" sends a reader back to the address they typed; this failure
+      is about the device they typed it on, and the OSStatus is the only part of
+      it anybody can search for.
+    */
+    ;(secretStore.set as jest.Mock).mockRejectedValueOnce(
+      new Error(
+        "Calling the 'setValueWithKeyAsync' function has failed → Caused by: A required entitlement isn't present."
+      )
+    )
+
+    renderScreen(
+      <OnboardingNavigator
+        gatewayId={GATEWAY_A}
+        onComplete={jest.fn()}
+        initialStep="done"
+        initialDraft={{ ...signedInDraft(), test: { key: '', userDisplayName: 'Fake Tester', botCount: 2 } }}
+      />
+    )
+    fireEvent.press(primaryButton('Start chatting'))
+
+    await waitFor(() =>
+      expect(screen.getByTestId('done-error')).toHaveTextContent(
+        /Hermie could not store the credentials securely on this device: .*required entitlement/
+      )
+    )
+
+    // Nothing was written, which is what makes the button below a retry rather
+    // than a second attempt on top of a half-configured gateway.
+    expect(keyValueStore.setJson).not.toHaveBeenCalledWith(GATEWAY_CONFIG_KEY, expect.anything())
+    expect(primaryButton('Try again')).toBeTruthy()
+  })
 })

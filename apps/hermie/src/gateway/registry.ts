@@ -33,11 +33,12 @@ import { randomBytes } from '../platform/random'
 import {
   clearCredentials,
   CONFIG_KEY,
+  configKeyFor,
   saveGatewaySetup,
   type SaveGatewaySetupInput,
   type StoredGatewayConfig
 } from './config'
-import { namespace } from './namespace'
+import { namespace, NAMESPACE_SEPARATOR } from './namespace'
 
 /** The registry itself. Device-level: never namespaced, never synced. */
 export const GATEWAY_REGISTRY_KEY = 'hermie.gateways'
@@ -363,6 +364,48 @@ export async function saveGatewayRegistry(registry: GatewayRegistry): Promise<vo
   await keyValueStore.setJson(GATEWAY_REGISTRY_KEY, registry)
 }
 
+/** The prefix every namespaced gateway configuration key starts with. */
+const CONFIG_KEY_PREFIX = `${CONFIG_KEY}${NAMESPACE_SEPARATOR}`
+
+/**
+ * Take out every stored configuration that no entry in the list claims.
+ *
+ * An orphan is `hermie.gateway.config@<id>` for an id the registry has never
+ * heard of, and until `saveGatewaySetup` was made to write its credentials
+ * first there was a way to mint one on every single launch: the configuration
+ * landed, a keychain write then rejected, and the caller never reached the line
+ * that would have recorded the id. Fifty of them had collected on the iPhone
+ * simulator and thirty-nine on the iPad by the time anybody counted, and none
+ * of them would ever be read again — the id is random, so nothing can rediscover
+ * one, and nothing had written it down.
+ *
+ * The rule is deliberately the narrowest one that does the job. Only this ONE
+ * base key is swept, and only the suffixed form of it:
+ *
+ *  - other namespaced keys (a chat cache, an auth ring) are left alone, because
+ *    they are rebuildable and sweeping them would mean this function deciding
+ *    what every feature's storage is worth;
+ *  - the UNSUFFIXED `hermie.gateway.config` is left alone, because it is what a
+ *    device that predates the registry still boots from and what
+ *    `loadGatewayRegistry` adopts its first entry out of. It is the one key
+ *    here whose absence from the list means "not migrated yet" rather than
+ *    "abandoned".
+ *
+ * Answers the keys it removed, so a caller can say so rather than guess.
+ */
+export async function sweepOrphanGatewayConfigs(registry: GatewayRegistry): Promise<string[]> {
+  const live = new Set(registry.gateways.map(gateway => gateway.id))
+  const orphans = (await keyValueStore.keys()).filter(
+    key => key.startsWith(CONFIG_KEY_PREFIX) && !live.has(key.slice(CONFIG_KEY_PREFIX.length))
+  )
+
+  if (orphans.length > 0) {
+    await keyValueStore.deleteMany(orphans)
+  }
+
+  return orphans
+}
+
 export interface SaveGatewayInput extends SaveGatewaySetupInput {
   /**
    * The entry to write into, or `null` to mint one.
@@ -410,6 +453,13 @@ function reconcileGateway(
  * credentials first. The stored access, refresh and session tokens were minted
  * by a gateway this entry no longer points at, and leaving them in the keychain
  * hands the next sign-in a credential from somewhere else.
+ *
+ * **Nothing here half-happens.** The three writes go credentials, then
+ * configuration, then entry — least recoverable first — and each step only runs
+ * because the one before it landed. `saveGatewaySetup` holds the first two to
+ * that rule; the third is held to it here, by taking the configuration back out
+ * if the list cannot be saved. A brand-new gateway therefore either exists
+ * completely or not at all, and the caller learns which by whether this threw.
  */
 export async function saveGatewayAndRegister(input: SaveGatewayInput): Promise<SaveGatewayResult> {
   const { gatewayId = null, activate = false, ...setup } = input
@@ -430,7 +480,23 @@ export async function saveGatewayAndRegister(input: SaveGatewayInput): Promise<S
 
   const next = activate ? setActiveGateway(withEntry, id) : withEntry
 
-  await saveGatewayRegistry(next)
+  try {
+    await saveGatewayRegistry(next)
+  } catch (error) {
+    /*
+      The configuration under this id is now storage nothing will ever claim,
+      because the id only existed in this function. Take it back out.
+
+      Only for an id minted here: an entry that already existed keeps its
+      configuration, which is the one it was dialling a moment ago and is still
+      the best thing on disk for it.
+    */
+    if (!existing) {
+      await keyValueStore.delete(configKeyFor(ns)).catch(() => undefined)
+    }
+
+    throw error
+  }
 
   return { registry: next, id }
 }

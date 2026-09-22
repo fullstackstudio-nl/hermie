@@ -308,8 +308,21 @@ export const strings = {
         'Hermie will remember this gateway in this browser. The session itself stays where the gateway put it \u2014 in a cookie Hermie cannot read.',
       gateway: 'GATEWAY',
       finish: 'Start chatting',
+      /** The same button after a failure: it is a retry, and it says so. */
+      retry: 'Try again',
       saving: 'Saving…',
-      saveFailed: (message: string) => `The settings could not be saved: ${message}`
+      saveFailed: (message: string) => `The settings could not be saved: ${message}`,
+      /**
+       * The keychain refused, which is neither the address nor the sign-in.
+       *
+       * Named separately from `saveFailed` because the two send a reader to
+       * different places: a save that failed reads as "something about what I
+       * typed", and this one is about the device. The platform's own reason is
+       * kept on the end — an OSStatus is ugly and it is also the only thing
+       * that tells a missing entitlement from a locked device.
+       */
+      credentialsNotStored: (reason: string) =>
+        `Hermie could not store the credentials securely on this device: ${reason}`
     }
   },
 

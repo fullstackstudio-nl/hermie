@@ -33,7 +33,8 @@ import {
   removeGateway,
   renameGateway,
   saveGatewayRegistry,
-  setActiveGateway
+  setActiveGateway,
+  sweepOrphanGatewayConfigs
 } from './registry'
 import { useConnectionStore } from './store'
 
@@ -177,6 +178,8 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
   const timelineRef = useRef<AuthTimeline | null>(null)
   /** Which gateway the ring in `timelineRef` was restored for. */
   const timelineIdRef = useRef<string | null>(null)
+  /** Whether this launch has already swept orphan configurations. See `reload`. */
+  const sweptRef = useRef(false)
 
   const status = useConnectionStore(state => state.status)
   const lastError = useConnectionStore(state => state.lastError)
@@ -241,6 +244,28 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
     [setStatus, setStoredConfig, setStoredFrontDoor, teardown]
   )
 
+  /**
+   * Say that the launch read went wrong, on every channel there is.
+   *
+   * Two of them, because neither is enough on its own. The ring is what the
+   * owner can reach — Settings → Connection prints it, and it survives the
+   * restart that usually follows — but it belongs to a gateway, and a failure
+   * early enough in `reload` happens before there is one to belong to. The
+   * console is the channel that is always there and never reaches the owner,
+   * so it carries the whole error object rather than a name.
+   *
+   * `__DEV__` gates only the console: a release build should not print to a log
+   * nobody is reading, and the ring costs nothing and is the half that matters
+   * on a device in somebody's pocket.
+   */
+  const reportStartupIssue = useCallback((what: string, error: unknown) => {
+    timelineRef.current?.record({ event: 'startup.failed' })
+
+    if (__DEV__) {
+      console.error(`[hermie] ${what}:`, error)
+    }
+  }, [])
+
   const reload = useCallback(async () => {
     // Development only, and BEFORE the read below rather than beside it: a launch
     // argument may name a gateway, and the point of it is that the ordinary read
@@ -263,6 +288,33 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
     // below, because the configuration is one of the things being moved.
     if (migratedId && active) {
       await migrateGatewayStorage(namespace(migratedId), active.address)
+    }
+
+    /*
+      Once per launch, and AFTER the move above, which is the only ordering that
+      is safe: the move is what turns the unsuffixed configuration into an entry,
+      and a sweep that ran first would be looking at a list that does not yet
+      mention it.
+
+      Once per launch rather than once ever, because "ever" would need a marker
+      of its own and a marker is another thing that can be wrong. The cost is one
+      `getAllKeys` on a store the launch is already reading, and on every device
+      but the ones that collected orphans it finds nothing and writes nothing.
+    */
+    if (!sweptRef.current) {
+      sweptRef.current = true
+
+      const swept = await sweepOrphanGatewayConfigs(stored).catch((error: unknown) => {
+        // Housekeeping must never be the reason a launch fails: there is a
+        // gateway to dial and this was only ever about reclaiming space.
+        reportStartupIssue('could not sweep orphan gateway configurations', error)
+
+        return []
+      })
+
+      if (__DEV__ && swept.length > 0) {
+        console.warn(`[hermie] removed ${swept.length} gateway configuration(s) that no entry claimed`)
+      }
     }
 
     if (!active) {
@@ -331,13 +383,22 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
     }
 
     connect(loaded, ns, timelineRef.current!)
-  }, [connect, teardown])
+  }, [connect, reportStartupIssue, teardown])
 
   useEffect(() => {
     // A rejection here used to escape into nothing and leave the app on the
     // splash screen for ever. Whatever went wrong, the wizard is a better
     // answer than a spinner with no end.
-    void reload().catch(() => setPhase('onboarding'))
+    //
+    // It must not be a SILENT better answer, though, which is what this was
+    // until the keychain started refusing on unsigned builds: the app dropped
+    // onto Welcome on every launch and the only trace of the reason was the
+    // storage it had half-written. The wizard is still where this lands; the
+    // difference is that the reason is now on the ring and in the log.
+    void reload().catch((error: unknown) => {
+      reportStartupIssue('the stored gateway could not be read; opening setup instead', error)
+      setPhase('onboarding')
+    })
 
     return () => {
       teardown()
