@@ -19,7 +19,7 @@
  * The keyboard and the Mac menu bar are here too, because they are the two ways in
  * that no screenshot can show.
  */
-import { act, fireEvent, screen, waitFor } from '@testing-library/react-native'
+import { act, fireEvent, screen } from '@testing-library/react-native'
 import { AppState, StyleSheet, Text, useWindowDimensions } from 'react-native'
 
 import { RegularShell } from '../src/app/RegularShell'
@@ -34,7 +34,7 @@ import {
   SIDEBAR_WIDTH,
   SIDEBAR_WIDTH_NARROW
 } from '../src/ui/tokens'
-import { renderScreen, withProviders } from './support/render'
+import { renderScreen, withProviders, waitForGone } from './support/render'
 import { resetSettledWidth, useLayoutMode, useSidebarState } from '../src/app/useLayoutMode'
 
 /**
@@ -107,7 +107,7 @@ const bot = (name: string, displayName: string): Bot => ({
 })
 
 // The overlay stays mounted for its own slide-out, so every "it went away" waits.
-// `jest.setup.js` says why the wait is allowed five seconds.
+// `jest.after-env.js` says why the wait is allowed five seconds.
 const sidebarWidthOf = () =>
   (StyleSheet.flatten(screen.getByTestId('shell-sidebar').props.style as never) as { width?: number }).width
 
@@ -449,7 +449,7 @@ describe('the narrow window', () => {
     fireEvent.press(screen.getByTestId('sidebar-rail-show'))
     fireEvent.press(screen.getByTestId('bot-row-writer'))
 
-    await waitFor(() => expect(screen.queryByTestId('sidebar-overlay')).toBeNull())
+    await waitForGone(() => screen.queryByTestId('sidebar-overlay'), 'sidebar-overlay')
     // …and the chat it was opened to pick is the one now in the column.
     expect(screen.queryByTestId('chat-empty')).toBeNull()
     expect(screen.getByTestId('chat-header')).toBeTruthy()
@@ -462,7 +462,7 @@ describe('the narrow window', () => {
     fireEvent.press(screen.getByTestId('sidebar-rail-show'))
     fireEvent.press(screen.getByTestId('sidebar-overlay-scrim'))
 
-    await waitFor(() => expect(screen.queryByTestId('sidebar-overlay')).toBeNull())
+    await waitForGone(() => screen.queryByTestId('sidebar-overlay'), 'sidebar-overlay')
   })
 
   /**
@@ -485,7 +485,7 @@ describe('the narrow window', () => {
 
     press('close')
 
-    await waitFor(() => expect(screen.queryByTestId('sidebar-overlay')).toBeNull())
+    await waitForGone(() => screen.queryByTestId('sidebar-overlay'), 'sidebar-overlay')
     expect(screen.getByTestId('overlay-panel')).toBeTruthy()
   })
 })

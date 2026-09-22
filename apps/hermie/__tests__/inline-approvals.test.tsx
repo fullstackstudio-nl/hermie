@@ -27,7 +27,7 @@ import { useChatsStore } from '../src/store/chats'
 import { openRequests } from '@hermie/transcript'
 import { useSettingsStore } from '../src/store/settings'
 import type { ToolItem } from '../src/chat-ui/types'
-import { renderScreen, withProviders } from './support/render'
+import { renderScreen, withProviders, waitForGone } from './support/render'
 
 let mockController: Record<string, jest.Mock>
 let mockRuntime: {
@@ -214,6 +214,6 @@ describe('the request card in the transcript', () => {
 
     fireEvent.press(screen.getByTestId(`request-choice-${open?.id}-deny`))
 
-    await waitFor(() => expect(screen.queryByTestId('approval-sheet')).toBeNull())
+    await waitForGone(() => screen.queryByTestId('approval-sheet'), 'approval-sheet')
   })
 })

@@ -1,4 +1,4 @@
-import { render } from '@testing-library/react-native'
+import { render, waitFor } from '@testing-library/react-native'
 import type { ReactElement } from 'react'
 import { SafeAreaProvider, type Metrics } from 'react-native-safe-area-context'
 
@@ -29,6 +29,26 @@ export function withProviders(ui: ReactElement) {
 /** Render a screen with the providers every screen assumes are above it. */
 export function renderScreen(ui: ReactElement) {
   return render(withProviders(ui))
+}
+
+/**
+ * Wait until `query` finds nothing: a sheet, panel or overlay has finished its
+ * exit and unmounted.
+ *
+ * Not `waitFor(() => expect(query()).toBeNull())`. Every poll that still finds
+ * the element fails that matcher, and a failing matcher pretty-prints what it
+ * received — here a mounted panel or sheet, with its whole subtree. Measured,
+ * that is close to half a second per poll on a fast machine, against a 16ms
+ * exit animation; two or three polls on a slower CI runner used up the test's
+ * five seconds. Checking for null directly costs a tree walk, and the failure
+ * message still names what stayed.
+ */
+export function waitForGone(query: () => unknown, what: string, options?: Parameters<typeof waitFor>[1]) {
+  return waitFor(() => {
+    if (query() != null) {
+      throw new Error(`Expected ${what} to be gone, but it is still on screen.`)
+    }
+  }, options)
 }
 
 export function deferred<T>() {

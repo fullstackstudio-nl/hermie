@@ -41,8 +41,11 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      # The runner has two cores; say so, rather than let jest size its own pool.
+      # Called on the workspace directly: `npm run test:app -- …` would hand the
+      # flag to the nested npm call as an npm option instead of to jest.
       - name: App tests
-        run: npm run test:app
+        run: npm run test --workspace @hermie/app -- --maxWorkers=2
 
       # The browser export is the one build a static check cannot stand in for:
       # a native-only import added to a shared file compiles, typechecks and

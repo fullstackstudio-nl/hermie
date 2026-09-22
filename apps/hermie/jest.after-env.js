@@ -23,5 +23,10 @@ const { configure } = require('@testing-library/react-native')
  * and not any one assertion. It costs a passing suite nothing — `waitFor` returns
  * as soon as its condition holds — and only changes how long a genuinely failing
  * one takes to say so.
+ *
+ * Most of that second was never the animation. A wait for something to LEAVE,
+ * written as `waitFor(() => expect(query()).toBeNull())`, pretty-prints the whole
+ * still-mounted panel into a failure message on every poll, at roughly half a
+ * second each. `waitForGone` in `__tests__/support/render.tsx` is the form to use.
  */
 configure({ asyncUtilTimeout: 5000 })

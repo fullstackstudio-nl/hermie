@@ -20,7 +20,7 @@ import { haptic } from '../src/platform/haptics'
 import { type Bot, useBotsStore } from '../src/store/bots'
 import { useChatsStore } from '../src/store/chats'
 import { useSettingsStore } from '../src/store/settings'
-import { deferred, renderScreen } from './support/render'
+import { deferred, renderScreen, waitForGone } from './support/render'
 
 // `mock`-prefixed so the factory below may close over it (Jest's hoisting rule).
 let mockController: Record<string, jest.Mock>
@@ -316,7 +316,7 @@ describe('ChatScreen', () => {
 
     // And it does go once a send lands, so the tray is not simply sticky.
     fireEvent.press(screen.getByTestId('composer-send'))
-    await waitFor(() => expect(screen.queryByTestId('composer-attachments')).toBeNull())
+    await waitForGone(() => screen.queryByTestId('composer-attachments'), 'composer-attachments')
   })
 
   it('stages a pasted image the same way the photo picker does', async () => {
@@ -539,7 +539,7 @@ describe('ChatScreen', () => {
 
     // Gone one slide-out later — and the answer has not been anywhere: nothing
     // resolves that promise until the assertion below has run.
-    await waitFor(() => expect(screen.queryByTestId('approval-sheet')).toBeNull(), { timeout: 4000 })
+    await waitForGone(() => screen.queryByTestId('approval-sheet'), 'approval-sheet', { timeout: 4000 })
     expect(settled).toBe(false)
 
     // Still open, still in the transcript, with the way back to it.
@@ -794,7 +794,7 @@ describe('ChatScreen', () => {
     // blocked, so the header must not go back to the idle label.
     // The sheet leaves after its close animation (or the host's settle
     // fallback), which can take longer than the default wait on a slow runner.
-    await waitFor(() => expect(screen.queryByTestId('clarify-sheet')).toBeNull(), { timeout: 4000 })
+    await waitForGone(() => screen.queryByTestId('clarify-sheet'), 'clarify-sheet', { timeout: 4000 })
     expect(screen.getByText('Waiting for you')).toBeTruthy()
     // …and the transcript still offers the way back to it.
     expect(screen.getByText('Answer')).toBeTruthy()
@@ -984,7 +984,7 @@ describe('ChatScreen', () => {
 
     // "Done" used to clear only the screen's own notice, so a failed open left
     // a banner no button on it could remove.
-    await waitFor(() => expect(screen.queryByText(/gateway not connected/u)).toBeNull())
+    await waitForGone(() => screen.queryByText(/gateway not connected/u), 'the text /gateway not connected/u')
   })
 })
 
@@ -1262,7 +1262,7 @@ describe('the typing indicator', () => {
       })
     })
 
-    await waitFor(() => expect(screen.queryByTestId('typing-indicator')).toBeNull())
+    await waitForGone(() => screen.queryByTestId('typing-indicator'), 'typing-indicator')
   })
 })
 
@@ -1373,7 +1373,7 @@ describe('the chat\u2019s own way into memory', () => {
 
     fireEvent.press(screen.getByTestId('memory-bots'))
 
-    await waitFor(() => expect(screen.queryByTestId('memory-bots')).toBeNull())
+    await waitForGone(() => screen.queryByTestId('memory-bots'), 'memory-bots')
     expect(screen.getByTestId('composer-input')).toBeTruthy()
     // And not back onto the sheet it was opened from.
     expect(screen.queryByTestId('bot-profile')).toBeNull()

@@ -27,7 +27,7 @@ import { useChatLayoutStore } from '../src/store/chat-layout'
 import { useChatsStore } from '../src/store/chats'
 import { useCronStore } from '../src/store/cron'
 import { useSettingsStore } from '../src/store/settings'
-import { renderScreen } from './support/render'
+import { renderScreen, waitForGone } from './support/render'
 
 const mockHttpGet = jest.fn()
 const mockRequest = jest.fn()
@@ -400,7 +400,7 @@ describe('the route into the cron’s own detail', () => {
     await waitFor(() => expect(screen.getByTestId('cron-row-job-scan-researcher')).toBeTruthy())
 
     fireEvent.press(screen.getByTestId('overlay-close'))
-    await waitFor(() => expect(screen.queryByTestId('overlay-panel')).toBeNull())
+    await waitForGone(() => screen.queryByTestId('overlay-panel'), 'overlay-panel')
 
     await waitFor(() => expect(screen.getByTestId('cron-delivery-c:1-open')).toBeTruthy())
   })

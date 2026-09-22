@@ -14,14 +14,14 @@
  * is DIMMED while the panel is open, and not interactive; `overlay-frame.test.tsx`
  * owns that half, and the geometry of the frame with it.
  */
-import { fireEvent, screen, waitFor } from '@testing-library/react-native'
+import { fireEvent, screen } from '@testing-library/react-native'
 import { StyleSheet, useWindowDimensions } from 'react-native'
 
 import { RegularShell } from '../src/app/RegularShell'
 import { type Bot, useBotsStore } from '../src/store/bots'
 import { useChatLayoutStore } from '../src/store/chat-layout'
 import { useChatsStore } from '../src/store/chats'
-import { renderScreen } from './support/render'
+import { renderScreen, waitForGone } from './support/render'
 import { resetSettledWidth } from '../src/app/useLayoutMode'
 
 /**
@@ -140,7 +140,7 @@ describe('the overlay panel', () => {
 
   // The panel stays mounted for its own slide-out — one that unmounted on the
   // first frame of its exit would simply vanish — so these wait for it to go.
-  // `jest.setup.js` says why the wait is allowed five seconds.
+  // `jest.after-env.js` says why the wait is allowed five seconds.
   it('closes on the round close button', async () => {
     renderScreen(<RegularShell />)
 
@@ -149,7 +149,7 @@ describe('the overlay panel', () => {
 
     fireEvent.press(screen.getByTestId('overlay-close'))
 
-    await waitFor(() => expect(screen.queryByTestId('overlay-panel')).toBeNull())
+    await waitForGone(() => screen.queryByTestId('overlay-panel'), 'overlay-panel')
   })
 
   it('closes on a tap outside itself', async () => {
@@ -158,7 +158,7 @@ describe('the overlay panel', () => {
     fireEvent.press(screen.getByTestId('tab-settings'))
     fireEvent.press(screen.getByTestId('overlay-scrim'))
 
-    await waitFor(() => expect(screen.queryByTestId('overlay-panel')).toBeNull())
+    await waitForGone(() => screen.queryByTestId('overlay-panel'), 'overlay-panel')
   })
 })
 
