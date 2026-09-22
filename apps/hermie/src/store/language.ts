@@ -99,6 +99,22 @@ export const useLanguageStore = create<LanguageState>(set => ({
   }
 }))
 
+/*
+  The device's language applies from the FIRST frame, not from the first disk
+  read.
+
+  `hydrate` runs in an effect, which is after a paint, so without this a phone
+  set to Dutch would open on an English screen and flip a moment later — and
+  "Follow device" is the default, so that is the common case rather than an edge
+  one. The stored choice then either agrees with what is already on screen,
+  which is the usual outcome, or corrects it once.
+
+  It also keeps the store and `activeLocale()` from disagreeing. They are two
+  places holding the same fact, and a window where one says Dutch and the other
+  says English is a bug waiting for somebody to read whichever one is wrong.
+*/
+setActiveLocale(useLanguageStore.getState().locale)
+
 /**
  * Put the store back where a fresh launch would find it.
  *
