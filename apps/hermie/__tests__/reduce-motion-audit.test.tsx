@@ -230,7 +230,7 @@ const SURFACES: { name: string; render: () => React.ReactElement }[] = [
   {
     name: 'the overlay panel',
     render: () => (
-      <OverlayPanel frame={{ x: 0, y: 0, width: 402, height: 874 }} onClose={() => undefined} title="Panel" visible>
+      <OverlayPanel frame={{ x: 0, y: 0, width: 402, height: 874 }} onClose={() => undefined} visible>
         <Text>panel</Text>
       </OverlayPanel>
     )

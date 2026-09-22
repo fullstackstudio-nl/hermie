@@ -13,7 +13,7 @@
  * is not about a single job: `gateway_running === false` means the scheduler
  * process is down, and every cron below is then a plan rather than a promise.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Pressable, RefreshControl, SectionList, View } from 'react-native'
 
 import { ContextMenuHost } from '../../platform/context-menu'
@@ -75,9 +75,16 @@ export interface CronScreenProps {
    * Needs `initialJobId`; without one there is nothing to show.
    */
   detailOnly?: boolean
+  /**
+   * The wide shell's close (X): the list root has no `back` there, so its
+   * overlay hands its own close in as the chrome's trailing action instead.
+   * Only the list draws it — the detail and run screens below already have a
+   * `back` of their own. Absent everywhere else.
+   */
+  trailing?: ReactNode
 }
 
-export function CronScreen({ back, detailOnly = false, initialCreate, initialJobId }: CronScreenProps = {}) {
+export function CronScreen({ back, detailOnly = false, initialCreate, initialJobId, trailing }: CronScreenProps = {}) {
   const controller = useCronController()
   const jobs = useCronStore(state => state.jobs)
   const loading = useCronStore(state => state.loading)
@@ -328,7 +335,7 @@ export function CronScreen({ back, detailOnly = false, initialCreate, initialJob
         }}
       />
 
-      <PageChrome back={back} onHeightChange={setChromeHeight} title={cronStrings.title} />
+      <PageChrome back={back} onHeightChange={setChromeHeight} title={cronStrings.title} trailing={trailing} />
     </Screen>
   )
 }

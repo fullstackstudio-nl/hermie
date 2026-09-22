@@ -17,7 +17,7 @@
  * enough and it is the point — this file is about WHERE the screen is mounted,
  * and `kanban.test.ts` owns what it says once it has data.
  */
-import { fireEvent, screen, waitFor, within } from '@testing-library/react-native'
+import { fireEvent, screen, within } from '@testing-library/react-native'
 import { useWindowDimensions } from 'react-native'
 
 import { RegularShell } from '../src/app/RegularShell'
@@ -112,23 +112,29 @@ describe('Boards on a wide window', () => {
     expect(screen.getByTestId('bot-row-writer')).toBeTruthy()
   })
 
-  /** Settings → Bots & capabilities → Boards, which is where the row lives now. */
+  /**
+   * Settings → Bots & capabilities → Boards, which is where the row lives now.
+   *
+   * Settings is in the content column itself since HERM-102/108 (no longer the
+   * 520pt `overlay-panel`), so the search scope is `shell-content` rather than
+   * the overlay.
+   */
   function openBoardsFromSettings() {
     fireEvent.press(screen.getByTestId('tab-settings'))
-    fireEvent.press(within(screen.getByTestId('overlay-panel')).getByTestId('settings-cat-Capabilities'))
-    fireEvent.press(within(screen.getByTestId('overlay-panel')).getByTestId('settings-boards'))
+    fireEvent.press(within(screen.getByTestId('shell-content')).getByTestId('settings-cat-Capabilities'))
+    fireEvent.press(within(screen.getByTestId('shell-content')).getByTestId('settings-boards'))
   }
 
-  it('takes the column from Settings rather than sitting inside its 520pt panel', async () => {
+  it('takes the column from Settings rather than sitting inside its own layout', () => {
     renderScreen(<RegularShell />)
 
     openBoardsFromSettings()
 
     expect(within(screen.getByTestId('shell-content')).getByText(board())).toBeTruthy()
-    // The panel goes, rather than staying up over the column the board was just
-    // moved into. Awaited because it slides: `usePresence` keeps it mounted for
-    // the length of the slide-out and only then drops it.
-    await waitFor(() => expect(screen.queryByTestId('overlay-panel')).toBeNull())
+    // Settings itself is gone, rather than sitting behind the board: the two
+    // share the one column, the way Settings and the board opened from the
+    // chat list share it below.
+    expect(screen.queryByTestId('settings-host')).toBeNull()
   })
 
   it('goes back one level — to Settings when that is the door it came through', () => {
@@ -141,7 +147,7 @@ describe('Boards on a wide window', () => {
     fireEvent.press(within(screen.getByTestId('shell-content')).getByLabelText(strings.settings.title))
 
     expect(screen.queryByText(board())).toBeNull()
-    expect(screen.getByTestId('overlay-panel')).toBeTruthy()
+    expect(screen.getByTestId('settings-host')).toBeTruthy()
   })
 
   it('goes back to the chat column when the chat list was the door', () => {

@@ -36,17 +36,24 @@
  * it opens, which is after this one, so the first Escape pops the sub page and
  * the panel stays; a second Escape closes the panel. Nothing here coordinates
  * that: it falls out of mount order, which is exactly why the stack is a stack.
+ *
+ * ### It draws no title row of its own any more (HERM-102, HERM-108)
+ *
+ * It used to: a title and a round close button, the same shape repeated for
+ * Activity, Crons and Settings. That was a second header — the page inside
+ * already draws its own `PageChrome` — so a panel read as "Settings" twice.
+ * The title and the close both come from the page now: `PageChrome`'s `title`
+ * names it, and a `trailing` close (X) closes it, handed in by whichever shell
+ * mounted the page. This component is left with exactly the thing an overlay
+ * actually is — where it sits, what it dims, and what closes it.
  */
 import { type ReactNode } from 'react'
-import { Animated, Pressable, StyleSheet, View } from 'react-native'
+import { Animated, StyleSheet, View } from 'react-native'
 
-import { strings } from '../i18n/strings'
 import { GlassSurface } from '../ui/glass'
-import { Icon, ICON_SIZE } from '../ui/Icon'
 import { usePresence } from '../ui/motion'
-import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
-import { OVERLAY_MAX_WIDTH, TAP_SLOP, WINDOW_GAP } from '../ui/tokens'
+import { OVERLAY_MAX_WIDTH, WINDOW_GAP } from '../ui/tokens'
 import { useEscapeKey } from '../ui/useEscapeKey'
 import { useHardwareBack } from '../ui/useHardwareBack'
 import { useShortcutScope } from '../ui/useShortcut'
@@ -56,7 +63,6 @@ export type PanelFrame = { x: number; y: number; width: number; height: number }
 
 export type OverlayPanelProps = {
   visible: boolean
-  title: string
   onClose: () => void
   /**
    * The content panel's measured frame, from its own `onLayout`.
@@ -67,7 +73,7 @@ export type OverlayPanelProps = {
   children: ReactNode
 }
 
-export function OverlayPanel({ children, frame, onClose, title, visible }: OverlayPanelProps) {
+export function OverlayPanel({ children, frame, onClose, visible }: OverlayPanelProps) {
   const theme = useTheme()
   // `present` trails `visible` by one slide-out: see `usePresence`.
   const { present, progress } = usePresence(visible, { reduceMotion: theme.reduceMotion, token: 'panel' })
@@ -136,36 +142,7 @@ export function OverlayPanel({ children, frame, onClose, title, visible }: Overl
           number.
         */}
         <GlassSurface contentStyle={{ flex: 1 }} radius={theme.radii.panel} style={{ flex: 1 }} variant="panel">
-          <View
-            style={{
-              alignItems: 'center',
-              flexDirection: 'row',
-              gap: theme.space.md,
-              paddingHorizontal: theme.space.panel,
-              paddingTop: theme.space.panel
-            }}
-          >
-            <Text accessibilityRole="header" aria-level={1} style={{ flex: 1 }} variant="title">
-              {title}
-            </Text>
-
-            <Pressable
-              accessibilityLabel={strings.layout.close}
-              accessibilityRole="button"
-              hitSlop={TAP_SLOP}
-              onPress={onClose}
-              testID="overlay-close"
-            >
-              <GlassSurface
-                contentStyle={{ alignItems: 'center', height: 38, justifyContent: 'center', width: 38 }}
-                variant="control"
-              >
-                <Icon color={theme.colors.textMuted} name="close" size={ICON_SIZE.inline} />
-              </GlassSurface>
-            </Pressable>
-          </View>
-
-          <View style={{ flex: 1 }}>{children}</View>
+          {children}
         </GlassSurface>
       </Animated.View>
     </View>

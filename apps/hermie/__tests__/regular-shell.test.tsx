@@ -14,15 +14,37 @@
  * is DIMMED while the panel is open, and not interactive; `overlay-frame.test.tsx`
  * owns that half, and the geometry of the frame with it.
  */
-import { fireEvent, screen } from '@testing-library/react-native'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react-native'
 import { StyleSheet, useWindowDimensions } from 'react-native'
 
 import { RegularShell } from '../src/app/RegularShell'
+import { SETTINGS_ROUTES } from '../src/features/settings/navigation'
 import { type Bot, useBotsStore } from '../src/store/bots'
 import { useChatLayoutStore } from '../src/store/chat-layout'
 import { useChatsStore } from '../src/store/chats'
 import { renderScreen, waitForGone } from './support/render'
 import { resetSettledWidth } from '../src/app/useLayoutMode'
+
+const mockEscapeListeners = new Set<() => void>()
+
+jest.mock('../src/platform/keyboard-modifiers', () => ({
+  isShiftDown: jest.fn(() => false),
+  hasHardwareKeyboard: jest.fn(() => false),
+  subscribeToEscape: (handler: () => void) => {
+    mockEscapeListeners.add(handler)
+
+    return () => mockEscapeListeners.delete(handler)
+  }
+}))
+
+/** Press Escape, the way the native module would deliver it. */
+function pressEscape() {
+  act(() => {
+    for (const listener of [...mockEscapeListeners]) {
+      listener()
+    }
+  })
+}
 
 /**
  * One window per test.
@@ -83,6 +105,7 @@ const paddingOf = (testID: string) =>
 
 beforeEach(() => {
   runsOnMac.RUNS_ON_MAC = false
+  mockEscapeListeners.clear()
   useBotsStore.getState().reset()
   useChatsStore.getState().reset()
   useChatLayoutStore.getState().reset()
@@ -141,10 +164,15 @@ describe('the overlay panel', () => {
   // The panel stays mounted for its own slide-out — one that unmounted on the
   // first frame of its exit would simply vanish — so these wait for it to go.
   // `jest.after-env.js` says why the wait is allowed five seconds.
+  //
+  // Settings used to be the third destination in here too. HERM-102/108 moved
+  // it into the content column instead (see below), so this is Activity now —
+  // still an `OverlayPanel`, still this same close button, drawn by
+  // `PageChrome`'s `trailing` rather than by a title row the panel no longer has.
   it('closes on the round close button', async () => {
     renderScreen(<RegularShell />)
 
-    fireEvent.press(screen.getByTestId('tab-settings'))
+    fireEvent.press(screen.getByTestId('tab-activity'))
     expect(screen.getByTestId('overlay-panel')).toBeTruthy()
 
     fireEvent.press(screen.getByTestId('overlay-close'))
@@ -155,10 +183,122 @@ describe('the overlay panel', () => {
   it('closes on a tap outside itself', async () => {
     renderScreen(<RegularShell />)
 
-    fireEvent.press(screen.getByTestId('tab-settings'))
+    fireEvent.press(screen.getByTestId('tab-activity'))
     fireEvent.press(screen.getByTestId('overlay-scrim'))
 
     await waitForGone(() => screen.queryByTestId('overlay-panel'), 'overlay-panel')
+  })
+})
+
+/**
+ * Settings, since HERM-102/108: the CONTENT column, the way Boards already
+ * worked, rather than the 520pt `OverlayPanel` Activity and Crons still use.
+ *
+ * That move is the whole point: `SETTINGS_SPLIT_MIN_WIDTH` (640) is wider than
+ * the overlay ever grew, so the split layout — the category list beside the
+ * page it opens — was unreachable in the shipping app until Settings had a
+ * column wide enough to earn it.
+ */
+describe('Settings, in the content column', () => {
+  it('takes the column instead of an overlay, with its own close', () => {
+    renderScreen(<RegularShell />)
+
+    fireEvent.press(screen.getByTestId('tab-settings'))
+
+    expect(screen.getByTestId('settings-host')).toBeTruthy()
+    expect(screen.getByTestId('settings-close')).toBeTruthy()
+    expect(screen.queryByTestId('overlay-panel')).toBeNull()
+    expect(screen.queryByTestId('overlay-frame')).toBeNull()
+    // Not one of the destinations the sidebar dims for — it replaced the chat
+    // column outright, the way Boards does, rather than covering it.
+    expect(screen.queryByTestId('overlay-scrim')).toBeNull()
+    expect(screen.queryByTestId('overlay-scrim-sidebar')).toBeNull()
+    // The chat list stays selectable underneath, same as it does for Boards.
+    expect(screen.getByTestId('bot-row-writer')).toBeTruthy()
+  })
+
+  it('closes on its own round close button', () => {
+    renderScreen(<RegularShell />)
+
+    fireEvent.press(screen.getByTestId('tab-settings'))
+    fireEvent.press(screen.getByTestId('settings-close'))
+
+    expect(screen.queryByTestId('settings-host')).toBeNull()
+  })
+
+  /**
+   * The wide-shell twin of `compact-shell.test.tsx`'s global back count: this
+   * looks for `page-back` over the WHOLE screen, not inside a page's own
+   * wrapper, so a stray second back drawn by the shell rather than by the page
+   * would not slip past it.
+   */
+  it('draws no page-back at the root, one on a deep page, and none again after switching category', async () => {
+    renderScreen(<RegularShell />)
+
+    fireEvent.press(screen.getByTestId('tab-settings'))
+    expect(screen.queryAllByTestId('page-back')).toHaveLength(0)
+
+    fireEvent.press(screen.getByTestId('settings-cat-Account'))
+    await waitFor(() => expect(screen.getByTestId('settings-page-Account')).toBeTruthy())
+
+    const backs = screen.queryAllByTestId('page-back')
+
+    expect(backs).toHaveLength(1)
+    expect(backs[0]?.props.accessibilityLabel).toBe(SETTINGS_ROUTES.Root.title())
+
+    // Past the split threshold the category list is a column beside the page,
+    // and picking another category REPLACES the page rather than pushing a
+    // back onto it — so the count returns to zero rather than growing.
+    fireEvent(screen.getByTestId('settings-host'), 'layout', { nativeEvent: { layout: { width: 1200, height: 900 } } })
+    await waitFor(() => expect(screen.getByTestId('settings-category-column')).toBeTruthy())
+
+    fireEvent.press(within(screen.getByTestId('settings-category-column')).getByTestId('settings-cat-Appearance'))
+    await waitFor(() => expect(screen.getByTestId('settings-page-Appearance')).toBeTruthy())
+
+    expect(screen.queryAllByTestId('page-back')).toHaveLength(0)
+  })
+
+  /**
+   * Split or stacked is `SettingsHost`'s OWN measured width, not the shell's —
+   * `settings-routes.test.tsx` pins that against a bare `SettingsScreen`. This
+   * is the same layout rule reached through the shell that mounts it, at the
+   * two widths the owner's brief names: 1200pt side by side, 600pt one column.
+   */
+  it('splits at 1200pt and stays one column at 600pt', async () => {
+    renderScreen(<RegularShell />)
+    fireEvent.press(screen.getByTestId('tab-settings'))
+
+    fireEvent(screen.getByTestId('settings-host'), 'layout', { nativeEvent: { layout: { width: 600, height: 900 } } })
+    expect(screen.queryByTestId('settings-category-column')).toBeNull()
+    expect(screen.getByTestId('settings-page-Root')).toBeTruthy()
+
+    fireEvent(screen.getByTestId('settings-host'), 'layout', { nativeEvent: { layout: { width: 1200, height: 900 } } })
+    await waitFor(() => expect(screen.getByTestId('settings-category-column')).toBeTruthy())
+    // The first category is the split stack's own bottom page there, so the
+    // list page itself is gone rather than sitting beside the column too.
+    expect(screen.queryByTestId('settings-page-Root')).toBeNull()
+  })
+
+  /**
+   * `OverlayPanel` used to register Escape for Settings along with Activity and
+   * Crons. Settings draws a close (X) rather than a `back` now, which is not
+   * something `PageChrome` answers Escape for by itself, so the shell registers
+   * its own — see `RegularShell`'s comment beside `useEscapeKey(… settingsOpen)`.
+   * One level at a time, same as everywhere else Escape reaches a stack.
+   */
+  it('answers Escape one level at a time: a deep page first, then Settings itself', async () => {
+    renderScreen(<RegularShell />)
+
+    fireEvent.press(screen.getByTestId('tab-settings'))
+    fireEvent.press(screen.getByTestId('settings-cat-Account'))
+    await waitFor(() => expect(screen.getByTestId('settings-page-Account')).toBeTruthy())
+
+    pressEscape()
+    await waitForGone(() => screen.queryByTestId('settings-page-Account'), 'the Account page')
+    expect(screen.getByTestId('settings-page-Root')).toBeTruthy()
+
+    pressEscape()
+    await waitForGone(() => screen.queryByTestId('settings-host'), 'the Settings host')
   })
 })
 

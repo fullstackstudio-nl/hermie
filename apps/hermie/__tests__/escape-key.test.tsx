@@ -241,7 +241,7 @@ describe('Escape inside the overlay panel', () => {
     const onClose = jest.fn()
 
     renderScreen(
-      <OverlayPanel onClose={onClose} title="Settings" visible>
+      <OverlayPanel onClose={onClose} visible>
         <SubPage />
       </OverlayPanel>
     )
@@ -255,7 +255,7 @@ describe('Escape inside the overlay panel', () => {
     const onClose = jest.fn()
 
     renderScreen(
-      <OverlayPanel onClose={onClose} title="Settings" visible>
+      <OverlayPanel onClose={onClose} visible>
         <SubPage />
       </OverlayPanel>
     )

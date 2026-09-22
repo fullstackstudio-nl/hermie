@@ -17,7 +17,7 @@
  *    when it is not; a number nobody is looking at is not worth a round trip.
  */
 import type { ActivityEntry } from '@hermie/transcript'
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { RefreshControl, SectionList, Pressable, View } from 'react-native'
 
 import { formatClock } from '../../chat-ui'
@@ -37,6 +37,12 @@ export interface ActivityScreenProps {
   onOpenBot?: (botName: string, options?: { focusItemId?: string }) => void
   /** Absent on a tab root — both shells mount this as one, so neither passes it. */
   back?: PageChromeBack
+  /**
+   * The wide shell's close (X): this screen has no `back` there, so its overlay
+   * hands its own close in as the chrome's trailing action instead. Absent
+   * everywhere else.
+   */
+  trailing?: ReactNode
 }
 
 interface DaySection {
@@ -90,7 +96,7 @@ function groupByDay(entries: readonly ActivityEntry[], now: number): DaySection[
   return sections
 }
 
-export function ActivityScreen({ onOpenBot, back }: ActivityScreenProps) {
+export function ActivityScreen({ onOpenBot, back, trailing }: ActivityScreenProps) {
   const theme = useTheme()
   const { status } = useGateway()
   const { entries, counters, loading, refreshing, error, refresh } = useActivity()
@@ -157,7 +163,7 @@ export function ActivityScreen({ onOpenBot, back }: ActivityScreenProps) {
         {...usePageScroll(chromeHeight)}
       />
 
-      <PageChrome back={back} onHeightChange={setChromeHeight} title={strings.activity.title} />
+      <PageChrome back={back} onHeightChange={setChromeHeight} title={strings.activity.title} trailing={trailing} />
     </Screen>
   )
 }

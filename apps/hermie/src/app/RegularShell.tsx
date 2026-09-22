@@ -21,13 +21,38 @@ import { useSafeAreaInsets } from '../platform/safe-area'
 import { useBotDisplayName } from '../store/bots'
 import { useChatLayoutStore } from '../store/chat-layout'
 import { GlassDepthProvider, GlassSurface, Wallpaper } from '../ui/glass'
+import { RoundIconButton } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
+import { useEscapeKey } from '../ui/useEscapeKey'
+import { useHardwareBack } from '../ui/useHardwareBack'
 import { useShortcut } from '../ui/useShortcut'
-import { SIDEBAR_RAIL_WIDTH } from '../ui/tokens'
+import { CONTROL_SIZE, SIDEBAR_RAIL_WIDTH } from '../ui/tokens'
 import { OverlayPanel, type PanelFrame } from './OverlayPanel'
 import { PanelScrim } from './PanelScrim'
 import { SidebarOverlay } from './SidebarOverlay'
 import { useSidebarState, useSidebarWidth } from './useLayoutMode'
+
+/**
+ * The close (X) a destination draws when it has nowhere to go BACK to.
+ *
+ * Activity and Crons keep their overlay's old close — a round glass button —
+ * but it is drawn by the PAGE now, as `PageChrome`'s `trailing`, rather than by
+ * a title row `OverlayPanel` no longer has. Settings draws the same button at
+ * its own root, in the content column, for the same reason: a root has nothing
+ * under it to return to, so a close reads truer than a back that goes nowhere.
+ */
+function DestinationClose({ onPress, testID }: { onPress: () => void; testID: string }) {
+  return (
+    <RoundIconButton
+      icon="close"
+      label={strings.layout.close}
+      onPress={onPress}
+      opaque
+      size={CONTROL_SIZE.regular}
+      testID={testID}
+    />
+  )
+}
 
 /**
  * A sidebar and a chat column, edge to edge, for a wide window — an iPad, or a
@@ -151,7 +176,12 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
   const [listOverlay, setListOverlay] = useState(false)
   // The content panel's own box, for the overlay that has to be exactly it.
   const [contentFrame, setContentFrame] = useState<PanelFrame | undefined>(undefined)
-  const overlayOpen = section !== null
+  // Activity and Crons still slide in over the chat column — things you
+  // consult without leaving your place. Settings does not: it takes the
+  // CONTENT column, the way Boards does (HERM-102, HERM-108), so it is not one
+  // of the destinations this dims the sidebar or mounts `OverlayPanel` for.
+  const overlayOpen = section === 'activity' || section === 'cron'
+  const settingsOpen = section === 'settings'
 
   /*
    * The browser tab's name. This shell has no navigator, so nothing used to
@@ -316,13 +346,33 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
   }, [overlays, setSidebarCollapsed])
 
   // ⌘, opens Settings, on a Mac from the keyboard and from the menu bar. ⌘W and
-  // Escape close it again, through the Escape stack `OverlayPanel` registers on.
+  // Escape close it again, through the stacks registered just below.
   useShortcut('settings', () => openSection('settings'))
   // ⌘⇧S / ⌃⇧S, and the Mac menu bar's Hide/Show Sidebar, which arrives as the same
   // action. Registered on the shell rather than on the sidebar because the sidebar
   // is the thing that goes away — a shortcut that unregisters when its target is
   // hidden is a shortcut that can only ever hide.
   useShortcut('toggleSidebar', toggleSidebar)
+
+  /*
+   * Settings' own Escape and Android back, closing it entirely.
+   *
+   * `OverlayPanel` used to register these for every destination, including
+   * Settings; now that Settings lives in the content column like Boards
+   * rather than under `OverlayPanel`, it has to register its own — and it
+   * draws a close (X) rather than a `back`, so `PageChrome`'s own Escape
+   * handling (which only fires for a `back`) never picks it up either.
+   *
+   * Registered HERE, on the shell, rather than inside `SettingsHost`, is what
+   * gives "one level at a time" for free: this mounts the moment the section
+   * opens, before any page inside it does, so a deeper page's own `PageChrome`
+   * back always registers LATER and therefore answers first (see
+   * `useEscapeKey`/`useHardwareBack` — last registered, first delivered).
+   * Popping back to the root leaves this as the only handler again, so the
+   * NEXT Escape is the one that closes Settings.
+   */
+  useEscapeKey(() => setSection(null), settingsOpen)
+  useHardwareBack(() => setSection(null), settingsOpen)
 
   /** The list, in whichever of its two containers is on screen. */
   const list = (
@@ -459,7 +509,7 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
                 testID="shell-content-panel"
               >
                 {/*
-                One of the three, and the chat is the default. Early returns
+                One of the four, and the chat is the default. Early returns
                 rather than a navigator, which is the shape this shell already
                 uses for its panels: both columns stay mounted, so a stack would
                 have to be told twice what "back" means.
@@ -474,6 +524,21 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
                   not the window.
                 */
                   <KanbanScreen backLabel={titleFor(boards.from) || strings.tabs.chats} onClose={closeBoards} />
+                ) : settingsOpen ? (
+                  /*
+                  Settings takes the column exactly the way Boards does, and for
+                  the same reason (HERM-102, HERM-108): a 520pt overlay cannot
+                  hold a category list and a page side by side, and
+                  `SETTINGS_SPLIT_MIN_WIDTH` (640) is wider than the overlay ever
+                  was, so the split layout was unreachable until this moved.
+                  `SettingsScreen` is `SettingsHost`; it measures its own width
+                  and decides split vs stacked from that, not from anything this
+                  shell knows.
+                */
+                  <SettingsScreen
+                    rootTrailing={<DestinationClose onPress={() => setSection(null)} testID="settings-close" />}
+                    {...(initial?.page ? { initialRoute: initial.page } : {})}
+                  />
                 ) : conversations?.id ? (
                   <ConversationViewScreen
                     back={{
@@ -517,10 +582,14 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
           <OverlayPanel
             {...(contentFrame ? { frame: contentFrame } : {})}
             onClose={() => setSection(null)}
-            title={titleFor(section)}
             visible={overlayOpen}
           >
-            {section === 'activity' ? <ActivityScreen onOpenBot={openBot} /> : null}
+            {section === 'activity' ? (
+              <ActivityScreen
+                onOpenBot={openBot}
+                trailing={<DestinationClose onPress={() => setSection(null)} testID="overlay-close" />}
+              />
+            ) : null}
             {section === 'cron' ? (
               <CronScreen
                 {...(cronJobId ? { initialJobId: cronJobId } : {})}
@@ -529,10 +598,8 @@ export function RegularShell({ initial }: { initial?: DevInitialView } = {}) {
                 // twice: the screen decides on its first render whether the
                 // editor is up, and a live screen would ignore the second press.
                 key={cronCreate ? 'cron-create' : 'cron'}
+                trailing={<DestinationClose onPress={() => setSection(null)} testID="overlay-close" />}
               />
-            ) : null}
-            {section === 'settings' ? (
-              <SettingsScreen {...(initial?.page ? { initialRoute: initial.page } : {})} />
             ) : null}
           </OverlayPanel>
         </View>

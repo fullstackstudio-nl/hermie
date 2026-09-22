@@ -90,17 +90,25 @@ beforeEach(() => {
   mockDimensions.mockReturnValue({ ...MAC, scale: 2, fontScale: 1 })
 })
 
-/** Render the shell, report the content panel's frame, and open Settings. */
-function openSettings() {
+/**
+ * Render the shell, report the content panel's frame, and open Activity.
+ *
+ * This used to open Settings. HERM-102/108 moved Settings into the content
+ * column instead of `OverlayPanel` (see `regular-shell.test.tsx`), so it no
+ * longer produces an `overlay-frame` to measure — Activity and Crons still do,
+ * and the frame geometry this file is about does not depend on which of the
+ * two is open.
+ */
+function openActivity() {
   renderScreen(<RegularShell />)
 
   fireEvent(screen.getByTestId('shell-content-panel'), 'layout', { nativeEvent: { layout: CONTENT_FRAME } })
-  fireEvent.press(screen.getByTestId('tab-settings'))
+  fireEvent.press(screen.getByTestId('tab-activity'))
 }
 
 describe('the destination panel’s frame', () => {
   it('is the content panel’s measured box, not a guess from the window', () => {
-    openSettings()
+    openActivity()
 
     expect(flat('overlay-frame')).toMatchObject({
       height: CONTENT_FRAME.height,
@@ -112,7 +120,7 @@ describe('the destination panel’s frame', () => {
   })
 
   it('shares the content panel’s top, bottom and right edges exactly', () => {
-    openSettings()
+    openActivity()
 
     const panel = flat('overlay-panel')
 
@@ -131,7 +139,7 @@ describe('the destination panel’s frame', () => {
     // No `onLayout` fired: the fallback has to be right, not merely present, or
     // the panel jumps on its second frame.
     renderScreen(<RegularShell />)
-    fireEvent.press(screen.getByTestId('tab-settings'))
+    fireEvent.press(screen.getByTestId('tab-activity'))
 
     expect(flat('overlay-frame')).toMatchObject(StyleSheet.absoluteFill)
   })
@@ -139,7 +147,7 @@ describe('the destination panel’s frame', () => {
 
 describe('the dim', () => {
   it('is inside BOTH columns, in each column’s own shape', () => {
-    openSettings()
+    openActivity()
 
     for (const id of ['overlay-scrim-dim', 'overlay-scrim-sidebar-dim']) {
       const dim = flat(id) as ViewStyle & { backgroundColor?: string }
@@ -157,7 +165,7 @@ describe('the dim', () => {
   })
 
   it('leaves the wallpaper gap alone: the panel’s own frame intercepts nothing', () => {
-    openSettings()
+    openActivity()
 
     // The only thing the destination panel puts at the column level is the frame
     // box, and it is pass-through. Nothing in this layout paints or captures over
@@ -179,19 +187,20 @@ describe('the dim', () => {
     slow" is a budget problem, so it gets a bigger budget rather than a rewrite.
   */
   it('closes one level from either panel’s dim', async () => {
-    openSettings()
+    openActivity()
     fireEvent.press(screen.getByTestId('overlay-scrim-sidebar'))
 
     await waitFor(() => expect(screen.queryByTestId('overlay-panel')).toBeNull())
 
-    fireEvent.press(screen.getByTestId('tab-activity'))
+    // Crons, this time — the other destination that still opens as an overlay.
+    fireEvent.press(screen.getByTestId('tab-cron'))
     fireEvent.press(screen.getByTestId('overlay-scrim'))
 
     await waitFor(() => expect(screen.queryByTestId('overlay-panel')).toBeNull())
   }, 15_000)
 
   it('takes the taps the sidebar would have taken, so it is not interactive under a dim', () => {
-    openSettings()
+    openActivity()
 
     // A pressable filling the panel, live while the overlay is open. That is what
     // makes the sidebar unreachable — the row underneath is still mounted and still

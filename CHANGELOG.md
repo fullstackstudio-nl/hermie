@@ -81,6 +81,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bespoke back buttons for it. Activity's sticky "Today" divider is drawn in the page's own glass
   material instead of a flat fill, so it no longer reads as an opaque band across the screen.
 
+- **On an iPad or a Mac, Settings opens in the content column, the way Boards already does, instead
+  of the 520pt panel Activity and Crons still slide in as (HERM-102, HERM-108).** A panel that size
+  could never hold a category list beside the page it opens, so the split layout — categories on the
+  left, the chosen page on the right — was code nobody's window was ever wide enough to reach. It
+  closes on a round close (X) instead of a back, since there is nothing under its root to return to;
+  Escape and Android's back still close it one level at a time, a page first and Settings itself on
+  the next press. Activity and Crons keep their panel, and it no longer draws its own title row —
+  the title and the close both come from the page's own chrome now, the same as everywhere else.
+
 ### Removed
 
 - **The gateway's logs page (HERM-103).** Settings no longer has a "gateway's logs" row, and the
