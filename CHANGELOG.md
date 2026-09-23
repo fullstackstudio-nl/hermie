@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-09-23
+
 ### Added
 
 - **The desktop shell scaffold (`apps/desktop`, Tauri 2).** A window opens on a Hermie Web address

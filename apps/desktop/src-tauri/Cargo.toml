@@ -1,6 +1,6 @@
 [package]
 name = "hermie-desktop"
-version = "0.1.0"
+version = "0.1.7"
 description = "Hermie desktop shell — a webview over a Hermie Web instance"
 edition = "2021"
 rust-version = "1.77.2"
