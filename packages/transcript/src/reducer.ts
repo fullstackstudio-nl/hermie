@@ -33,6 +33,7 @@ import {
   freeItemId,
   type ItemOrigin,
   type ItemReaction,
+  type MessageAuthor,
   type NoticeItem,
   type NoticeKind,
   SEQ_STEP,
@@ -1877,12 +1878,20 @@ export function applyResumeSnapshot(state: ChatState, snapshot: ResumeSnapshot, 
  * left when the send had no words at all. A caller that passed a friendlier name
  * here instead left the bubble and its row with nothing in common, which is how a
  * file sent with no text came back as a second bubble.
+ *
+ * `author` is the reader's own identity, when the caller has one to give — the
+ * same shape the persisted row will eventually carry (`MessageAuthor`). Passing
+ * it here means the bubble does not change silhouette the moment its row lands:
+ * `mergeWithLive` prefers the fresh row's author, but until that arrives the
+ * optimistic item should already say what the row will say. No caller wires
+ * this through yet; it is here so the one that does needs no reducer change.
  */
 export function beginLocalTurn(
   state: ChatState,
   text: string,
   attachments?: string[],
-  now: number = Date.now()
+  now: number = Date.now(),
+  author?: MessageAuthor
 ): ChatState {
   const next = editable(state)
   const projected = stripUserText(text)
@@ -1895,6 +1904,7 @@ export function beginLocalTurn(
       kind: 'user',
       text: projected.text,
       ...(refs?.length ? { attachments: refs } : {}),
+      ...(author ? { author } : {}),
       pending: true,
       ts: now / 1000
     },

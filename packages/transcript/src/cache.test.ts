@@ -6,8 +6,8 @@ import { applyEvent, applyServerRequest, beginLocalTurn } from './reducer'
 import { rowsToItems } from './rows-to-items'
 import { visibleItems } from './selectors'
 import { approvalRequest, delegationEvents, dmDispatchTurn } from './__fixtures__/events'
-import { rpcHistoryRows } from './__fixtures__/rows'
-import { type BotDmOutItem, type ChatState, createChatState, type TranscriptItem } from './types'
+import { authoredRow, rpcHistoryRows } from './__fixtures__/rows'
+import { type BotDmOutItem, type ChatState, createChatState, type TranscriptItem, type UserItem } from './types'
 
 const NOW = 1_700_000_000_000
 const IDS = { storedSessionId: 'stored-1', resolvedSessionId: 'resolved-1' }
@@ -95,6 +95,41 @@ describe('cache round trip', () => {
     expect(after.epoch).toBeUndefined()
     // Everything else still paints; only the watermark is refused.
     expect(after.order).toHaveLength(snapshot.items.length)
+  })
+})
+
+describe('author survives the cache (HERM-83)', () => {
+  it('round-trips an author through actual JSON, not just object identity', () => {
+    const withAuthor = reconcile(fresh(), rowsToItems([authoredRow], 'rpc'))
+    const snapshot = snapshotForCache(withAuthor, NOW)
+    // `snapshotForCache` is what actually gets written to disk, so prove the
+    // round trip through the wire format it will really take, not the object
+    // this process happens to still be holding a reference to.
+    const throughJson = JSON.parse(JSON.stringify(snapshot))
+    const after = stateFromCache('researcher', IDS, throughJson)
+    const user = after.order.map(id => after.items[id]).find((item): item is UserItem => item?.kind === 'user')
+
+    expect(user?.author).toEqual({ id: 'oidc:user-a', name: 'Robin' })
+  })
+
+  it('loads a cached item from an older build with no author as unattributed', () => {
+    // An older build's cache never wrote `author` at all — not `author:
+    // undefined`, the key is simply absent, the way a build before this field
+    // existed would have written it. Rehydrating that item must not invent one.
+    const withAuthor = reconcile(fresh(), rowsToItems([authoredRow], 'rpc'))
+    const snapshot = snapshotForCache(withAuthor, NOW)
+    const legacyItem = snapshot.items[0] as UserItem & Record<string, unknown>
+
+    expect(legacyItem.author).toBeDefined()
+
+    const { author: _author, ...withoutAuthor } = legacyItem
+    const legacySnapshot = { ...snapshot, items: [withoutAuthor as TranscriptItem] }
+
+    const after = stateFromCache('researcher', IDS, legacySnapshot)
+    const user = after.order.map(id => after.items[id]).find((item): item is UserItem => item?.kind === 'user')
+
+    expect(user).toBeDefined()
+    expect(user?.author).toBeUndefined()
   })
 })
 

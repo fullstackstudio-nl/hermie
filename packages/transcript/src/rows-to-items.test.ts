@@ -10,6 +10,9 @@ import {
 } from './rows-to-items'
 import {
   attachedContextRow,
+  authoredRow,
+  authoredRowRest,
+  authorlessRows,
   codexSidecarRow,
   cronBotChatBody,
   cronBotChatHeader,
@@ -525,5 +528,62 @@ describe('the [System: …] wrapper, on the history path', () => {
     const [item] = rowsToItems([{ role: 'user', text: plainProcessText, row_id: 4 }], 'rpc')
 
     expect((item as NoticeItem).body).toBe('error TS2345: Argument of type string is not assignable.')
+  })
+})
+
+describe('display_metadata.author (HERM-83)', () => {
+  it('projects a valid author, leaving an unrelated metadata key alone', () => {
+    const [item] = rowsToItems([authoredRow], 'rpc')
+
+    expect((item as UserItem).author).toEqual({ id: 'oidc:user-a', name: 'Robin' })
+  })
+
+  it('projects no author when the stamp is a string, not an object', () => {
+    const [item] = rowsToItems([authorlessRows.stringAuthor!], 'rpc')
+
+    expect((item as UserItem).author).toBeUndefined()
+  })
+
+  it('projects no author for an empty author object', () => {
+    const [item] = rowsToItems([authorlessRows.emptyAuthor!], 'rpc')
+
+    expect((item as UserItem).author).toBeUndefined()
+  })
+
+  it('projects no author for a blank id', () => {
+    const [item] = rowsToItems([authorlessRows.blankId!], 'rpc')
+
+    expect((item as UserItem).author).toBeUndefined()
+  })
+
+  it('projects no author for a numeric id', () => {
+    const [item] = rowsToItems([authorlessRows.numericId!], 'rpc')
+
+    expect((item as UserItem).author).toBeUndefined()
+  })
+
+  it('drops the whole author when the id is valid but the name is not a string', () => {
+    // D2: "accepting only a non-empty string id and a string name, and dropping
+    // the whole thing otherwise" — a valid id does not entitle the row to a
+    // half-formed author. The id is a real, usable identity here; the row still
+    // gets none, because keeping it would mean this file decides on its own
+    // which malformed shapes are "close enough", and the gateway never sent one.
+    const [item] = rowsToItems([authorlessRows.numericName!], 'rpc')
+
+    expect((item as UserItem).author).toBeUndefined()
+  })
+
+  it('projects no author when display_metadata itself is not an object', () => {
+    const [item] = rowsToItems([authorlessRows.nonObjectMetadata!], 'rpc')
+
+    expect((item as UserItem).author).toBeUndefined()
+  })
+
+  it('resolves the same author from the REST and the RPC shape of one row', () => {
+    const [fromRpc] = rowsToItems([authoredRow], 'rpc')
+    const [fromRest] = rowsToItems([authoredRowRest], 'rest')
+
+    expect(fromRest).toEqual(fromRpc)
+    expect((fromRest as UserItem).author).toEqual({ id: 'oidc:user-a', name: 'Robin' })
   })
 })

@@ -45,6 +45,22 @@ export interface ItemBase {
   reactions?: ItemReaction[]
 }
 
+/**
+ * Who the GATEWAY said wrote a row — never a guess.
+ *
+ * Absent means nobody knows: the turn was unattributed (a crash continuation,
+ * a wake, a cron, a bot delivery), the session's identity was ambiguous, or the
+ * row predates the gateway writing this at all. An absent author must stay
+ * absent; it is never inferred from `origin`, `pending`, or anything else the
+ * client already believes about the item.
+ */
+export interface MessageAuthor {
+  /** `<provider>:<user_id>` exactly as the gateway spelled it. The identity. */
+  id: string
+  /** The gateway's own display name for them, when it sent one. Untrusted text. */
+  name?: string
+}
+
 /** A human turn (or the bot's own steer / skill invocation projection). */
 export interface UserItem extends ItemBase {
   kind: 'user'
@@ -72,6 +88,8 @@ export interface UserItem extends ItemBase {
   displayKind?: 'skill_invocation' | 'steer'
   /** A foreign turn started before we know who spoke; filled by `reconcileTail`. */
   unknownAuthor?: boolean
+  /** Who the gateway says wrote this row. See `MessageAuthor` — absent, never guessed. */
+  author?: MessageAuthor
 }
 
 /** An inbound bot-to-bot message: a `role:user` row that is NOT the human speaking. */

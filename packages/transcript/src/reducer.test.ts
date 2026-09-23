@@ -303,6 +303,21 @@ describe('local submits', () => {
     expect((list(state)[0] as UserItem).pending).toBe(false)
   })
 
+  it('puts the caller-supplied author straight on the optimistic bubble', () => {
+    // HERM-83: so a sent bubble does not change silhouette the moment its own
+    // row lands with the same author on it.
+    const author = { id: 'oidc:user-a', name: 'Robin' }
+    const state = beginLocalTurn(fresh(), 'ship it', undefined, NOW, author)
+
+    expect((list(state)[0] as UserItem).author).toEqual(author)
+  })
+
+  it('leaves the optimistic bubble unattributed when no author is given', () => {
+    const state = beginLocalTurn(fresh(), 'ship it', undefined, NOW)
+
+    expect((list(state)[0] as UserItem).author).toBeUndefined()
+  })
+
   it('remembers a prompt the backend parked behind the running turn', () => {
     let state = beginLocalTurn(fresh(), 'and then deploy', undefined, NOW)
 

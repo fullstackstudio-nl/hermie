@@ -275,3 +275,66 @@ export const codexSidecarRow: TranscriptRow = {
     { type: 'message', role: 'assistant', phase: 'final', content: [{ type: 'output_text', text: 'Recovered reply.' }] }
   ]
 }
+
+/**
+ * `display_metadata.author` (HERM-83, D1/D2) in every shape `rowsToItems` must
+ * tell apart: a real author beside another unrelated key, and the ways a stamp
+ * can be malformed — a string instead of an object, an empty or non-string id,
+ * a non-string name. Every one of the malformed rows must project no author at
+ * all rather than half of one.
+ */
+export const authoredRow: TranscriptRow = {
+  role: 'user',
+  row_id: 60,
+  text: 'lunch at noon?',
+  timestamp: 1_700_000_100,
+  display_metadata: { author: { id: 'oidc:user-a', name: 'Robin' }, display_text: 'unrelated key, left alone' }
+}
+
+/** The same row as the REST transport ships it — `content`/`id`, same metadata. */
+export const authoredRowRest: TranscriptRow = {
+  role: 'user',
+  id: 60,
+  content: 'lunch at noon?',
+  timestamp: 1_700_000_100,
+  display_metadata: { author: { id: 'oidc:user-a', name: 'Robin' }, display_text: 'unrelated key, left alone' }
+}
+
+export const authorlessRows: Record<string, TranscriptRow> = {
+  stringAuthor: {
+    role: 'user',
+    row_id: 61,
+    text: 'string, not an object',
+    display_metadata: { author: 'oidc:user-a' }
+  },
+  emptyAuthor: {
+    role: 'user',
+    row_id: 62,
+    text: 'empty object',
+    display_metadata: { author: {} }
+  },
+  blankId: {
+    role: 'user',
+    row_id: 63,
+    text: 'blank id',
+    display_metadata: { author: { id: '' } }
+  },
+  numericId: {
+    role: 'user',
+    row_id: 64,
+    text: 'numeric id',
+    display_metadata: { author: { id: 7 } }
+  },
+  numericName: {
+    role: 'user',
+    row_id: 65,
+    text: 'numeric name',
+    display_metadata: { author: { id: 'oidc:user-a', name: 7 } }
+  },
+  nonObjectMetadata: {
+    role: 'user',
+    row_id: 66,
+    text: 'metadata is a bare string',
+    display_metadata: 'not an object'
+  }
+}

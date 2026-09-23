@@ -27,6 +27,7 @@ import {
   type BotDmOutItem,
   type CronDeliveryItem,
   type ItemOrigin,
+  type MessageAuthor,
   type NoticeItem,
   type NoticeKind,
   type ProcessCompletionBlock,
@@ -314,6 +315,38 @@ function displayText(metadata: unknown): string | undefined {
   const text = asObject(metadata)?.display_text
 
   return typeof text === 'string' && text.trim() ? text : undefined
+}
+
+/**
+ * `display_metadata.author`, read the same defensive way as every other key
+ * this file pulls out of that free-form dict.
+ *
+ * Accepts only a non-empty string `id` and, when present, a string `name` —
+ * anything else (a string instead of an object, a missing or non-string id, a
+ * `name` of the wrong type) drops the whole author rather than keeping half of
+ * it. A partial author is worse than none: it would name someone by an id the
+ * gateway never actually stamped this way.
+ */
+function authorFromMetadata(metadata: unknown): MessageAuthor | undefined {
+  const author = asObject(asObject(metadata)?.author)
+
+  if (!author) {
+    return undefined
+  }
+
+  const id = author.id
+
+  if (typeof id !== 'string' || !id) {
+    return undefined
+  }
+
+  const name = author.name
+
+  if (name !== undefined && typeof name !== 'string') {
+    return undefined
+  }
+
+  return name ? { id, name } : { id }
 }
 
 function goalsFromArgs(args: Record<string, unknown> | null | undefined): string[] {
@@ -688,6 +721,10 @@ export function rowsToItems(rows: readonly TranscriptRow[], shape: RowShape, opt
     const steered = classified?.kind === 'user' && classified.steered
     const speechKind =
       displayKind === 'skill_invocation' || displayKind === 'steer' ? displayKind : steered ? 'steer' : ''
+    // The gateway only ever stamps this on a `role:"user"` row (D1); a `system`
+    // row reaching here — an older gateway, a transport that dropped
+    // `display_kind` — carries no author and must not be given one.
+    const author = role === 'user' ? authorFromMetadata(row.display_metadata) : undefined
 
     push<UserItem>({
       id: fallbackId,
@@ -695,6 +732,7 @@ export function rowsToItems(rows: readonly TranscriptRow[], shape: RowShape, opt
       text: stripped.text,
       ...(stripped.attachments ? { attachments: stripped.attachments } : {}),
       ...(speechKind ? { displayKind: speechKind } : {}),
+      ...(author ? { author } : {}),
       ...base
     })
   })

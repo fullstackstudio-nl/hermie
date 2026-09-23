@@ -344,6 +344,62 @@ describe('a turn we sent ourselves coming back persisted', () => {
 })
 
 /**
+ * HERM-83: the fresh row's author wins, and pairing a bubble with its own row
+ * never leaves the reader with two authors — or two bubbles — for one turn.
+ */
+describe('author reconciliation', () => {
+  const author = { id: 'oidc:user-a', name: 'Robin' }
+
+  it('gives the optimistic bubble the row author once the row lands, without duplicating it', () => {
+    const submitted = beginLocalTurn(fresh(), 'delegate the dependency audit', undefined, NOW, author)
+    const persistedRows: TranscriptRow[] = [
+      {
+        role: 'user',
+        text: 'delegate the dependency audit',
+        row_id: 7,
+        timestamp: 1_700_000_100,
+        display_metadata: { author }
+      }
+    ]
+
+    const next = reconcileTail(submitted, rowsToItems(persistedRows, 'rest'))
+    const userItems = list(next).filter((item): item is UserItem => item.kind === 'user')
+
+    expect(userItems).toHaveLength(1)
+    expect(userItems[0]?.author).toEqual(author)
+    expect(userItems[0]?.rowId).toBe(7)
+  })
+
+  it("keeps the row's own author even when it differs from the optimistic guess", () => {
+    // Not a real scenario (a reader's own author does not change turn to turn),
+    // but it proves the rule: the fresh row wins, unconditionally.
+    const submitted = beginLocalTurn(fresh(), 'ping', undefined, NOW, { id: 'oidc:stale', name: 'Stale' })
+    const persistedRows: TranscriptRow[] = [
+      { role: 'user', text: 'ping', row_id: 9, timestamp: 1_700_000_100, display_metadata: { author } }
+    ]
+
+    const next = reconcileTail(submitted, rowsToItems(persistedRows, 'rest'))
+    const userItems = list(next).filter((item): item is UserItem => item.kind === 'user')
+
+    expect(userItems).toHaveLength(1)
+    expect(userItems[0]?.author).toEqual(author)
+  })
+
+  it('names a foreign placeholder from the row that fills it', () => {
+    const live = run([{ type: 'message.start', seq: 1 }])
+    const placeholder = list(live)[0] as UserItem
+
+    expect(placeholder.unknownAuthor).toBe(true)
+
+    const tail = rowsToItems([{ role: 'user', text: 'good morning', row_id: 71, display_metadata: { author } }], 'rest')
+    const state = reconcileTail(live, tail)
+    const filled = state.items[placeholder.id] as UserItem
+
+    expect(filled.author).toEqual(author)
+  })
+})
+
+/**
  * Pairing on the attachments when there is no text to pair on.
  *
  * `reconcile` and `reconcileTail` both key the live side by what an item says, so
