@@ -942,6 +942,29 @@ const stringsEn = {
       capabilities: 'Bots & capabilities',
       advanced: 'Advanced',
       about: 'About',
+      /**
+       * One sentence per category, on the card its page opens with.
+       *
+       * Not a summary. A summary says where a setting STANDS — "Dark · English" —
+       * and belongs on the row, because a reader scanning the list is looking for
+       * the thing that is wrong. These say what the category is FOR, which is the
+       * question somebody has once, on arriving. Plain sentences, no marketing,
+       * and each one names the thing the page actually decides.
+       */
+      blurb: {
+        account: 'Who this device is signed in as, and the ways of leaving.',
+        gateways: 'The gateway this device talks to, and the others it knows about.',
+        chats: 'What a new conversation shows, and how a bot is addressed.',
+        notifications: 'When a bot may reach you, and how much a notification says.',
+        context: 'What a bot is told about you and this device.',
+        memory: 'What each bot remembers between conversations.',
+        appearance: 'Light or dark, the language, the text size and the theme.',
+        privacy: 'The lock on this device, and what it takes to open it.',
+        voice: 'How Hermie reads a reply out, and how it hears you.',
+        capabilities: 'The skills, servers and boards your bots can reach.',
+        advanced: 'Hermie Web\u2019s own updates, and the tools for building the app.',
+        about: 'Which Hermie this is, and the licences it ships under.'
+      },
       summary: {
         signedOut: 'Not signed in',
         gateways: (host: string, count: number) =>
@@ -958,6 +981,29 @@ const stringsEn = {
         version: (version: string) => `Version ${version}`
       }
     },
+
+    /**
+     * The sidebar's search field, on the split layout only.
+     *
+     * It reads a category's title, the line of state under it, and the titles of
+     * every page underneath it — so it finds Licences under About and MCP servers
+     * under Bots & capabilities. The phone's list has no field: it is one screen
+     * of twelve rows, and a box between the reader and a list they can see all of
+     * is furniture.
+     */
+    search: {
+      label: 'Search settings',
+      noMatches: 'No setting matches that.'
+    },
+
+    /**
+     * The group header over the four surfaces a bot can be given.
+     *
+     * Its own group, under the one row that MAKES a bot: "New bot…" is an action
+     * and the four under this are places, and a card that mixes the two is a card
+     * whose footer cannot say anything true about all five rows.
+     */
+    capabilityReach: 'What your bots can reach',
 
     gateway: 'Gateway',
     address: 'Address',

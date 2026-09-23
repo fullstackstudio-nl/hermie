@@ -13,7 +13,13 @@ import { localised } from '../../i18n/catalogue'
 
 const profileStringsEn = {
   settings: {
-    group: 'BOTS',
+    /*
+      Sentence case, and `InsetGroup` uppercases it at render. Stored as 'BOTS'
+      until now, which is the shape HERM-106 took out of every other header in
+      the app: a string that carries its own presentation is a string two
+      screens can disagree about.
+    */
+    group: 'Bots',
     newBot: 'New bot…',
     newBotHint: 'Make another bot on this gateway'
   },

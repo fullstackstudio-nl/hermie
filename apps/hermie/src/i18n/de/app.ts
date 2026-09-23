@@ -538,6 +538,20 @@ export const app: Translation<typeof strings> = {
       capabilities: 'Bots und Fähigkeiten',
       advanced: 'Erweitert',
       about: 'Über',
+      blurb: {
+        account: 'Mit welchem Konto dieses Gerät angemeldet ist, und wie du es verlässt.',
+        gateways: 'Das Gateway, mit dem dieses Gerät spricht, und die anderen, die es kennt.',
+        chats: 'Was ein neues Gespräch zeigt, und wie ein Bot angesprochen wird.',
+        notifications: 'Wann ein Bot dich erreichen darf, und wie viel eine Mitteilung sagt.',
+        context: 'Was ein Bot über dich und dieses Gerät erfährt.',
+        memory: 'Was sich jeder Bot zwischen Gesprächen merkt.',
+        appearance: 'Hell oder dunkel, die Sprache, die Textgröße und das Thema.',
+        privacy: 'Die Sperre auf diesem Gerät, und was nötig ist, um sie zu öffnen.',
+        voice: 'Wie Hermie eine Antwort vorliest, und wie es dich hört.',
+        capabilities: 'Die Skills, Server und Boards, die deine Bots erreichen können.',
+        advanced: 'Die Updates von Hermie Web selbst, und das Werkzeug zum Bauen der App.',
+        about: 'Welches Hermie das ist, und unter welchen Lizenzen es ausgeliefert wird.'
+      },
       summary: {
         signedOut: 'Nicht angemeldet',
         gateways: (host: string, count: number) =>
@@ -553,6 +567,12 @@ export const app: Translation<typeof strings> = {
         developer: 'Entwickler',
         version: (version: string) => `Version ${version}`
       }
+    },
+    capabilityReach: 'Was deine Bots erreichen können',
+
+    search: {
+      label: 'Einstellungen durchsuchen',
+      noMatches: 'Keine Einstellung passt dazu.'
     },
     address: 'Adresse',
     viaHermieWeb: 'über Hermie Web',

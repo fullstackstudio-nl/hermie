@@ -16,6 +16,8 @@ import { directTouchPanRef } from '../../../platform/pointer-drag'
 import { PageFrame, useFramedScroll, useStackBack, type PageChromeBack } from '../../../ui/chrome'
 import { useTheme } from '../../../ui/theme'
 import { FORM_MAX_WIDTH } from '../../../ui/tokens'
+import { isSettingsCategory } from './category-look'
+import { CategoryHeaderCard } from './CategoryHeaderCard'
 import { settingsTitle } from './route-meta'
 import type { SettingsRouteName } from './route-names'
 
@@ -57,15 +59,34 @@ export interface SettingsPageProps {
 export function SettingsPage({ route, title, subtitle, trailing, scroll = true, children }: SettingsPageProps) {
   const back = useSettingsBack(route)
   const host = useContext(SettingsHostChromeContext)
+  /*
+    A CATEGORY page opens with a header card — the mark, the name and one
+    sentence — and the card is the page's heading, so the bar above it draws none.
+    A page with a `title` of its own is not a category page (a gateway's own name
+    on `GatewayDetail`), and neither is anything deeper in the stack: those keep
+    the centred title they have always had.
+
+    The back control is not affected in either case. It belongs to the route and
+    the chrome draws exactly one, which is what `settings-routes.test.tsx` walks.
+  */
+  const category = title === undefined && isSettingsCategory(route) ? route : null
 
   return (
     <PageFrame
       {...(back ? { back } : {})}
       {...(subtitle ? { subtitle } : {})}
       title={title ?? settingsTitle(route)}
+      {...(category ? { titleHidden: true } : {})}
       {...(trailing ? { trailing } : route === 'Root' && host.rootTrailing ? { trailing: host.rootTrailing } : {})}
     >
-      {scroll ? <SettingsScroll>{children}</SettingsScroll> : children}
+      {scroll ? (
+        <SettingsScroll>
+          {category ? <CategoryHeaderCard category={category} /> : null}
+          {children}
+        </SettingsScroll>
+      ) : (
+        children
+      )}
     </PageFrame>
   )
 }

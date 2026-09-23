@@ -526,6 +526,20 @@ export const app: Translation<typeof strings> = {
       capabilities: 'Bots en mogelijkheden',
       advanced: 'Geavanceerd',
       about: 'Over',
+      blurb: {
+        account: 'Met welk account dit apparaat is ingelogd, en hoe je eruit stapt.',
+        gateways: 'De gateway waarmee dit apparaat praat, en de andere die het kent.',
+        chats: 'Wat een nieuw gesprek laat zien, en hoe een bot wordt aangesproken.',
+        notifications: 'Wanneer een bot je mag bereiken, en hoeveel een melding zegt.',
+        context: 'Wat een bot over jou en dit apparaat te horen krijgt.',
+        memory: 'Wat elke bot tussen gesprekken onthoudt.',
+        appearance: 'Licht of donker, de taal, de tekstgrootte en het thema.',
+        privacy: 'De vergrendeling op dit apparaat, en wat nodig is om hem te openen.',
+        voice: 'Hoe Hermie een antwoord voorleest, en hoe hij jou hoort.',
+        capabilities: 'De skills, servers en borden waar je bots bij kunnen.',
+        advanced: 'De updates van Hermie Web zelf, en het gereedschap om de app te bouwen.',
+        about: 'Welke Hermie dit is, en onder welke licenties hij wordt geleverd.'
+      },
       summary: {
         signedOut: 'Niet ingelogd',
         gateways: (host: string, count: number) =>
@@ -541,6 +555,12 @@ export const app: Translation<typeof strings> = {
         developer: 'Ontwikkelaar',
         version: (version: string) => `Versie ${version}`
       }
+    },
+    capabilityReach: 'Waar je bots bij kunnen',
+
+    search: {
+      label: 'Zoek in instellingen',
+      noMatches: 'Geen instelling komt daarmee overeen.'
     },
     address: 'Adres',
     version: 'Versie',
