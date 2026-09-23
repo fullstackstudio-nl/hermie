@@ -28,7 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **The sidebar on iPad and Mac follows the reference's shape.** A search field, then a row for
     whoever this device is signed in as, then the categories as free-standing rows with the open one
     filled and its label in the accent ink — the same selected-row surface the chat list's open bot
-    gets. The phone keeps the grouped cards it had, with the new marks in them.
+    gets. The phone keeps the grouped cards it had, with the new marks in them, and now leads with
+    that same account row rather than only the sidebar getting one. Either way it is the single way
+    into the Account category: the list underneath it no longer keeps a second row to the same place,
+    and the row itself bolds whoever is signed in — falling back to the host, then to the plain
+    signed-out wording, only where there is no name to bold.
   - **The search actually searches.** It reads a category's title, the line of state under it, and the
     title of every page underneath it, so "licence" finds About and "MCP" finds Bots & capabilities —
     and a row matched through a page it holds says which page instead of its summary. It is drawn in

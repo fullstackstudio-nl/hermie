@@ -1,26 +1,31 @@
 /**
- * Who this device is signed in as, at the top of the Settings sidebar: a round
- * avatar, the name, and the gateway under it.
+ * Who this device is signed in as, at the top of the Settings list: a round
+ * avatar, the person, and what they are signed in to underneath.
  *
- * ## It is a shortcut, not a home
+ * ## The only way in
  *
- * It opens the Account category, which is still a row in the list below. Nothing
- * moved: the same page answers "who am I signed in as" either way, and this is
- * the reference's own top row — the one thing a reader opening Settings looks at
- * before they look for anything.
+ * It opens the Account category, and the category no longer keeps a row of its
+ * own beside it — one destination, one row, on the phone's list and the
+ * sidebar both. Two adjacent rows to the same place, with the bold and quiet
+ * lines swapped between them, read as a bug rather than as two doors.
  *
- * ## Two lines, two different facts
+ * ## Two lines, and which fact earns the bold one
  *
- * The bold line is the person; the quiet one is the GATEWAY, because "signed in"
- * on this app is always signed in to somewhere, and a name with no host beside it
- * is half an answer on a device that knows more than one. Where there is no name
- * to show — a session token, a gateway whose provider reports nothing — the
- * provider takes the bold line and the round mark falls back to a person glyph
- * rather than inventing an initial out of a sentence.
+ * The bold line is the PERSON, because that is what a reader glances at first.
+ * Only where there is no name at all does the row fall back, and the fallback
+ * never repeats a fact between the two lines:
+ *
+ *  - name known → bold the name, quiet the host.
+ *  - no name, a host known → bold the HOST, quiet the auth mode or provider
+ *    ("Session token", the provider's own display name). Bolding the auth mode
+ *    while the host sits under it says the same thing twice in the wrong
+ *    order — a session token is not who signed in, a host is closer to it.
+ *  - neither a name nor a host — a device that was never set up — keeps the
+ *    plain signed-out wording, same as before.
  *
  * Read through `?.` for the reason `GatewayTitle` gives: Settings is rendered by
  * suites that stand in for the gateway context with the two or three fields they
- * care about, and a row at the top of the sidebar is not worth a crash in any of
+ * care about, and a row at the top of the list is not worth a crash in any of
  * them.
  */
 import { Pressable, View } from 'react-native'
@@ -42,20 +47,38 @@ export function AccountRow({ onPress }: AccountRowProps) {
   const theme = useTheme()
   const { config } = useGateway()
   const summary = strings.settings.categories.summary
-  const name =
-    config?.userDisplayName ||
-    (config?.authMode === 'session_token'
+  // The old single fallback: what the row said, in full, before there was a
+  // host to prefer over it. Still exactly right for the one case that has
+  // neither a name nor a host — a device that was never set up — which is why
+  // it survives unchanged as that branch's bold line below.
+  const providerOrTokenLabel =
+    config?.authMode === 'session_token'
       ? strings.settings.authModeToken
-      : config?.providerDisplayName || config?.provider || summary.signedOut)
+      : config?.providerDisplayName || config?.provider || summary.signedOut
   // Empty rather than `describeGatewayAddress`'s own "Unknown" where there is no
   // address at all: a device that has never been set up has no gateway to name,
   // and "Unknown" under a name reads as a fault rather than as an absence.
   const host = config?.baseUrl ? describeGatewayAddress(config.baseUrl).host : ''
+
+  let boldText: string
+  let quietText: string
+
+  if (config?.userDisplayName) {
+    boldText = config.userDisplayName
+    quietText = host || summary.signedOut
+  } else if (host) {
+    boldText = host
+    quietText = providerOrTokenLabel
+  } else {
+    boldText = providerOrTokenLabel
+    quietText = summary.signedOut
+  }
+
   const size = AVATAR_SIZE.header
 
   return (
     <Pressable
-      accessibilityLabel={name}
+      accessibilityLabel={boldText}
       accessibilityRole="button"
       onPress={onPress}
       style={({ pressed }) => ({
@@ -97,10 +120,10 @@ export function AccountRow({ onPress }: AccountRowProps) {
 
         <View style={{ flex: 1, gap: theme.space.xxs, minWidth: 0 }}>
           <Text numberOfLines={1} style={{ fontWeight: '600' }} testID="settings-account-name" variant="body">
-            {name}
+            {boldText}
           </Text>
           <Text color="textMuted" numberOfLines={1} variant="meta">
-            {host || summary.signedOut}
+            {quietText}
           </Text>
         </View>
 

@@ -238,7 +238,7 @@ describe('Settings, in the content column', () => {
     fireEvent.press(screen.getByTestId('tab-settings'))
     expect(screen.queryAllByTestId('page-back')).toHaveLength(0)
 
-    fireEvent.press(screen.getByTestId('settings-cat-Account'))
+    fireEvent.press(screen.getByTestId('settings-account-row'))
     await waitFor(() => expect(screen.getByTestId('settings-page-Account')).toBeTruthy())
 
     const backs = screen.queryAllByTestId('page-back')
@@ -290,7 +290,7 @@ describe('Settings, in the content column', () => {
     renderScreen(<RegularShell />)
 
     fireEvent.press(screen.getByTestId('tab-settings'))
-    fireEvent.press(screen.getByTestId('settings-cat-Account'))
+    fireEvent.press(screen.getByTestId('settings-account-row'))
     await waitFor(() => expect(screen.getByTestId('settings-page-Account')).toBeTruthy())
 
     pressEscape()

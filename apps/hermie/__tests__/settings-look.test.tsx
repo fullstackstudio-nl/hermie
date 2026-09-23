@@ -56,10 +56,23 @@ jest.mock('../src/features/settings/licences-data', () => ({
   })
 }))
 
+/**
+ * `mock`-prefixed so the hoisted `jest.mock` factory below is allowed to close
+ * over it. Tests for the account row's bold-line rule reassign this before
+ * rendering, to reach the cases a fixed config cannot: a host with no name, and
+ * neither.
+ */
+let mockGatewayConfig: Record<string, unknown> | null = {
+  authMode: 'native_pkce',
+  baseUrl: 'https://gateway.example.com',
+  userDisplayName: 'Sam',
+  version: '1'
+}
+
 jest.mock('../src/gateway', () => ({
   useGateway: () => ({
     changeGateway: jest.fn(),
-    config: { authMode: 'native_pkce', baseUrl: 'https://gateway.example.com', userDisplayName: 'Sam', version: '1' },
+    config: mockGatewayConfig,
     signOut: jest.fn(),
     status: 'ready'
   })
@@ -151,7 +164,9 @@ describe('the mark each category carries', () => {
   it('draws one beside every row in the list', async () => {
     await open('Root')
 
-    for (const name of visibleCategories()) {
+    // Not Account: it has no list row of its own here any more, only the
+    // account row above the list, which carries an avatar rather than a mark.
+    for (const name of visibleCategories().filter(candidate => candidate !== 'Account')) {
       expect(screen.getByTestId(`settings-mark-${name}`)).toBeTruthy()
     }
   })
@@ -239,9 +254,16 @@ describe('the sidebar', () => {
 
   it('marks the category whose page is open beside it', async () => {
     const column = await openSidebar()
-    const open = visibleCategories()[0] as SettingsCategoryName
+    // Not `visibleCategories()[0]` (Account): that category has no row of its
+    // own in the list any more, so "the one that's open" is proven with a
+    // category the account row does not also stand for.
+    const open = visibleCategories().find(name => name !== 'Account') as SettingsCategoryName
 
-    expect(within(column).getByTestId(`settings-cat-${open}`).props.accessibilityState.selected).toBe(true)
+    fireEvent.press(within(column).getByTestId(`settings-cat-${open}`))
+
+    await waitFor(() =>
+      expect(within(column).getByTestId(`settings-cat-${open}`).props.accessibilityState.selected).toBe(true)
+    )
   })
 
   it('is the only place the search field is drawn', async () => {
@@ -251,6 +273,72 @@ describe('the sidebar', () => {
 
     act(() => layout(1200))
     await waitFor(() => expect(screen.getByTestId('settings-search')).toBeTruthy())
+  })
+
+  it('has no separate Account row: the account row is the only way in', async () => {
+    const column = await openSidebar()
+
+    expect(within(column).getByTestId('settings-account-row')).toBeTruthy()
+    expect(within(column).queryByTestId('settings-cat-Account')).toBeNull()
+  })
+})
+
+describe('the phone list', () => {
+  it('leads with the account row too, and drops the separate Account row', async () => {
+    await open('Root')
+
+    expect(screen.getByTestId('settings-account-row')).toBeTruthy()
+    expect(screen.queryByTestId('settings-cat-Account')).toBeNull()
+    // The rest of the list is untouched.
+    expect(screen.getByTestId('settings-cat-Gateways')).toBeTruthy()
+  })
+
+  it('opens Account from the account row', async () => {
+    await open('Root')
+
+    fireEvent.press(screen.getByTestId('settings-account-row'))
+
+    await waitFor(() => expect(screen.getByTestId('settings-page-Account')).toBeTruthy())
+  })
+})
+
+describe('the account row’s bold line', () => {
+  const defaultConfig = mockGatewayConfig
+
+  afterEach(() => {
+    mockGatewayConfig = defaultConfig
+  })
+
+  it('bolds the name and puts the host underneath, when a name is known', async () => {
+    // The suite's default config already has a name; this is the baseline the
+    // other two cases are a fallback FROM.
+    await open('Root')
+
+    expect(screen.getByTestId('settings-account-name')).toHaveTextContent('Sam')
+    expect(screen.getByText('gateway.example.com')).toBeTruthy()
+  })
+
+  it('bolds the host and puts the auth mode underneath, when there is no name', async () => {
+    mockGatewayConfig = {
+      authMode: 'session_token',
+      baseUrl: 'http://127.0.0.1:8787',
+      version: '1'
+    }
+
+    await open('Root')
+
+    // The bug this fixes: bold and quiet were swapped, so the host sat under
+    // an auth mode wrongly given the bold line.
+    expect(screen.getByTestId('settings-account-name')).toHaveTextContent('127.0.0.1')
+    expect(screen.getByText(strings.settings.authModeToken)).toBeTruthy()
+  })
+
+  it('keeps the plain signed-out wording when there is neither a name nor a host', async () => {
+    mockGatewayConfig = null
+
+    await open('Root')
+
+    expect(screen.getByTestId('settings-account-name')).toHaveTextContent(strings.settings.categories.summary.signedOut)
   })
 })
 

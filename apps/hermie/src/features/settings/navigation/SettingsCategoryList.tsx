@@ -8,12 +8,22 @@
  * list, one place a category can be forgotten from. What differs is the chrome
  * around it, and that is `variant`:
  *
- *  - **`grouped`** (the default, and the phone) — the rows in `InsetGroup` cards,
- *    and nothing above them. No search field and no account row: the phone's
- *    Settings root is one screen deep and a search box on it would be a field
- *    between the reader and a list they can already see all of.
+ *  - **`grouped`** (the default, and the phone) — the account row on top, then
+ *    the rows in `InsetGroup` cards. No search field: the phone's Settings root
+ *    is one screen deep and a search box on it would be a field between the
+ *    reader and a list they can already see all of.
  *  - **`sidebar`** — the reference's own shape. A search field, then the account
  *    row, then the categories as free-standing rows with the open one filled.
+ *
+ * ## One row to Account, not two
+ *
+ * The account row is the only way into the Account category on either layout.
+ * Wherever it is on screen — always on the phone, and on the sidebar whenever a
+ * search is not narrowing the list — the `'Account'` category drops out of the
+ * groups below it, so the same destination never sits twice in the same list
+ * with its two lines swapped between the copies. Typing into the sidebar's
+ * search hides the account row and lets `'Account'` back in as an ordinary
+ * match, because it is then the only way left to reach it while searching.
  *
  * ## The search is real
  *
@@ -116,6 +126,18 @@ export function SettingsCategoryList({ onPick, current = null, variant = 'groupe
     // the map is recomputed whenever a summary changes anyway.
   }, [needle, summaries])
 
+  /*
+   * The account row is on screen whenever a search is not hiding it — always on
+   * the phone, since `needle` is forced to `''` there. While it is, `'Account'`
+   * is dropped from every group it would otherwise sit in below it: the same
+   * filter, run once, feeds both layouts.
+   */
+  const accountRowShown = !needle
+  const groupsFor = (groups: readonly SettingsCategoryName[][]) =>
+    groups
+      .map(group => (accountRowShown ? group.filter(name => name !== 'Account') : group))
+      .filter(group => group.length > 0)
+
   const row = (name: SettingsCategoryName) => {
     const hit = hits.get(name)
 
@@ -140,7 +162,14 @@ export function SettingsCategoryList({ onPick, current = null, variant = 'groupe
   if (!sidebar) {
     return (
       <>
-        {visibleCategoryGroups().map(group => (
+        {/*
+          The reference's own top row, on the phone list too — not only the
+          sidebar. `'Account'` is filtered out of the groups below by
+          `groupsFor`, so this is the one and only row that opens it.
+        */}
+        <AccountRow onPress={() => onPick('Account')} />
+
+        {groupsFor(visibleCategoryGroups()).map(group => (
           <InsetGroup key={group.join('-')}>
             {group.map(name => (
               // The wrapper is `InsetGroup`'s hairline seam; the row inside it
@@ -153,7 +182,7 @@ export function SettingsCategoryList({ onPick, current = null, variant = 'groupe
     )
   }
 
-  const found = visibleCategories().filter(name => hits.get(name)?.matched)
+  const found = visibleCategories().filter(name => hits.get(name)?.matched && (!accountRowShown || name !== 'Account'))
 
   return (
     <>
@@ -173,11 +202,11 @@ export function SettingsCategoryList({ onPick, current = null, variant = 'groupe
       {/*
         The account row, above the categories and outside the search: it is who
         this device IS rather than a setting, and a reader narrowing the list
-        down to one word is not looking for it. It opens the Account category —
-        a shortcut to a page that is still in the list below, not a second home
-        for anything.
+        down to one word is not looking for it. It is the ONLY way into the
+        Account category while it is shown — `groupsFor` drops that category
+        out of the list below for exactly as long as this row is on screen.
       */}
-      {needle ? null : <AccountRow onPress={() => onPick('Account')} />}
+      {accountRowShown ? <AccountRow onPress={() => onPick('Account')} /> : null}
 
       {/*
         The groups become gaps rather than cards here. The reference's sidebar has
@@ -185,14 +214,11 @@ export function SettingsCategoryList({ onPick, current = null, variant = 'groupe
         say what they said — they are the spacing between the runs.
       */}
       {found.length ? (
-        visibleCategoryGroups()
-          .map(group => group.filter(name => hits.get(name)?.matched))
-          .filter(group => group.length > 0)
-          .map(group => (
-            <View key={group.join('-')} style={{ gap: theme.space.xxs }}>
-              {group.map(name => row(name))}
-            </View>
-          ))
+        groupsFor(visibleCategoryGroups().map(group => group.filter(name => hits.get(name)?.matched))).map(group => (
+          <View key={group.join('-')} style={{ gap: theme.space.xxs }}>
+            {group.map(name => row(name))}
+          </View>
+        ))
       ) : (
         <Text
           color="textMuted"
