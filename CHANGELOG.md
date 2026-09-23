@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A day divider in a Bot Chat no longer strands a slash command's answer, or a reclaimed-session
+  notice, on the wrong side of it.** Both are built locally rather than replayed from history — a
+  command's result card is never persisted at all, and a reclaimed-session notice is a broadcast —
+  so a re-hydration that folded yesterday's cached chat together with this morning's new rows had
+  nothing to match either one against and simply appended it after everything the re-hydration
+  brought back, however old it really was. `YESTERDAY` then rendered below `TODAY`'s messages
+  instead of above them. Both now keep the place their own timestamp says they belong, the same way
+  an answered approval card already did.
+
 ## [0.1.7] - 2026-09-23
 
 ### Added

@@ -41,11 +41,24 @@ const toolKeyOf = (item: TranscriptItem): string | undefined =>
  */
 const matchKeyOf = (item: TranscriptItem): string => `${item.kind}\n${itemMatchKey(item)}`
 
+/**
+ * Notice kinds this client mints itself and the gateway never writes as a row —
+ * see the `'command'` case of `NoticeKind` in `types.ts` and `session.reclaimed`
+ * (`reducer.ts`), which is a broadcast, not a persisted turn. A re-hydration has
+ * nothing to match either against, ever, no matter how long the client waits.
+ */
+const EPHEMERAL_NOTICE_KINDS: ReadonlySet<NoticeItem['noticeKind']> = new Set(['command', 'reclaimed'])
+
+const isEphemeralNotice = (item: TranscriptItem): boolean =>
+  item.kind === 'notice' && EPHEMERAL_NOTICE_KINDS.has(item.noticeKind)
+
 /** Items the backend never persists, so a re-hydration can never re-supply them. */
-const isEphemeral = (item: TranscriptItem): boolean => item.kind === 'approval' || item.kind === 'clarify'
+const isEphemeral = (item: TranscriptItem): boolean =>
+  item.kind === 'approval' || item.kind === 'clarify' || isEphemeralNotice(item)
 
 /**
- * A request the reader has already settled.
+ * Something the reader has already settled, as opposed to a question still
+ * open or a card still waiting on an answer.
  *
  * It is the difference between a question and a record of one, and the two
  * belong in different places. An OPEN request is being asked NOW: it stands at
@@ -59,9 +72,14 @@ const isEphemeral = (item: TranscriptItem): boolean => item.kind === 'approval' 
  * — and was appended BEHIND every row that hydration brought back, including
  * this morning's. `layoutRows` stamps a date wherever the day changes between
  * neighbours, so the reader got `TODAY`, yesterday's card, and `TODAY` again.
+ *
+ * A `command` or `reclaimed` notice is the same shape of problem with no "open"
+ * state to protect: a slash command's answer and a reclaimed-session notice are
+ * always a record of something that already happened, so they always belong
+ * here rather than in the plain `kept` bucket `placeByTimestamp` never sorts.
  */
 const isSettledRequest = (item: TranscriptItem): boolean =>
-  (item.kind === 'approval' || item.kind === 'clarify') && item.state !== 'open'
+  ((item.kind === 'approval' || item.kind === 'clarify') && item.state !== 'open') || isEphemeralNotice(item)
 
 /**
  * Put items that carry their own moment back into it, rather than at the end.
