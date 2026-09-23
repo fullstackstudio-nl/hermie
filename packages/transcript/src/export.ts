@@ -32,7 +32,7 @@
  * saved on a phone should carry that phone's idea of a clock and this package
  * has no business knowing what it is.
  */
-import type { TranscriptItem } from './types'
+import type { MessageAuthor, TranscriptItem } from './types'
 
 export interface TranscriptExportOptions {
   /** The bot's display name, as the header and its replies are labelled. */
@@ -49,6 +49,24 @@ export interface TranscriptExportOptions {
   formatTime?: (seconds: number) => string
   /** When the export was taken, for the header. Same formatter. */
   exportedAt?: number
+  /**
+   * HERM-83, D6 gate 1: only the canonical GROUP chat may put somebody else's
+   * name on a `user` row. Absent — every export before `author` existed —
+   * every `user` row stays `selfName`, exactly as today.
+   */
+  groupChat?: boolean
+  /**
+   * The reader's own identity, D3's own/foreign gate, compared against
+   * `item.author.id`. Absent is the safe default: `selfName` for every row.
+   */
+  ownAuthorId?: string
+  /**
+   * Names a foreign author — D4's rungs 2 and 3, or rung 1 when the host has
+   * one. This package cannot sanitise a name itself (see the chat kit's
+   * `fallbackSenderName`); a caller with no resolver leaves every `user` row
+   * `selfName` rather than printing a raw, untrusted id.
+   */
+  resolveSenderName?: (author: MessageAuthor) => string
 }
 
 export interface TranscriptExport {
@@ -89,6 +107,26 @@ function requestLine(item: Extract<TranscriptItem, { kind: 'approval' | 'clarify
   return `Question — ${questions.join('; ') || item.state}`
 }
 
+/**
+ * The name a `user` row is exported under, when it is somebody else's
+ * (HERM-83, D3/D6) — the same gate `attributedSenderName` in `preview.ts`
+ * applies, restated here because an export walks a plain item list rather
+ * than a `ChatState`. `undefined` for the reader's own row, an unattributed
+ * one, anywhere the caller has not said is the group chat, or a caller with
+ * no resolver — every one of those keeps today's `selfName`.
+ */
+function foreignSenderWho(author: MessageAuthor | undefined, options: TranscriptExportOptions): string | undefined {
+  if (!options.groupChat || !options.ownAuthorId || !options.resolveSenderName || !author) {
+    return undefined
+  }
+
+  if (author.id === options.ownAuthorId) {
+    return undefined
+  }
+
+  return options.resolveSenderName(author) || undefined
+}
+
 /** One line of a row: who spoke, and the body under it. `null` drops the row. */
 interface Entry {
   /** The speaker or the row's label. Empty for a row that is not speech. */
@@ -112,7 +150,7 @@ function entryFor(item: TranscriptItem, options: TranscriptExportOptions): Entry
             body: [item.text.trim(), ...(item.attachments ?? []).map(reference => `[${reference}]`)]
               .filter(Boolean)
               .join('\n'),
-            who: self
+            who: foreignSenderWho(item.author, options) || self
           }
         : null
 

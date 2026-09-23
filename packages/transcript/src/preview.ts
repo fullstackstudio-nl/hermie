@@ -29,7 +29,7 @@
  * had something happen in it, and a blank line says less than the switch does.
  */
 import { parseInjectedRow } from './injected'
-import type { ChatState, TranscriptItem } from './types'
+import type { ChatState, MessageAuthor, TranscriptItem } from './types'
 
 export interface ChatPreview {
   /** The words to show. Never carries a `[System: …]` or other wrapper. */
@@ -40,10 +40,41 @@ export interface ChatPreview {
    */
   fromHandle?: string
   /**
+   * Somebody else's turn in the group chat: the resolved name to lead the row
+   * with (HERM-83, D6). Absent for the reader's own turns, an unattributed
+   * row, anywhere the caller has not said is the group chat, and every kind
+   * but `user` — the same gate `TranscriptContext`/`UserBubble` draw a name
+   * from, restated here because a chat-list row has no bubble to ask.
+   */
+  senderName?: string
+  /**
    * The words are the machine's scaffolding rather than anybody speaking. A row
    * may draw them more quietly; it must not attribute them.
    */
   system: boolean
+}
+
+/**
+ * What a caller has to hand over before a `user` row can be attributed here.
+ *
+ * The engine holds `MessageAuthor` but not who is reading or how a name gets
+ * sanitised — both are the app's own state (`ChatRuntime`'s identity, the chat
+ * kit's `fallbackSenderName`) — so, exactly like `TranscriptContext.groupChat`
+ * / `ownAuthorId` / `resolveSenderName`, they arrive as options rather than
+ * being read from anywhere global. Every field absent is the safe default:
+ * every `user` row previews exactly as it did before `author` existed.
+ */
+export interface ChatPreviewOptions {
+  /** D6 gate 1: only the canonical GROUP chat leads a row with a sender. */
+  groupChat?: boolean
+  /** The reader's own identity — D3's own/foreign gate, against `author.id`. */
+  ownAuthorId?: string
+  /**
+   * Names a foreign author — D4's rungs 2 and 3, or rung 1 when the host has
+   * one. This package cannot sanitise a name itself; a caller with nothing to
+   * resolve leaves every row unattributed rather than showing a raw id.
+   */
+  resolveSenderName?: (author: MessageAuthor) => string
 }
 
 /**
@@ -59,13 +90,13 @@ export interface ChatPreview {
  * Read backwards: the answer is nearly always the last row, and a chat can be
  * thousands of them.
  */
-export function previewFromChat(state: ChatState | undefined): ChatPreview | null {
+export function previewFromChat(state: ChatState | undefined, options: ChatPreviewOptions = {}): ChatPreview | null {
   if (!state) {
     return null
   }
 
   for (let index = state.order.length - 1; index >= 0; index -= 1) {
-    const found = previewOfItem(state.items[state.order[index] ?? ''])
+    const found = previewOfItem(state.items[state.order[index] ?? ''], options)
 
     if (found) {
       return found
@@ -75,16 +106,43 @@ export function previewFromChat(state: ChatState | undefined): ChatPreview | nul
   return null
 }
 
-function previewOfItem(item: TranscriptItem | undefined): ChatPreview | null {
+/**
+ * The sender to lead a `user` row's preview with, or `undefined`.
+ *
+ * `undefined` for every case D6/D3 already rule out elsewhere: not the group
+ * chat, the reader's own identity not known, no author on the row, the row's
+ * own author, or a caller with no resolver at all.
+ */
+function attributedSenderName(author: MessageAuthor | undefined, options: ChatPreviewOptions): string | undefined {
+  if (!options.groupChat || !options.ownAuthorId || !options.resolveSenderName || !author) {
+    return undefined
+  }
+
+  if (author.id === options.ownAuthorId) {
+    return undefined
+  }
+
+  return options.resolveSenderName(author) || undefined
+}
+
+function previewOfItem(item: TranscriptItem | undefined, options: ChatPreviewOptions): ChatPreview | null {
   if (!item) {
     return null
   }
 
   switch (item.kind) {
-    case 'user':
+    case 'user': {
       // A placeholder for a turn whose author is not known yet says nothing, and
       // neither does a bubble that carried only an attachment.
-      return item.unknownAuthor ? null : text(item.text)
+      if (item.unknownAuthor) {
+        return null
+      }
+
+      const found = text(item.text)
+      const senderName = found ? attributedSenderName(item.author, options) : undefined
+
+      return found && senderName ? { ...found, senderName } : found
+    }
 
     case 'assistant':
       // An empty bubble is the turn in progress; there is nothing to preview
@@ -154,8 +212,12 @@ export function previewFromGatewayText(raw: unknown): ChatPreview | null {
  * before it. A stale-by-one-row preview of something somebody said beats a fresh
  * preview of a marker nobody wrote.
  */
-export function chatRowPreview(state: ChatState | undefined, gatewayPreview: unknown): ChatPreview | null {
-  return previewFromChat(state) ?? previewFromGatewayText(gatewayPreview)
+export function chatRowPreview(
+  state: ChatState | undefined,
+  gatewayPreview: unknown,
+  options: ChatPreviewOptions = {}
+): ChatPreview | null {
+  return previewFromChat(state, options) ?? previewFromGatewayText(gatewayPreview)
 }
 
 /**

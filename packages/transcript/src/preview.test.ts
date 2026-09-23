@@ -9,11 +9,11 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import { chatRowPreview, previewFromChat, previewFromGatewayText } from './preview'
+import { chatRowPreview, previewFromChat, previewFromGatewayText, type ChatPreviewOptions } from './preview'
 import { reconcile } from './reconcile'
 import { rowsToItems, type TranscriptRow } from './rows-to-items'
 import { cronBotChatText, delegationBatchText, modelSwitchMarkerText } from './__fixtures__/rows'
-import { type ChatState, createChatState } from './types'
+import { type ChatState, createChatState, type MessageAuthor } from './types'
 
 const chatOf = (rows: readonly TranscriptRow[]): ChatState =>
   reconcile(createChatState('researcher', 'stored-1', 'resolved-1'), rowsToItems(rows, 'rpc'))
@@ -158,5 +158,73 @@ describe('previewFromGatewayText on a row the gateway cut for the list', () => {
       text: '[the plan](https://example.test) is ready',
       system: false
     })
+  })
+})
+
+describe('who a group-chat row’s preview leads with (HERM-83, Task 5)', () => {
+  const ME = 'authentik:me'
+  const WRITER: MessageAuthor = { id: 'authentik:writer', name: 'Robin' }
+
+  // A stand-in for `fallbackSenderName` (chat-ui/format.ts): the engine
+  // cannot import the chat kit, so the resolver is always the caller's, the
+  // same shape `TranscriptContext.resolveSenderName` and `entryFor`
+  // (`export.ts`) already take.
+  const resolveSenderName = (author: MessageAuthor): string => author.name ?? author.id
+
+  const GROUP_OPTIONS: ChatPreviewOptions = { groupChat: true, ownAuthorId: ME, resolveSenderName }
+
+  const authoredRowOf = (author: MessageAuthor): TranscriptRow => ({
+    role: 'user',
+    row_id: 1,
+    text: 'draft is ready',
+    display_metadata: { author }
+  })
+
+  it('leads with the resolved name for somebody else’s row', () => {
+    const chat = chatOf([authoredRowOf(WRITER)])
+
+    expect(previewFromChat(chat, GROUP_OPTIONS)).toEqual({ text: 'draft is ready', senderName: 'Robin', system: false })
+  })
+
+  it('never names the reader’s own attributed row', () => {
+    const chat = chatOf([authoredRowOf({ id: ME, name: 'Me' })])
+
+    expect(previewFromChat(chat, GROUP_OPTIONS)?.senderName).toBeUndefined()
+  })
+
+  it('never names anybody outside the group chat, even with everything else known', () => {
+    const chat = chatOf([authoredRowOf(WRITER)])
+
+    expect(previewFromChat(chat, { ...GROUP_OPTIONS, groupChat: false })?.senderName).toBeUndefined()
+  })
+
+  it('never names anybody before the reader’s own identity is known', () => {
+    const chat = chatOf([authoredRowOf(WRITER)])
+
+    expect(previewFromChat(chat, { groupChat: true, resolveSenderName })?.senderName).toBeUndefined()
+  })
+
+  it('never names an unattributed row', () => {
+    const chat = chatOf([{ role: 'user', row_id: 1, text: 'no stamp on this one' }])
+
+    expect(previewFromChat(chat, GROUP_OPTIONS)?.senderName).toBeUndefined()
+  })
+
+  it('leaves every row unattributed when the caller has no resolver to name one with', () => {
+    const chat = chatOf([authoredRowOf(WRITER)])
+
+    expect(previewFromChat(chat, { groupChat: true, ownAuthorId: ME })?.senderName).toBeUndefined()
+  })
+
+  it('threads the same options through `chatRowPreview`', () => {
+    const chat = chatOf([authoredRowOf(WRITER)])
+
+    expect(chatRowPreview(chat, '', GROUP_OPTIONS)?.senderName).toBe('Robin')
+  })
+
+  it('leaves an absent options argument exactly as it behaved before `author` existed', () => {
+    const chat = chatOf([authoredRowOf(WRITER)])
+
+    expect(previewFromChat(chat)).toEqual({ text: 'draft is ready', system: false })
   })
 })

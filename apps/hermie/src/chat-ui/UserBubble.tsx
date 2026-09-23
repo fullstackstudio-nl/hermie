@@ -24,6 +24,7 @@
 import { View } from 'react-native'
 
 import { Markdown } from '../markdown'
+import { Text } from '../ui/primitives'
 import { useTheme } from '../ui/theme'
 import { AVATAR_SIZE } from '../ui/tokens'
 import { AttachmentGallery, type GalleryAttachment } from './AttachmentGallery'
@@ -242,7 +243,17 @@ export function UserBubble({
     the same left edge instead of stepping in and out as the avatar comes and
     goes. `Avatar` is `aria-hidden` by design (D7); the name is real text, in
     reading order ahead of the bubble, which is the whole of the attribution a
-    screen reader gets from this row.
+    screen reader gets from the first bubble of a run.
+
+    A bubble that CONTINUES the run draws no visible name — that is the point
+    of a run — but D7 does not let attribution go quiet with it: a reader who
+    landed here without seeing the one above (a screen reader jumping between
+    messages is exactly that reader) still has to be told once whose bubble
+    this is. `SenderNameForScreenReader` is that one announcement: present in
+    the same reading-order slot `SenderLabel` would occupy, visually collapsed
+    to a `1×1` box rather than drawn — see its own comment for why zero size
+    was wrong — so nothing is duplicated on screen: the visible name stays
+    suppressed, only its announcement is not.
   */
   return (
     <View style={{ flexDirection: 'row' }} testID={`user-sender-${item.id}`}>
@@ -259,7 +270,9 @@ export function UserBubble({
       </View>
 
       <View style={{ flex: 1 }}>
-        {grouped ? null : (
+        {grouped ? (
+          <SenderNameForScreenReader name={sender.name} testID={`user-sender-name-a11y-${item.id}`} />
+        ) : (
           <SenderLabel
             authorId={sender.authorId}
             name={sender.name}
@@ -271,5 +284,31 @@ export function UserBubble({
         {message}
       </View>
     </View>
+  )
+}
+
+/**
+ * The sender's name, for a screen reader only (HERM-83, D7).
+ *
+ * A real element with an explicit `accessibilityLabel` — not the bubble made
+ * into one opaque accessible unit. Verified against the rendered app
+ * (`docs/platform-notes.md` has the read-out): today a bubble is NOT one
+ * accessible element — its sender name, its body (including a link, which
+ * carries its own `accessibilityRole: 'link'`) and its clock each stand as
+ * their own stop. Folding the whole bubble into one label would read fine as
+ * prose but takes a link's separate stop away, so this adds an announcement
+ * instead of replacing the bubble's.
+ *
+ * Zero size does not reliably reach a screen reader — a fully transparent or
+ * zero-frame view is dropped by VoiceOver on iOS, and by some browser screen
+ * readers too. `height`/`width: 1` with `overflow: 'hidden'` is the ordinary
+ * "visually hidden" shape instead: a real, fully opaque node a click can
+ * never land on and an eye can never see, but one AT can still find.
+ */
+function SenderNameForScreenReader({ name, testID }: { name: string; testID?: string }) {
+  return (
+    <Text accessibilityLabel={name} style={{ height: 1, overflow: 'hidden', width: 1 }} testID={testID}>
+      {name}
+    </Text>
   )
 }

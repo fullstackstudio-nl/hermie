@@ -333,6 +333,14 @@ export function formatChatPreview(preview: ChatPreview | null): string {
     return clipInline(`🤖 @${preview.fromHandle}: ${plainTextPreview(preview.text)}`)
   }
 
+  if (preview.senderName) {
+    // Somebody else's turn in the group chat (HERM-83, D6) — already resolved
+    // and sanitised by whoever built this preview (`fallbackSenderName` or its
+    // caller), so it goes on as-is, with no bot emoji: this is a person, not a
+    // teammate handle.
+    return clipInline(`${preview.senderName}: ${plainTextPreview(preview.text)}`)
+  }
+
   const match = preview.text.match(/^Message from\s+(?:🤖\s*)?([^(:]+?)(?:\s*\(@([^)]+)\))?\s*:\s*([\s\S]*)$/)
 
   if (!match) {

@@ -12,6 +12,35 @@ by Hermie Web (ADR-0015), and it is the only one nobody installs. Sections dated
 that talk about a native macOS target described a platform that no longer exists — they were removed
 rather than rewritten, and git history has them.
 
+## A message bubble is many accessible elements, not one (2026-09-24)
+
+HERM-83, D7: attributing a group-chat bubble whose visible name is suppressed mid-run needed to know
+what a screen reader focuses when it lands on a bubble. Read the rendered app's own accessibility
+tree (Hermie Web against the fake gateway, Chrome's accessibility tab) rather than assume either
+answer.
+
+### A bubble is not one accessible element — its sender name, its body and its clock are three
+
+Nothing wraps `Bubble` in `accessible`, so each `Text` inside is its own stop: the sender's name (on
+the first bubble of a run), the message body — a link inside it keeps its own separate `link` role,
+reachable and activatable on its own — and the clock on the meta line. Folding the whole bubble into
+one labelled element would read as a tidy sentence but takes the link's own stop away with it, so
+`UserBubble` never does that; the mid-run announcement is an ADDITIONAL element, not a replacement
+for the bubble's existing ones.
+
+### A zero-size accessible element is not a safe way to hide one from sight
+
+The first attempt sized the mid-run sender name at `height: 0, opacity: 0, width: 0`. Chrome's own
+accessibility tree still listed it — checked by reading it, not assumed — but that is Chrome's tree,
+not a real screen reader's, and it is not the platform this app ships to first: UIKit is documented
+not to expose a fully transparent or zero-frame view to VoiceOver, and at least some browser screen
+readers drop one too. The fix is the ordinary "visually hidden" shape instead — a real, fully opaque
+`1×1` box with `overflow: 'hidden'` — re-checked the same way in Chrome's tree, still present. **Not
+verified against VoiceOver on an iOS simulator or a device** — this app has no prebuilt native iOS
+project in every checkout, and standing one up (`expo prebuild`, CocoaPods, a full Xcode build) is
+disproportionate to one style rule; if a build is ever cheaply at hand, checking this shape against
+real VoiceOver is the thing this note is missing.
+
 ## Settings navigation (2026-09-23)
 
 Settings is a native stack over a category list now (HERM-75/101/102/105/108), and every non-chat

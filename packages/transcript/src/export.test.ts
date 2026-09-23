@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { exportTranscript, transcriptFileName } from './export'
-import type { TranscriptItem } from './types'
+import type { MessageAuthor, TranscriptItem } from './types'
 
 let seq = 0
 
@@ -168,6 +168,72 @@ describe('serializing a conversation', () => {
 
     expect(markdown).toContain('_Exported 01:00_')
     expect(text).toContain('Exported 01:00')
+  })
+})
+
+describe('who a `user` row is exported under (HERM-83, Task 5)', () => {
+  const ME = 'authentik:me'
+  const WRITER: MessageAuthor = { id: 'authentik:writer', name: 'Robin' }
+  const RESEARCHER_AUTHOR: MessageAuthor = { id: 'authentik:researcher-person', name: 'Sam' }
+
+  // A stand-in for `fallbackSenderName` (chat-ui/format.ts): this package
+  // cannot import the chat kit, so the resolver is always the caller's — the
+  // same shape `TranscriptContext.resolveSenderName` and `preview.ts`'s
+  // `ChatPreviewOptions.resolveSenderName` already take.
+  const resolveSenderName = (author: MessageAuthor): string => author.name ?? author.id
+
+  const GROUP_OPTIONS = { ...OPTIONS, groupChat: true, ownAuthorId: ME, resolveSenderName }
+
+  it('carries both names when two people share the group chat', () => {
+    const items: TranscriptItem[] = [
+      { ...base(60), author: WRITER, kind: 'user', text: 'Draft the summary.' },
+      { ...base(120), author: RESEARCHER_AUTHOR, kind: 'user', text: 'Already on it.' }
+    ]
+
+    const { markdown, text } = exportTranscript(items, GROUP_OPTIONS)
+
+    expect(markdown).toContain('**Robin**')
+    expect(markdown).toContain('Draft the summary.')
+    expect(markdown).toContain('**Sam**')
+    expect(markdown).toContain('Already on it.')
+    expect(text).toContain('Robin:')
+    expect(text).toContain('Sam:')
+  })
+
+  it('keeps the reader’s own attributed row under `selfName`', () => {
+    const items: TranscriptItem[] = [{ ...base(60), author: { id: ME, name: 'Me' }, kind: 'user', text: 'ship it' }]
+
+    expect(exportTranscript(items, GROUP_OPTIONS).markdown).toContain('**You**')
+  })
+
+  it('keeps an unattributed row under `selfName`, even in the group chat', () => {
+    const items: TranscriptItem[] = [{ ...base(60), kind: 'user', text: 'from before the stamp existed' }]
+
+    expect(exportTranscript(items, GROUP_OPTIONS).markdown).toContain('**You**')
+  })
+
+  it('never names anybody outside the group chat, even with everything else known', () => {
+    const items: TranscriptItem[] = [{ ...base(60), author: WRITER, kind: 'user', text: 'Draft the summary.' }]
+
+    const { markdown } = exportTranscript(items, { ...GROUP_OPTIONS, groupChat: false })
+
+    expect(markdown).not.toContain('**Robin**')
+    expect(markdown).toContain('**You**')
+  })
+
+  it('leaves every row under `selfName` when the caller has no resolver to name one with', () => {
+    const items: TranscriptItem[] = [{ ...base(60), author: WRITER, kind: 'user', text: 'Draft the summary.' }]
+
+    const { markdown } = exportTranscript(items, { ...OPTIONS, groupChat: true, ownAuthorId: ME })
+
+    expect(markdown).not.toContain('**Robin**')
+    expect(markdown).toContain('**You**')
+  })
+
+  it('exports exactly as before when the caller passes none of the new options', () => {
+    const items: TranscriptItem[] = [{ ...base(60), author: WRITER, kind: 'user', text: 'Draft the summary.' }]
+
+    expect(exportTranscript(items, OPTIONS).markdown).toContain('**You**')
   })
 })
 

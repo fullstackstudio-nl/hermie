@@ -15,11 +15,12 @@
  * runs twice for that, which is a backwards walk that stops at the first message
  * — cheaper than the render it avoids.
  */
-import { chatRowPreview } from '@hermie/transcript'
+import { chatRowPreview, type ChatPreviewOptions } from '@hermie/transcript'
 import { useMemo } from 'react'
 
-import { formatChatPreview } from '../../chat-ui'
+import { fallbackSenderName, formatChatPreview } from '../../chat-ui'
 import { useChatsStore } from '../../store/chats'
+import { useDeviceContextStore } from '../../store/device-context'
 
 export interface RowPreview {
   text: string
@@ -27,9 +28,31 @@ export interface RowPreview {
   system: boolean
 }
 
+/**
+ * This hook is only ever asked for the row a BOT owns — `state.chats[botName]`,
+ * keyed by the bare bot name, which is the canonical GROUP chat's state; a
+ * personal sub-chat lives under `bot#<storedId>` and its list row reads the
+ * gateway's own `preview` string directly (`ConversationListView.tsx`), never
+ * this hook. So `groupChat: true` is simply what is true of every call here —
+ * not a guess — and it is still spelled out as an explicit option rather than
+ * assumed, exactly like `TranscriptContext.groupChat` (HERM-83, D6, gate 1).
+ */
+const GROUP_CHAT_OPTIONS = { groupChat: true } as const
+
 export function useRowPreview(botName: string, gatewayPreview: string): RowPreview {
-  const text = useChatsStore(state => formatChatPreview(chatRowPreview(state.chats[botName], gatewayPreview)))
-  const system = useChatsStore(state => chatRowPreview(state.chats[botName], gatewayPreview)?.system === true)
+  // The reader's own identity — D3's own/foreign gate — the same source
+  // `ChatScreen` reads for the transcript itself.
+  const ownAuthorId = useDeviceContextStore(state => state.userId) || undefined
+  const options: ChatPreviewOptions = {
+    ...GROUP_CHAT_OPTIONS,
+    ownAuthorId,
+    // D4's rungs 2 and 3 — the same resolver a bubble falls back to when the
+    // host has nothing beyond the row itself (HERM-83 Task 4 is not built).
+    resolveSenderName: fallbackSenderName
+  }
+
+  const text = useChatsStore(state => formatChatPreview(chatRowPreview(state.chats[botName], gatewayPreview, options)))
+  const system = useChatsStore(state => chatRowPreview(state.chats[botName], gatewayPreview, options)?.system === true)
 
   return useMemo(() => ({ text, system }), [text, system])
 }

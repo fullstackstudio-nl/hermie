@@ -37,6 +37,7 @@ import {
   ChatHeader,
   chatStrings,
   Composer,
+  fallbackSenderName,
   formatClock,
   type ComposerAttachment,
   type PickerOption,
@@ -1795,6 +1796,12 @@ function Conversation({
           // time, and the transcript package has no business knowing what that
           // is.
           formatTime: seconds => `${new Date(seconds * 1000).toLocaleDateString()} ${formatClock(seconds)}`.trim(),
+          // HERM-83, D6/D3: the same gate and the same rungs-2/3 resolver the
+          // transcript itself draws a name from — the export has no bubble to
+          // ask, so it is handed the identical facts.
+          groupChat,
+          ownAuthorId,
+          resolveSenderName: fallbackSenderName,
           selfName: chatStrings.export.self
         }
       )
@@ -1809,7 +1816,7 @@ function Conversation({
         }
       )
     },
-    [chat.items, display]
+    [chat.items, display, groupChat, ownAuthorId]
   )
 
   /**

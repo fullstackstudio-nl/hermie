@@ -28,6 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   was added. A message the gateway did not attribute — sent before this shipped, or from
   the Hermes dashboard or the TUI — keeps drawing exactly as it always has: nobody is named on a guess.
   Shown only in the shared Bot Chat; a personal conversation, a branch and a retired one are unchanged.
+- **The same name reaches the chat list, an exported transcript and a screen reader.** The shared Bot
+  Chat's row in the chat list now leads its preview with the sender — `Robin: draft is ready` — the
+  same way an inbound teammate DM already prefixed a handle; a `.md` or `.txt` export of the
+  conversation puts every attributed message under the sender's own name instead of the reader's; and
+  a bubble whose visible name is suppressed because it continues a run still carries the sender in its
+  accessibility label, once, so a screen reader is never left to guess whose turn it is reading. All
+  three read the identical gate the bubble itself does — the shared Bot Chat, an attributed row,
+  somebody other than the reader — so a personal conversation, a branch, a retired one, the reader's
+  own turns and an unattributed row are unchanged everywhere this shows up.
 
 ### Changed
 
