@@ -29,7 +29,7 @@ import {
   type ContrastRow
 } from '../apps/hermie/src/ui/contrast'
 import { resolveThemeFace, THEME_PRESET_ORDER } from '../apps/hermie/src/ui/themes'
-import { ACCENT_ORDER, ACCENTS, lightColors, type Scheme } from '../apps/hermie/src/ui/tokens'
+import { ACCENT_ORDER, ACCENTS, SENDER_INK_ORDER, lightColors, type Scheme } from '../apps/hermie/src/ui/tokens'
 
 function themeRows(): ContrastRow[] {
   const rows: ContrastRow[] = []
@@ -62,16 +62,16 @@ function accentRows(): ContrastRow[] {
 }
 
 /**
- * The eleven sender inks (HERM-83, D5), on the surfaces a group-chat name
- * actually sits on: the panel, the three opaque elevation rungs a bubble's
- * name label can be drawn over, and the sunk tint. Every preset, both
- * schemes, floor 4.5 — the same floor as any other text.
+ * The sender inks (HERM-83, D5) — `SENDER_INK_ORDER`, which is `ACCENT_ORDER`
+ * minus `default`, `red` and `green` (see `tokens.ts`) — on the surfaces a
+ * group-chat name actually sits on: the panel, the three opaque elevation
+ * rungs a bubble's name label can be drawn over, and the sunk tint. Every
+ * preset, both schemes, floor 4.5 — the same floor as any other text.
  *
- * `default` is included even though the picker never assigns it to a person
- * (D5 reserves it for the chat's own accent): the eleven were measured by
- * hand as a set in the design pass, and gating all eleven is what turns that
- * measurement into something `contrast:check` actually enforces rather than
- * ten of the eleven plus a comment.
+ * Only the inks a sender can actually be given are measured here. `default`,
+ * `red` and `green` are never handed to a person, so a row for them would not
+ * be gating anything a sender's name can be drawn in — it would just be
+ * `accentRows` a second time.
  */
 const SENDER_SURFACES = ['panel', 'elevation e1', 'elevation e2', 'elevation e3', 'sunk tint']
 
@@ -85,7 +85,7 @@ function senderInkRows(): ContrastRow[] {
         SENDER_SURFACES.includes(surface.name)
       )
 
-      for (const accent of ACCENT_ORDER) {
+      for (const accent of SENDER_INK_ORDER) {
         const ink = ACCENTS[accent].text[scheme]
 
         for (const surface of surfaces) {

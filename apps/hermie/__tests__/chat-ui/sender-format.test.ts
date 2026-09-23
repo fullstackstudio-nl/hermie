@@ -68,11 +68,20 @@ describe('senderInk', () => {
     }
   })
 
-  it('only ever picks from the ten non-default accent inks', () => {
+  it('only ever picks from `SENDER_INK_ORDER`', () => {
     const possible = new Set(SENDER_INK_ORDER.map(name => ACCENTS[name].text.light))
 
     for (const id of ['alex', 'robin', 'sam', 'jordan', 'writer-review']) {
       expect(possible.has(senderInk(id, 'light'))).toBe(true)
+    }
+  })
+
+  it('never lands on `red` or `green` — those are `danger` and `ok`, not a name colour', () => {
+    for (const id of ['alex', 'robin', 'sam', 'jordan', 'writer-review', 'authentik:1', 'authentik:2', 'a', 'b', 'c']) {
+      expect(senderInk(id, 'light')).not.toBe(ACCENTS.red.text.light)
+      expect(senderInk(id, 'light')).not.toBe(ACCENTS.green.text.light)
+      expect(senderInk(id, 'dark')).not.toBe(ACCENTS.red.text.dark)
+      expect(senderInk(id, 'dark')).not.toBe(ACCENTS.green.text.dark)
     }
   })
 })

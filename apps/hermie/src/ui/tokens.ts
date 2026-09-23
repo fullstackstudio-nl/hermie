@@ -355,11 +355,23 @@ export const ACCENT_ORDER: readonly AccentName[] = [
 ]
 
 /**
- * The ten colours a group chat may ink a SENDER's name in — `ACCENT_ORDER`
- * minus `default`, which stays reserved for the chat's own outgoing bubble so
- * a teammate's ink is never mistaken for the chat's own accent (HERM-83, D5).
+ * The colours a group chat may ink a SENDER's name in — `ACCENT_ORDER` minus
+ * `default`, `red` and `green` (HERM-83, D5).
+ *
+ * `default` stays reserved for the chat's own outgoing bubble, so a
+ * teammate's ink is never mistaken for the chat's own accent. `red` and
+ * `green` are excluded for the same reason `category-look.ts` excludes them
+ * from `CATEGORY_TINTS`: in this app they are not colours, they are `danger`
+ * and `ok`. A name inked in red reads as a warning about that person, not as
+ * that person's colour, and that is true of a sender's name exactly as it is
+ * true of a category mark. `lime` stays in — here it is a text ink read
+ * against glass, not a white glyph painted on a lime fill, so the contrast
+ * gate that rules it out for `CATEGORY_TINTS` has nothing to say against it
+ * here, and `scripts/check-contrast.ts` measures it like any other sender ink.
  */
-export const SENDER_INK_ORDER: readonly AccentName[] = ACCENT_ORDER.filter(name => name !== 'default')
+export const SENDER_INK_ORDER: readonly AccentName[] = ACCENT_ORDER.filter(
+  name => name !== 'default' && name !== 'red' && name !== 'green'
+)
 
 /** The soft tint a chat's colour lays under a selected row or an icon well. */
 export function accentSoft(name: AccentName, scheme: Scheme): string {

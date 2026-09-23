@@ -584,16 +584,25 @@ document already describes in §6.1. The avatar's gutter is reserved for the WHO
 run, drawn or not, so every bubble in it keeps one left edge instead of stepping in
 and out as the avatar comes and goes.
 
-**Two palettes, kept apart on purpose.** The name is inked from `ACCENT_ORDER` minus
-`default` — ten colours, so a person's ink is never mistaken for the chat's own
-accent — indexed by a hash of their IDENTITY, never their display name: a rename
-must not recolour a conversation, and two people who both call themselves the same
-thing must not merge. The avatar circle keeps its own four-tint palette (§4,
-"inline avatar 26") unchanged; only what picks a slot from it moves, from the name to
-the same identity. **No new colour was added for either.** The eleven sender inks
-were already in `tokens.ts`; `scripts/check-contrast.ts` now measures all eleven
-against the panel, elevation e1/e2/e3 and the sunk tint, on every preset in both
-schemes, floor 4.5 — worst case measured 4.94 : 1.
+**Two palettes, kept apart on purpose.** The name is inked from `SENDER_INK_ORDER`
+in `tokens.ts` — `ACCENT_ORDER` minus `default`, `red` and `green` — indexed by a
+hash of their IDENTITY, never their display name: a rename must not recolour a
+conversation, and two people who both call themselves the same thing must not
+merge. `default` stays out because it is the chat's own accent; `red` and `green`
+stay out because in this app they are not colours, they are `danger` and `ok` —
+the same call Settings' category marks make for `CATEGORY_TINTS`
+(`features/settings/navigation/category-look.ts`), and for the same reason: a
+person's name in red reads as a warning about that person, not as their colour.
+`lime` stays in — it is a text ink read against glass here, never a white glyph on
+a lime fill, so the contrast floor that rules it out for a category mark's well has
+nothing against it as a sender ink. That leaves eight: `indigo`, `violet`,
+`magenta`, `orange`, `teal`, `graphite`, `slate`, `lime`. The avatar circle keeps
+its own four-tint palette (§4, "inline avatar 26") unchanged; only what picks a
+slot from it moves, from the name to the same identity. **No new colour was added
+for either.** The eight sender inks were already in `tokens.ts`;
+`scripts/check-contrast.ts` measures exactly those eight against the panel,
+elevation e1/e2/e3 and the sunk tint, on every preset in both schemes, floor 4.5 —
+worst case measured 4.94 : 1.
 
 **The name is real text, not a caption on a picture.** It sits ahead of the bubble in
 reading order, so a screen reader says the name and then the message; the avatar is

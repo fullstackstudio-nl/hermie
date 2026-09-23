@@ -244,8 +244,9 @@ export function fallbackSenderName(author: MessageAuthor): string {
  * The colour a sender's name and avatar circle are keyed to — deterministic
  * from their IDENTITY, never their name (D5): a rename must not recolour a
  * conversation, and two people who both call themselves the same thing must
- * not merge. `ACCENT_ORDER` minus `default` is ten colours, so a teammate's
- * ink is never mistaken for the chat's own accent.
+ * not merge. Picked from `SENDER_INK_ORDER`, so a teammate's ink is never the
+ * chat's own accent and never one of the two status hues, `red` and `green`
+ * (see `tokens.ts`).
  */
 export function senderInk(authorId: string, scheme: Scheme): string {
   const name = SENDER_INK_ORDER[tintIndex(authorId, SENDER_INK_ORDER.length)] ?? SENDER_INK_ORDER[0] ?? 'indigo'

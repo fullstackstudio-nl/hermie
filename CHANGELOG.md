@@ -13,10 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   incoming bubble — their name over its first line in their own colour, their avatar beside it — the
   way any messenger shows a group, instead of the reader's own silhouette it drew before regardless
   of who actually sent it. The name is inked from the sender's identity, never their display name, so
-  a rename cannot recolour a conversation and two people who share a name cannot merge; it uses ten
-  colours already in `ui/tokens.ts`, and `scripts/check-contrast.ts` now measures all eleven sender
-  inks against the panel, every elevation rung and the sunk tint, in every theme and both schemes — no
-  new colour was added. A message the gateway did not attribute — sent before this shipped, or from
+  a rename cannot recolour a conversation and two people who share a name cannot merge; it uses eight
+  colours already in `ui/tokens.ts` — `red` and `green` are left out because they are `danger` and
+  `ok`, not a name colour — and `scripts/check-contrast.ts` measures those eight sender inks against
+  the panel, every elevation rung and the sunk tint, in every theme and both schemes — no new colour
+  was added. A message the gateway did not attribute — sent before this shipped, or from
   the Hermes dashboard or the TUI — keeps drawing exactly as it always has: nobody is named on a guess.
   Shown only in the shared Bot Chat; a personal conversation, a branch and a retired one are unchanged.
 
