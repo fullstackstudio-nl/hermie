@@ -485,13 +485,14 @@ say stays between you and the machine you run them on.
 
 ## Platforms
 
-| Platform              | State                                                                                                                                                                                                                           |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| iOS 15.1+             | The primary target                                                                                                                                                                                                              |
-| iPadOS                | The same build, with a sidebar layout on wide windows — and the sidebar hides                                                                                                                                                   |
-| Android 7.0+ (API 24) | Builds and runs, driven end to end on an emulator; a hardware test on a phone and a tablet is scheduled (2026-09-22). The signed release path runs in CI — the upload key exists and CI builds an APK and an app bundle with it |
-| macOS, Apple Silicon  | The same build again, as "Designed for iPad" — a window with the sidebar layout                                                                                                                                                 |
-| A browser             | Served by Hermie Web, a small process next to the gateway — see **Web** below                                                                                                                                                   |
+| Platform                                                 | State                                                                                                                                                                                                                           |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| iOS 15.1+                                                | The primary target                                                                                                                                                                                                              |
+| iPadOS                                                   | The same build, with a sidebar layout on wide windows — and the sidebar hides                                                                                                                                                   |
+| Android 7.0+ (API 24)                                    | Builds and runs, driven end to end on an emulator; a hardware test on a phone and a tablet is scheduled (2026-09-22). The signed release path runs in CI — the upload key exists and CI builds an APK and an app bundle with it |
+| macOS, Apple Silicon                                     | The same build again, as "Designed for iPad" — a window with the sidebar layout                                                                                                                                                 |
+| A browser                                                | Served by Hermie Web, a small process next to the gateway — see **Web** below                                                                                                                                                   |
+| Desktop (macOS, Intel and Apple Silicon, Windows, Linux) | Coming soon — a native app built on Hermie Web, with real text selection                                                                                                                                                        |
 
 **On a wide window the chat list is a sidebar, and the sidebar can be put away.**
 The chat header's round button hides it, ⌘⇧S brings it back, and the Mac's Chats
