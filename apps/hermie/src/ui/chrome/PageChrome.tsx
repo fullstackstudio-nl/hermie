@@ -47,6 +47,24 @@ export interface PageChromeProps {
   /** A quieter second line under the title, centred with it. */
   subtitle?: string
   /**
+   * The page draws its own heading, so the bar must not draw a second one.
+   *
+   * One caller: a Settings CATEGORY page, whose header card carries the name,
+   * the mark and the sentence (`CategoryHeaderCard`). A centred title in the bar
+   * directly above that card is the same word twice, and the owner's reference
+   * has no title bar over the card at all.
+   *
+   * `title` is still required and still given: it is what a caller passes to
+   * `PageFrame`, what the stack reads for a child's back label, and what a
+   * screen reader would get if this ever regressed to drawing it. Hiding it is a
+   * decision about the BAR, not about whether the page has a name.
+   *
+   * With nothing else in the row — no back on the stack's bottom page, no
+   * trailing action — the bar draws no glass at all and measures zero, so the
+   * card starts at the top of the pane instead of under an empty strip.
+   */
+  titleHidden?: boolean
+  /**
    * Absent on a tab root, which has nowhere to go back to. Present everywhere
    * else, with `label` the title of the page one level up — derived by the
    * caller (`useStackBack` for a routed page), never typed by hand, so it
@@ -98,12 +116,16 @@ export function PageChrome({
   subtitle,
   back,
   trailing,
+  titleHidden = false,
   testID = 'page-chrome',
   onHeightChange
 }: PageChromeProps) {
   const theme = useTheme()
   const [height, setHeight] = useState(0)
   const report = useContext(PageChromeReportContext)
+  // Nothing left to put in the row. See `titleHidden`: a glass strip holding one
+  // invisible spacer is furniture, and this is a page that asked for none.
+  const empty = titleHidden && !back && !trailing
 
   // A page never wires these by hand. `enabled` follows `back` rather than a
   // constant `true`, so a tab root — which passes no `back` at all — takes
@@ -132,41 +154,42 @@ export function PageChrome({
         style={{ left: 0, position: 'absolute', right: 0, top: 0 }}
         testID={testID}
       >
-        <GlassSurface
-          contentStyle={{
-            alignItems: 'center',
-            flexDirection: 'row',
-            gap: theme.space.sm,
-            paddingHorizontal: theme.space.md,
-            paddingVertical: theme.space.sm
-          }}
-          radius={0}
-          shadow="none"
-          testID={`${testID}-surface`}
-          variant="float"
-        >
-          {/*
+        {empty ? null : (
+          <GlassSurface
+            contentStyle={{
+              alignItems: 'center',
+              flexDirection: 'row',
+              gap: theme.space.sm,
+              paddingHorizontal: theme.space.md,
+              paddingVertical: theme.space.sm
+            }}
+            radius={0}
+            shadow="none"
+            testID={`${testID}-surface`}
+            variant="float"
+          >
+            {/*
             The leading slot. Exactly one back control when `back` is given,
             nothing at all otherwise — a tab root draws no leading slot rather
             than an empty one, which is the whole of HERM-105's "no back on a
             root" without a special case per shell.
           */}
-          {back ? (
-            <Pressable
-              accessibilityLabel={back.label}
-              accessibilityRole="button"
-              hitSlop={TAP_SLOP}
-              onPress={back.onPress}
-              style={({ pressed }) => ({
-                alignItems: 'center',
-                flexDirection: 'row',
-                flexShrink: 0,
-                gap: theme.space.xs,
-                opacity: pressed ? 0.6 : 1
-              })}
-              testID="page-back"
-            >
-              {/*
+            {back ? (
+              <Pressable
+                accessibilityLabel={back.label}
+                accessibilityRole="button"
+                hitSlop={TAP_SLOP}
+                onPress={back.onPress}
+                style={({ pressed }) => ({
+                  alignItems: 'center',
+                  flexDirection: 'row',
+                  flexShrink: 0,
+                  gap: theme.space.xs,
+                  opacity: pressed ? 0.6 : 1
+                })}
+                testID="page-back"
+              >
+                {/*
                 The same glass circle `RoundIconButton` draws — a `GlassSurface`
                 that may merge with a neighbour, `opaque` so a bubble passing
                 underneath cannot read through the mark. It is not the
@@ -174,28 +197,28 @@ export function PageChrome({
                 `Pressable`, and nesting one inside this row's `Pressable` would
                 make "one pressable, one testID" two overlapping ones instead.
               */}
-              <GlassSurface
-                interactive
-                opaque
-                radius={CONTROL_SIZE.regular / 2}
-                shadow="card"
-                style={{ height: CONTROL_SIZE.regular, width: CONTROL_SIZE.regular }}
-                variant="control"
-              >
-                <Icon
-                  color={theme.colors.accentText}
-                  name="chevronLeft"
-                  size={ICON_SIZE.control}
-                  slot={CONTROL_SIZE.regular}
-                />
-              </GlassSurface>
-              <Text color="accentText" numberOfLines={1} style={{ flexShrink: 1 }} variant="body">
-                {back.label}
-              </Text>
-            </Pressable>
-          ) : null}
+                <GlassSurface
+                  interactive
+                  opaque
+                  radius={CONTROL_SIZE.regular / 2}
+                  shadow="card"
+                  style={{ height: CONTROL_SIZE.regular, width: CONTROL_SIZE.regular }}
+                  variant="control"
+                >
+                  <Icon
+                    color={theme.colors.accentText}
+                    name="chevronLeft"
+                    size={ICON_SIZE.control}
+                    slot={CONTROL_SIZE.regular}
+                  />
+                </GlassSurface>
+                <Text color="accentText" numberOfLines={1} style={{ flexShrink: 1 }} variant="body">
+                  {back.label}
+                </Text>
+              </Pressable>
+            ) : null}
 
-          {/*
+            {/*
             The title, centred. Not measured against the leading and trailing
             slots the way the chat pill is — those are a fixed size there and a
             variable one here (a back label is as long as the previous page's
@@ -204,25 +227,28 @@ export function PageChrome({
             nothing sits directly across from the way the chat pill's avatar
             does.
           */}
-          <View style={{ flex: 1, gap: theme.space.xxs }}>
-            <Text
-              accessibilityRole="header"
-              aria-level={1}
-              numberOfLines={1}
-              style={{ textAlign: 'center' }}
-              variant="chatName"
-            >
-              {title}
-            </Text>
-            {subtitle ? (
-              <Text color="textMuted" numberOfLines={1} style={{ textAlign: 'center' }} variant="meta">
-                {subtitle}
-              </Text>
-            ) : null}
-          </View>
+            <View style={{ flex: 1, gap: theme.space.xxs }}>
+              {titleHidden ? null : (
+                <Text
+                  accessibilityRole="header"
+                  aria-level={1}
+                  numberOfLines={1}
+                  style={{ textAlign: 'center' }}
+                  variant="chatName"
+                >
+                  {title}
+                </Text>
+              )}
+              {subtitle ? (
+                <Text color="textMuted" numberOfLines={1} style={{ textAlign: 'center' }} variant="meta">
+                  {subtitle}
+                </Text>
+              ) : null}
+            </View>
 
-          {trailing ? <View style={{ flexShrink: 0 }}>{trailing}</View> : null}
-        </GlassSurface>
+            {trailing ? <View style={{ flexShrink: 0 }}>{trailing}</View> : null}
+          </GlassSurface>
+        )}
       </View>
     </PageChromeHeightContext.Provider>
   )

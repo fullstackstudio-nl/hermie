@@ -757,6 +757,21 @@ export const CONTROL_SIZE = { regular: 38, compact: 40 } as const
 
 export const AVATAR_SIZE = { list: 48, header: 38, inline: 26 } as const
 
+/**
+ * The rounded square a Settings category's mark sits in.
+ *
+ * Two sizes, because the mark does two jobs: `row` is the one in a list row,
+ * where it has to be findable while the eye runs down twelve labels, and
+ * `header` is the same mark on the card that opens the category's own page.
+ *
+ * The radii that go with them are `radii.md` and `radii.thumb` — 8 on 28 and 14
+ * on 52, which is the same corner at both sizes rather than two different
+ * squares. That pairing is the reason the numbers live together here instead of
+ * in the component: a well whose corner does not scale with it reads as a
+ * different shape per page.
+ */
+export const CATEGORY_MARK = { row: 28, header: 52 } as const
+
 /** List row height: 74 on the wide layout, 72 on phone. */
 export const ROW_HEIGHT = { regular: 74, compact: 72 } as const
 

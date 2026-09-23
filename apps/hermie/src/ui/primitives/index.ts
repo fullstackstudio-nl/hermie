@@ -12,6 +12,7 @@ export {
 } from './InsetGroup'
 export { RoundIconButton, type RoundIconButtonProps } from './RoundIconButton'
 export { Screen, type ScreenProps } from './Screen'
+export { SearchField, type SearchFieldProps } from './SearchField'
 export { SecretField, type SecretFieldProps } from './SecretField'
 export { Text, type TextProps } from './Text'
 export { TextField, type TextFieldProps } from './TextField'

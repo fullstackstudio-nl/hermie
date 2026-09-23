@@ -149,6 +149,23 @@ export function surfacesFor(scheme: Scheme, elevation: ElevationScale, backgroun
     out.push({ name: variant, background: over(glass[variant].fill, floor) })
   }
 
+  /*
+    The two ROW surfaces, which are a wash over a rung rather than over the floor.
+
+    `row` is what a pointer leaves under itself and `rowSelected` is the filled
+    pill under the open one — the chat list's selected bot, and since the Settings
+    skin the selected category in the sidebar. Both carry a label and a line of
+    state, and neither was in this table: a reader could lose the name of the row
+    they are standing on and every ratio here would still be green.
+
+    Untinted on purpose. `GlassSurface` takes a `tint` for a CHAT's own colour, and
+    what that composites to depends on a colour the reader picked, which is not a
+    property of the theme and cannot be floored here. The Settings sidebar
+    therefore draws its selected row without one — see `CategoryRow`.
+  */
+  out.push({ name: 'row', background: over(glass.row.fill, over(elevation.e2, floor)) })
+  out.push({ name: 'row selected', background: over(glass.rowSelected.fill, over(elevation.e2s, floor)) })
+
   for (const variant of ['in', 'inRead', 'dm', 'dmRead'] as BubbleVariant[]) {
     const recipe = bubbles[variant]
 
@@ -162,7 +179,8 @@ export function surfacesFor(scheme: Scheme, elevation: ElevationScale, backgroun
 
     `elevation.e3c` is the inset card every Settings row sits on, the tool card,
     the error card and the licence list; `e1` and `e2` are the navigator's own
-    background and a pressed row. None of them composite a wash over a wallpaper —
+    background and a pressed row, and `e2s` is what a selected row falls back to
+    where there is no blur. None of them composite a wash over a wallpaper —
     they are a flat colour — so nothing in the glass loop reaches them, and a role
     could be unreadable on an entire screen with every row here green. That is the
     surface the owner's Graphite report was actually about.
@@ -170,7 +188,7 @@ export function surfacesFor(scheme: Scheme, elevation: ElevationScale, backgroun
     `e0` is the wallpaper rung and is deliberately absent: `Screen` paints it only
     where there is no panel, and the ink on it comes off the panel above.
   */
-  for (const rung of ['e1', 'e2', 'e3', 'e3c'] as const) {
+  for (const rung of ['e1', 'e2', 'e2s', 'e3', 'e3c'] as const) {
     out.push({ name: `elevation ${rung}`, background: over(elevation[rung], floor) })
   }
 
