@@ -40,6 +40,12 @@ export function Page() {
 
   return (
     <SettingsPage route="Capabilities">
+      {/*
+        Two groups where there was one, and the line between them is what each row
+        IS. The first makes a bot; the four under `capabilityReach` are places a
+        bot can be sent — and a card holding both cannot carry a header or a footer
+        that is true of all five rows.
+      */}
       <InsetGroup header={profileStrings.settings.group}>
         <InsetButtonRow
           detail={profileStrings.settings.newBotHint}
@@ -47,6 +53,9 @@ export function Page() {
           testID="settings-new-bot"
           title={profileStrings.settings.newBot}
         />
+      </InsetGroup>
+
+      <InsetGroup header={strings.settings.capabilityReach}>
         <InsetButtonRow
           detail={skillStrings.settings.hint}
           onPress={() => navigation.navigate('Skills')}

@@ -72,6 +72,21 @@ export function settingsTitle(name: string): string {
 }
 
 /**
+ * Every route UNDER `name`, at any depth, in registry order.
+ *
+ * What the sidebar's search reads. A reader looking for the licences types
+ * "licence", and the word is on a page two levels down from About — so a search
+ * over the twelve category names alone would answer nothing while the thing sat
+ * right there in the registry. Derived from the same `parent` links the back
+ * walk uses, so a route added anywhere is searchable the moment it exists.
+ */
+export function settingsDescendants(name: SettingsRouteName): SettingsRouteName[] {
+  return (Object.keys(SETTINGS_ROUTE_META) as SettingsRouteName[]).filter(
+    route => route !== name && settingsChain(route, { withRoot: true }).includes(name)
+  )
+}
+
+/**
  * The routes from the top of the stack down to `name`, top first.
  *
  * `Root` is left out when the stack has no root of its own — the split layout,

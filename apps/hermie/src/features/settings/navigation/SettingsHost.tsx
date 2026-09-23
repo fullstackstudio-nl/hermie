@@ -119,7 +119,13 @@ export function SettingsHost({ initialRoute, initialParams, rootBack, rootTraili
           title={strings.settings.title}
         >
           <SettingsScroll>
-            <SettingsCategoryList current={category} onPick={setPicked} />
+            {/*
+              The sidebar shape: a search field, the account row, and the
+              categories as free-standing rows with the open one filled. The
+              phone's own list is the same component in its `grouped` shape —
+              see `SettingsCategoryList`.
+            */}
+            <SettingsCategoryList current={category} onPick={setPicked} variant="sidebar" />
           </SettingsScroll>
         </PageFrame>
       </View>

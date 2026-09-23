@@ -198,7 +198,10 @@ describe('the root', () => {
   it('lists the categories, each with a line of its own state', async () => {
     await open('Root')
 
-    expect(screen.getByTestId('settings-cat-Account')).toBeTruthy()
+    // Account has no row of its own here (HERM-108's follow-up): the account
+    // row above the list is the only way into it.
+    expect(screen.getByTestId('settings-account-row')).toBeTruthy()
+    expect(screen.queryByTestId('settings-cat-Account')).toBeNull()
     expect(screen.getByTestId('settings-cat-Gateways-summary')).toHaveTextContent('gateway.example.com · 1 gateway')
   })
 })

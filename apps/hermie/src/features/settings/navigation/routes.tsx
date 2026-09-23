@@ -11,7 +11,6 @@
  */
 import type { ComponentType } from 'react'
 
-import type { IconName } from '../../../ui/Icon'
 import * as About from '../categories/About'
 import * as Account from '../categories/Account'
 import * as Advanced from '../categories/Advanced'
@@ -83,8 +82,16 @@ export const SETTINGS_ROUTES = Object.fromEntries(
   ])
 ) as Record<SettingsRouteName, SettingsRoute>
 
+/**
+ * What a category DOES, as opposed to what it looks like.
+ *
+ * The mark, the colour and the one-sentence description live in
+ * `category-look.ts` instead of here, and that split is not tidiness: a category
+ * PAGE draws its own mark on its header card, and a page cannot read this table —
+ * `routes.tsx` imports every page, so the other direction is a cycle. Same reason
+ * `route-meta.ts` holds the titles.
+ */
 export interface SettingsCategory {
-  icon: IconName
   /** One line of where this category STANDS, read from the stores it owns. */
   useSummary: () => string
   /** `undefined` where the category is always there. Static: no hook, no store. */
@@ -92,18 +99,18 @@ export interface SettingsCategory {
 }
 
 const CATEGORIES: Record<SettingsCategoryName, SettingsCategory> = {
-  Account: { icon: 'person', useSummary: Account.useSummary },
-  Gateways: { icon: 'server', useSummary: Gateways.useSummary },
-  ChatsMessages: { icon: 'chats', useSummary: ChatsMessages.useSummary },
-  Notifications: { icon: 'bell', useSummary: Notifications.useSummary },
-  Context: { icon: 'idCard', useSummary: Context.useSummary },
-  Memory: { icon: 'book', useSummary: Memory.useSummary },
-  Appearance: { icon: 'contrast', useSummary: Appearance.useSummary },
-  Privacy: { icon: 'lock', useSummary: Privacy.useSummary },
-  Voice: { icon: 'mic', useSummary: Voice.useSummary, visible: Voice.isVoiceAvailable },
-  Capabilities: { icon: 'bolt', useSummary: Capabilities.useSummary },
-  Advanced: { icon: 'sliders', useSummary: Advanced.useSummary, visible: Advanced.isAdvancedVisible },
-  About: { icon: 'info', useSummary: About.useSummary }
+  Account: { useSummary: Account.useSummary },
+  Gateways: { useSummary: Gateways.useSummary },
+  ChatsMessages: { useSummary: ChatsMessages.useSummary },
+  Notifications: { useSummary: Notifications.useSummary },
+  Context: { useSummary: Context.useSummary },
+  Memory: { useSummary: Memory.useSummary },
+  Appearance: { useSummary: Appearance.useSummary },
+  Privacy: { useSummary: Privacy.useSummary },
+  Voice: { useSummary: Voice.useSummary, visible: Voice.isVoiceAvailable },
+  Capabilities: { useSummary: Capabilities.useSummary },
+  Advanced: { useSummary: Advanced.useSummary, visible: Advanced.isAdvancedVisible },
+  About: { useSummary: About.useSummary }
 }
 
 export const settingsCategory = (name: SettingsCategoryName): SettingsCategory => CATEGORIES[name]

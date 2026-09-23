@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Settings looks like something.** HERM-108 gave it the right structure — twelve categories, a page
+  each, one back control per route — and the owner's verdict on the result was that it does not look
+  like anything. The rows, the pages and the sidebar are redrawn against an iPadOS Settings reference
+  he picked, in this app's own material: no new colour, no gradient, and every value out of
+  `design/liquid-glass-tokens.md`.
+
+  - **Every category carries a coloured mark** — its icon in white on a rounded square in one of the
+    accent set's hues, 28pt in a row and 52pt on a page. The colours are chosen so no two categories
+    next to each other share one in any build this app ships, and three accents are deliberately
+    never used: `green` and `red` belong to `ok` and `danger`, and a mark that borrows a status hue is
+    a mark that can be read as a state; `lime` is the studio's ring colour, which white cannot be seen
+    on. The well is the accent's `bubble` value, which is the one colour in each swatch that
+    `npm run contrast:check` already measures white against.
+  - **Each category page opens with a header card**: the mark large, the category's name, and one new
+    sentence saying what the category is for — written in English, Dutch and German. The card is the
+    page's heading, so the bar above it no longer draws a second, centred copy of the same word.
+  - **The sidebar on iPad and Mac follows the reference's shape.** A search field, then a row for
+    whoever this device is signed in as, then the categories as free-standing rows with the open one
+    filled and its label in the accent ink — the same selected-row surface the chat list's open bot
+    gets. The phone keeps the grouped cards it had, with the new marks in them, and now leads with
+    that same account row rather than only the sidebar getting one. Either way it is the single way
+    into the Account category: the list underneath it no longer keeps a second row to the same place,
+    and the row itself bolds whoever is signed in — falling back to the host, then to the plain
+    signed-out wording, only where there is no name to bold.
+  - **The search actually searches.** It reads a category's title, the line of state under it, and the
+    title of every page underneath it, so "licence" finds About and "MCP" finds Bots & capabilities —
+    and a row matched through a page it holds says which page instead of its summary. It is drawn in
+    the sidebar only; the phone's list is one screen of twelve rows and does not need one.
+  - **Bots & capabilities is two groups rather than one.** "New bot…" makes a bot; Skills, MCP,
+    Connectors and Boards are places a bot can reach, and one card could not carry a header true of
+    all five rows.
+
+  Nothing moved. The route registry, the back-button behaviour and its 28-route walk, the tab bar, the
+  split layout's mechanics and every setting's location are untouched.
+
+- **`npm run contrast:check` measures three more surfaces**: the `e2s` rung, a hovered row and a
+  selected one. A selected row carries a name and a line of state and was in no row of that table, so
+  a reader could have lost the label of the row they were standing on with every ratio still green.
+  All three clear AA in all three themes, both schemes.
+
 ### Fixed
 
 - **Pasting a file into the composer on the Mac no longer attaches it twice or drops its path into
@@ -24,6 +66,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   slash command included, stays exactly where it was put, as does whatever was already on either
   side of the caret. A pasted image and a plain-text paste are unaffected, on the Mac and in the
   browser alike.
+- **The BOTS header in Settings → Bots & capabilities no longer carries its own capitals.** It was
+  stored as `'BOTS'` and `InsetGroup` uppercases at render, which is the shape HERM-106 took out of
+  every other header in the app.
 - **A day divider in a Bot Chat no longer strands a slash command's answer, or a reclaimed-session
   notice, on the wrong side of it.** Both are built locally rather than replayed from history — a
   command's result card is never persisted at all, and a reclaimed-session notice is a broadcast —

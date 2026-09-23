@@ -96,8 +96,10 @@ describe('the category list', () => {
       await open('Root')
 
       expect(screen.queryByTestId('settings-cat-Advanced')).toBeNull()
-      // The rest of the list is untouched.
-      expect(screen.getByTestId('settings-cat-Account')).toBeTruthy()
+      // The rest of the list is untouched. Not Account: that category has no
+      // row of its own any more (the account row above the list is the only
+      // way in), so a category that still keeps a plain list row proves it.
+      expect(screen.getByTestId('settings-cat-Gateways')).toBeTruthy()
     } finally {
       ;(globalThis as unknown as { __DEV__: boolean }).__DEV__ = previous
     }
