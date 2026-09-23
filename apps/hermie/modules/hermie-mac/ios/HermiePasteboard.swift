@@ -16,9 +16,12 @@ import UniformTypeIdentifiers
  Nothing here touches the responder chain, and that is the point rather than a limitation. A
  plain-text ⌘V has already been handled by the focused `UITextView` through the ordinary paste path
  by the time JavaScript even hears the shortcut happened, because this runs on a REPORT of the key
- having gone down, not on the paste action itself. An image or a file pasteboard, which a plain
- `UITextView` cannot paste at all — `canPerformAction(_:withSender:)` returns `false` for one with no
- string representation — is the ONLY case this adds anything to.
+ having gone down, not on the paste action itself. That includes a FILE, which this module used to
+ assume a plain `UITextView` could not paste at all — it can: `UIPasteboard.hasStrings` treats a
+ URL-conforming item as string-representable and synthesises its `absoluteString` on demand, so
+ `canPerformAction(_:withSender:)` says yes and the ordinary paste inserts the file's path as text.
+ Nothing on this seam can stop that; `src/chat-ui/paste-revert.ts` is where JavaScript undoes it once
+ this function says a file was there after all.
 
  ## The copy, again
 
@@ -33,24 +36,41 @@ enum HermiePasteboard {
    Every image or file attachment the general pasteboard is holding, in the same
    `{uri, name, size, mimeType}` shape `HermieDropView` hands JavaScript.
 
-   Both kinds are collected rather than the first one found: a paste can carry more than one image
-   at once — several photos copied together — and a Finder copy of one file alongside a caption
-   string should still hand over the file. A pasteboard holding neither returns an empty array,
-   which is the same thing to a caller as "nothing worth pasting" and not an error.
+   ## Files first, and images only where there is no file
+
+   A file URL and an image are read as ALTERNATIVES for one paste, never both, and that is not the
+   same rule the owner's first report ran into: a Finder copy of an image FILE puts both `public.file-url`
+   and a rendered image representation of that same file on the pasteboard, so `UIPasteboard.general`
+   answers both `.urls` and `.images` for what is, to the person who copied it, ONE file — and reading
+   both handed JavaScript two attachments with identical thumbnails for it. A pasted image with no
+   file behind it at all — a screenshot, or an image copied out of a web page — has no entry in
+   `.urls`, which is exactly what makes `.images` still the right fallback for it. `.urls` is asked
+   FIRST and `.images` is skipped whenever it answered anything, rather than the other way round,
+   because a file's own bytes belong in the upload `stageFile` already gives a drop, not in the
+   resize pipeline a screenshot goes through.
+
+   Several urls are still collected in one paste — a Finder copy of more than one file, all at once —
+   for the same reason several images used to be: nothing here assumes there is only one. A
+   pasteboard holding neither returns an empty array, which is the same thing to a caller as "nothing
+   worth pasting" and not an error.
    */
   static func attachments() -> [[String: Any]] {
     let pasteboard = UIPasteboard.general
     var results: [[String: Any]] = []
 
-    for image in pasteboard.images ?? [] {
-      if let attachment = writeImage(image) {
+    let fileURLs = (pasteboard.urls ?? []).filter { $0.isFileURL }
+
+    for url in fileURLs {
+      if let attachment = copyFile(url) {
         results.append(attachment)
       }
     }
 
-    for url in pasteboard.urls ?? [] where url.isFileURL {
-      if let attachment = copyFile(url) {
-        results.append(attachment)
+    if fileURLs.isEmpty {
+      for image in pasteboard.images ?? [] {
+        if let attachment = writeImage(image) {
+          results.append(attachment)
+        }
       }
     }
 

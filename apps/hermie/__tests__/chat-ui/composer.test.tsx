@@ -15,6 +15,8 @@ import {
   COMPOSER_LINE_HEIGHT,
   COMPOSER_ROUND_SIZE,
   COMPOSER_TEXT_LINE_HEIGHT,
+  PASTE_REVERT_POLL_MS,
+  PASTE_REVERT_WINDOW_MS,
   SLASH_POPOVER_MAX_HEIGHT,
   SLASH_SLOW_MS
 } from '../../src/chat-ui/Composer'
@@ -95,6 +97,30 @@ function pressPaste() {
   })
 }
 
+/**
+ * A pasteboard read that answers only when a test says so.
+ *
+ * The whole bug is an ordering between this answer and the field's own render,
+ * so every case below has to be able to put those two in either order.
+ */
+function deferredPaste() {
+  let resolve: (files: unknown[]) => void = () => undefined
+
+  mockReadPasteboardAttachment.mockImplementation(
+    () =>
+      new Promise(r => {
+        resolve = r
+      })
+  )
+
+  return (files: unknown[]) => resolve(files)
+}
+
+/** Let a resolved pasteboard promise's continuation run, without letting a timer run. */
+async function flushPasteboard() {
+  await act(async () => undefined)
+}
+
 /** The resolved style of a rendered node, function styles included. */
 function styleOf(testID: string): Record<string, number> {
   const raw = screen.getByTestId(testID).props.style as unknown
@@ -140,6 +166,7 @@ function renderComposerHandle(props: Record<string, unknown> = {}) {
     onAttach: jest.fn(),
     onAttachFile: jest.fn(),
     onChangeText: jest.fn(),
+    onPasteFiles: jest.fn(),
     onQuerySlash: jest.fn(),
     onRemoveAttachment: jest.fn(),
     onSend: jest.fn(),
@@ -1340,7 +1367,7 @@ describe('pasting from the general pasteboard', () => {
     expect(mockReadPasteboardAttachment).not.toHaveBeenCalled()
   })
 
-  it('reports nothing when the pasteboard held only text', async () => {
+  it('reports nothing when the pasteboard held only text, and leaves the field alone', async () => {
     mockHasNativePasteboard = true
     mockReadPasteboardAttachment.mockResolvedValue([])
 
@@ -1351,5 +1378,286 @@ describe('pasting from the general pasteboard', () => {
 
     await waitFor(() => expect(mockReadPasteboardAttachment).toHaveBeenCalled())
     expect(handlers.onPasteFiles).not.toHaveBeenCalled()
+    // A plain-text ⌘V is the field's own `UITextView` doing what it always
+    // does; this seam has nothing to say about it either way.
+    expect(handlers.onChangeText).not.toHaveBeenCalled()
+  })
+
+  it('hands over every file from one paste, none of them dropped or repeated', async () => {
+    mockHasNativePasteboard = true
+    mockReadPasteboardAttachment.mockResolvedValue([
+      { uri: 'file:///tmp/a.pdf', name: 'a.pdf', size: 10, mimeType: 'application/pdf' },
+      { uri: 'file:///tmp/b.pdf', name: 'b.pdf', size: 20, mimeType: 'application/pdf' }
+    ])
+
+    const handlers = renderComposer()
+
+    fireEvent(screen.getByTestId('composer-input'), 'focus')
+    pressPaste()
+
+    await waitFor(() =>
+      expect(handlers.onPasteFiles).toHaveBeenCalledWith([
+        { uri: 'file:///tmp/a.pdf', name: 'a.pdf', size: 10, mimeType: 'application/pdf' },
+        { uri: 'file:///tmp/b.pdf', name: 'b.pdf', size: 20, mimeType: 'application/pdf' }
+      ])
+    )
+    // Called exactly once: two files in one paste are one attach, not two.
+    expect(handlers.onPasteFiles).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * The bug the owner rejected: on the Mac, `UIPasteboard` answers `true` to
+   * `hasStrings` for a plain file just as readily as for typed words — see
+   * `paste-revert.ts` — so `UITextView`'s own Edit ▸ Paste inserts the file's
+   * path as text through the ordinary responder chain, entirely outside this
+   * component, before `readPasteboardAttachment` even answers. These three
+   * simulate that by calling `onChangeText` and re-rendering with the new
+   * value BETWEEN `pressPaste()` and the mocked promise resolving — exactly
+   * the order those two independent paths race in on a real Mac.
+   */
+  describe('undoing the stray text a file paste leaves behind', () => {
+    it('removes a file path pasted into an empty field, and still attaches the file', async () => {
+      mockHasNativePasteboard = true
+
+      const resolvePaste = deferredPaste()
+      const { handlers, rerender } = renderComposerHandle({ value: '' })
+
+      fireEvent(screen.getByTestId('composer-input'), 'focus')
+      pressPaste()
+
+      fireEvent.changeText(screen.getByTestId('composer-input'), 'file:///.file/id=6571367.77787307')
+      rerender({ value: 'file:///.file/id=6571367.77787307' })
+
+      resolvePaste([{ uri: 'file:///tmp/report.pdf', name: 'report.pdf', size: 1, mimeType: 'application/pdf' }])
+
+      await waitFor(() =>
+        expect(handlers.onPasteFiles).toHaveBeenCalledWith([
+          { uri: 'file:///tmp/report.pdf', name: 'report.pdf', size: 1, mimeType: 'application/pdf' }
+        ])
+      )
+      expect(handlers.onChangeText).toHaveBeenLastCalledWith('')
+    })
+
+    it('leaves what was already typed on both sides of a file pasted mid-sentence', async () => {
+      mockHasNativePasteboard = true
+
+      const resolvePaste = deferredPaste()
+      const { handlers, rerender } = renderComposerHandle({ value: 'check this  before you send' })
+
+      fireEvent(screen.getByTestId('composer-input'), 'focus')
+      fireEvent(screen.getByTestId('composer-input'), 'selectionChange', {
+        nativeEvent: { selection: { start: 11, end: 11 } }
+      })
+      pressPaste()
+
+      fireEvent.changeText(screen.getByTestId('composer-input'), 'check this file:///tmp/a.pdf before you send')
+      rerender({ value: 'check this file:///tmp/a.pdf before you send' })
+
+      resolvePaste([{ uri: 'file:///tmp/a.pdf', name: 'a.pdf', size: 1, mimeType: 'application/pdf' }])
+
+      await waitFor(() => expect(handlers.onPasteFiles).toHaveBeenCalled())
+      expect(handlers.onChangeText).toHaveBeenLastCalledWith('check this  before you send')
+    })
+
+    it('does not touch the field when nothing was inserted in between', async () => {
+      // Some builds and some pasteboard contents never trigger the UIKit
+      // quirk at all — an image with no string representation, for one. There
+      // must be nothing here that fires on every file paste regardless.
+      mockHasNativePasteboard = true
+
+      const resolvePaste = deferredPaste()
+      const { handlers } = renderComposerHandle({ value: 'draft' })
+
+      fireEvent(screen.getByTestId('composer-input'), 'focus')
+      pressPaste()
+
+      resolvePaste([{ uri: 'file:///tmp/photo.png', name: 'photo.png', size: 1, mimeType: 'image/png' }])
+
+      await waitFor(() => expect(handlers.onPasteFiles).toHaveBeenCalled())
+      expect(handlers.onChangeText).not.toHaveBeenCalled()
+    })
+  })
+
+  /**
+   * The window those two arrivals are raced in.
+   *
+   * The cases above put the field's render FIRST, which is only one of the two
+   * orderings — and the one a single check at the moment the pasteboard answers
+   * happens to get right. These put the bridge first, which is what a ⌘V on a
+   * machine with a busy render queue actually looks like, and then hold the
+   * window open while the reader keeps using the field. Fake timers because the
+   * window is the subject: every case here is about what a given number of
+   * milliseconds does, and does not, let happen.
+   */
+  describe('the window it looks for that insertion in', () => {
+    beforeEach(() => jest.useFakeTimers())
+    afterEach(() => jest.useRealTimers())
+
+    it('still reverts when the pasteboard answers before the field holds the path', async () => {
+      mockHasNativePasteboard = true
+
+      const resolvePaste = deferredPaste()
+      const { handlers, rerender } = renderComposerHandle({ value: '' })
+
+      fireEvent(screen.getByTestId('composer-input'), 'focus')
+      pressPaste()
+
+      // The bridge wins the race, so the window opens against a field UIKit has
+      // not reached yet and the first look has nothing to undo. This is the
+      // ordering the one-shot check answered "nothing happened" to.
+      resolvePaste([{ uri: 'file:///tmp/report.pdf', name: 'report.pdf', size: 1, mimeType: 'application/pdf' }])
+      await flushPasteboard()
+
+      expect(handlers.onPasteFiles).toHaveBeenCalled()
+      expect(handlers.onChangeText).not.toHaveBeenCalled()
+
+      // UIKit's own paste commits a render later — one tick, in this test.
+      fireEvent.changeText(screen.getByTestId('composer-input'), 'file:///.file/id=6571367.77787307')
+      rerender({ value: 'file:///.file/id=6571367.77787307' })
+
+      act(() => void jest.advanceTimersByTime(PASTE_REVERT_POLL_MS))
+
+      expect(handlers.onChangeText).toHaveBeenLastCalledWith('')
+    })
+
+    it('leaves a character the reader typed inside the window alone', async () => {
+      mockHasNativePasteboard = true
+
+      const resolvePaste = deferredPaste()
+      const { handlers, rerender } = renderComposerHandle({ value: '' })
+
+      fireEvent(screen.getByTestId('composer-input'), 'focus')
+      pressPaste()
+
+      // An image, which has no string representation for UIKit to paste — so the
+      // only thing that lands in the field while the window is open is a
+      // keystroke, and a window that reverted any growth at all would eat it.
+      resolvePaste([{ uri: 'file:///tmp/photo.png', name: 'photo.png', size: 1, mimeType: 'image/png' }])
+      await flushPasteboard()
+
+      fireEvent.changeText(screen.getByTestId('composer-input'), 'h')
+      rerender({ value: 'h' })
+
+      act(() => void jest.advanceTimersByTime(PASTE_REVERT_WINDOW_MS + PASTE_REVERT_POLL_MS))
+
+      expect(handlers.onChangeText).toHaveBeenCalledTimes(1)
+      expect(handlers.onChangeText).toHaveBeenLastCalledWith('h')
+    })
+
+    it('leaves a pasted path on screen once a word has been typed after it — the typing wins, the path stays', async () => {
+      mockHasNativePasteboard = true
+
+      const resolvePaste = deferredPaste()
+      const { handlers, rerender } = renderComposerHandle({ value: '' })
+
+      fireEvent(screen.getByTestId('composer-input'), 'focus')
+      pressPaste()
+
+      resolvePaste([{ uri: 'file:///tmp/a.pdf', name: 'a.pdf', size: 1, mimeType: 'application/pdf' }])
+      await flushPasteboard()
+
+      // Both arrive before the next look: UIKit's path, and then a word typed
+      // after it. The span is no longer one bare reference, and there is nothing
+      // in the string to say how much of it was the paste — so nothing comes
+      // out. A path left in the draft is something the reader can delete; a
+      // sentence deleted out from under them is not something they can get back.
+      fireEvent.changeText(screen.getByTestId('composer-input'), 'file:///tmp/a.pdf have a look')
+      rerender({ value: 'file:///tmp/a.pdf have a look' })
+
+      act(() => void jest.advanceTimersByTime(PASTE_REVERT_WINDOW_MS + PASTE_REVERT_POLL_MS))
+
+      expect(handlers.onChangeText).toHaveBeenCalledTimes(1)
+      expect(handlers.onChangeText).toHaveBeenLastCalledWith('file:///tmp/a.pdf have a look')
+    })
+
+    it('does not fire into the draft that replaced a sent one', async () => {
+      mockHasNativePasteboard = true
+
+      const resolvePaste = deferredPaste()
+      const { handlers, rerender } = renderComposerHandle({ value: 'ship it' })
+
+      fireEvent(screen.getByTestId('composer-input'), 'focus')
+      // The whole draft selected, which is a paste OVER it: that is the shape
+      // whose snapshot has neither a prefix nor a suffix, so the bracket check
+      // matches any later draft and the cancellation is the only thing left
+      // standing between the two messages.
+      fireEvent(screen.getByTestId('composer-input'), 'selectionChange', {
+        nativeEvent: { selection: { start: 0, end: 7 } }
+      })
+      pressPaste()
+
+      resolvePaste([{ uri: 'file:///tmp/a.pdf', name: 'a.pdf', size: 1, mimeType: 'application/pdf' }])
+      await flushPasteboard()
+
+      // Sent while the window was still open, and a next message begun that
+      // happens to be a path — a reader pointing at a log file.
+      fireEvent.press(screen.getByTestId('composer-send'))
+      rerender({ value: '' })
+      rerender({ value: '/var/log/system.log' })
+
+      act(() => void jest.advanceTimersByTime(PASTE_REVERT_WINDOW_MS + PASTE_REVERT_POLL_MS))
+
+      expect(handlers.onSend).toHaveBeenCalledWith('ship it')
+      expect(handlers.onChangeText).not.toHaveBeenCalled()
+    })
+
+    it('lets the second ⌘V own the window, not the first', async () => {
+      mockHasNativePasteboard = true
+
+      const resolvers: ((files: unknown[]) => void)[] = []
+
+      mockReadPasteboardAttachment.mockImplementation(
+        () => new Promise(resolve => resolvers.push(resolve as (files: unknown[]) => void))
+      )
+
+      const { handlers, rerender } = renderComposerHandle({ value: 'one' })
+
+      fireEvent(screen.getByTestId('composer-input'), 'focus')
+      fireEvent(screen.getByTestId('composer-input'), 'selectionChange', {
+        nativeEvent: { selection: { start: 0, end: 3 } }
+      })
+      pressPaste()
+      pressPaste()
+
+      // The first ⌘V's bridge call answers LAST, which a bridge is free to do.
+      // Its snapshot is two pastes old by then and must not open a window.
+      resolvers[1]([{ uri: 'file:///tmp/b.pdf', name: 'b.pdf', size: 1, mimeType: 'application/pdf' }])
+      await flushPasteboard()
+      resolvers[0]([{ uri: 'file:///tmp/a.pdf', name: 'a.pdf', size: 1, mimeType: 'application/pdf' }])
+      await flushPasteboard()
+
+      // Both files are attached either way: two ⌘V are two pastes, not one
+      // paste and a correction.
+      expect(handlers.onPasteFiles).toHaveBeenCalledTimes(2)
+
+      fireEvent.changeText(screen.getByTestId('composer-input'), '/tmp/a.pdf')
+      rerender({ value: '/tmp/a.pdf' })
+
+      act(() => void jest.advanceTimersByTime(PASTE_REVERT_POLL_MS))
+
+      // Once, by the window the second ⌘V owns. Two live windows would both
+      // revert on the same tick.
+      expect(handlers.onChangeText).toHaveBeenCalledTimes(2)
+      expect(handlers.onChangeText).toHaveBeenLastCalledWith('one')
+    })
+
+    it('stops looking when the window closes, rather than polling on', async () => {
+      mockHasNativePasteboard = true
+
+      const resolvePaste = deferredPaste()
+      const { handlers } = renderComposerHandle({ value: 'draft' })
+
+      fireEvent(screen.getByTestId('composer-input'), 'focus')
+      pressPaste()
+
+      resolvePaste([{ uri: 'file:///tmp/photo.png', name: 'photo.png', size: 1, mimeType: 'image/png' }])
+      await flushPasteboard()
+
+      act(() => void jest.advanceTimersByTime(PASTE_REVERT_WINDOW_MS + PASTE_REVERT_POLL_MS))
+
+      expect(handlers.onChangeText).not.toHaveBeenCalled()
+      // Nothing left on the clock: the window is a window, not a subscription.
+      expect(jest.getTimerCount()).toBe(0)
+    })
   })
 })

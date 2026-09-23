@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Pasting a file into the composer on the Mac no longer attaches it twice or drops its path into
+  the draft as text.** Both were one cause each, not one shared bug: a Finder copy of an image FILE
+  puts both a file reference and a rendered image on the general pasteboard, and reading both handed
+  JavaScript two attachments with identical thumbnails for what was, to the person who copied it,
+  one file — `HermiePasteboard` now reads a file URL and only falls back to the image when there is
+  no file behind it at all. Separately, `UIPasteboard` treats a file's URL as string-representable,
+  so the field's own Edit ▸ Paste inserts its path as ordinary text through the responder chain
+  before the composer even learns a file was there — nothing on that seam can stop it, so the
+  composer now undoes that insertion once it knows the paste was a file. The pasteboard's answer and
+  the field's own update arrive independently of one another, so the composer watches for the
+  insertion over a few frames rather than looking once and possibly looking too early, and it takes
+  back out only a span that reads as a single file reference: anything typed in the meantime, a
+  slash command included, stays exactly where it was put, as does whatever was already on either
+  side of the caret. A pasted image and a plain-text paste are unaffected, on the Mac and in the
+  browser alike.
 - **A day divider in a Bot Chat no longer strands a slash command's answer, or a reclaimed-session
   notice, on the wrong side of it.** Both are built locally rather than replayed from history — a
   command's result card is never persisted at all, and a reclaimed-session notice is a broadcast —

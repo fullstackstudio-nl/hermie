@@ -11,7 +11,7 @@
  *   - The slash popover is fed by props. The composer asks (`onQuerySlash`) and
  *     paints what it is given; it never calls the gateway itself.
  */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   Image,
   KeyboardAvoidingView,
@@ -45,6 +45,7 @@ import { useShortcut } from '../ui/useShortcut'
 import { AttachMenu } from './AttachMenu'
 import { FileChip } from './FileChip'
 import { QueuedChip } from './QueuedChip'
+import { revertStrayPasteText, type PasteSnapshot } from './paste-revert'
 import { shouldSend } from './send-key'
 import { chatStrings } from './strings'
 import type { AttachChoice, ComposerAttachment, ComposerDictation, SlashFailure, SlashSuggestion } from './types'
@@ -303,6 +304,36 @@ export const MENU_BACKDROP_REACH = 4000
 export const SLASH_SLOW_MS = 400
 
 /**
+ * How long the composer keeps looking for UIKit's own paste to land.
+ *
+ * The two things that have to agree here are on different clocks and neither
+ * one can be waited on: `readPasteboardAttachment` answers over a native
+ * bridge, and the field's new value arrives through a React render commit. One
+ * look at the moment the bridge answers therefore decides nothing — it is a
+ * coin toss on which of the two got there first, and half the time it sees a
+ * field UIKit has not touched yet and concludes there was nothing to undo. So
+ * the look is repeated until the insertion shows up or this runs out.
+ *
+ * A hard cap and not a promise of eventual delivery, because the window is a
+ * window on the READER too: for as long as it is open, a file reference typed
+ * into the field is indistinguishable from one UIKit inserted. Long enough for
+ * a bridge hop and a render on a busy machine, short enough that nobody is
+ * still inside it by the time they have finished a word.
+ */
+export const PASTE_REVERT_WINDOW_MS = 300
+
+/**
+ * How often it looks, inside that window.
+ *
+ * Roughly a frame. There is nothing to subscribe to — the value arrives as a
+ * prop, and a prop that has not changed does not re-run the handler that is
+ * waiting for it — so this polls, and polls cheaply: a string comparison
+ * against a ref, stopping the moment it has an answer rather than running the
+ * window out.
+ */
+export const PASTE_REVERT_POLL_MS = 16
+
+/**
  * How tall the completion popover is allowed to get.
  *
  * A constant rather than a `style` literal because the keyboard has to be able
@@ -399,6 +430,75 @@ export function Composer({
   const query = useRef(onQuerySlash)
 
   query.current = onQuerySlash
+
+  /**
+   * `value`, read through a ref rather than the prop closed over at render
+   * time.
+   *
+   * The paste shortcut below snapshots `value` the instant ⌘V fires, then asks
+   * the pasteboard something asynchronously — and by the time that answer
+   * comes back, `value` may already have moved on to a LATER render, the way
+   * it does the instant UIKit's own paste inserts a file's path. Reading the
+   * prop straight from that handler's closure would still see the value as of
+   * ⌘V, which is the snapshot, not the answer to "what does the field say
+   * right now" the revert needs. Kept in sync on every render, the same way
+   * `query` above is.
+   */
+  const latestValue = useRef(value)
+
+  latestValue.current = value
+
+  /** The open revert window's next look, or `null` while no window is open. */
+  const revertPoll = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  /**
+   * Which ⌘V the open revert window belongs to.
+   *
+   * A counter rather than a flag, because the thing that has to be superseded is
+   * sometimes still a promise: a second ⌘V can land before the first one's
+   * `readPasteboardAttachment` has answered, and that first answer must not then
+   * open a window against a snapshot two pastes old. Every ⌘V takes the next
+   * number and everything downstream of one checks the number is still its own,
+   * so cancelling is the same act as making the old number stale.
+   */
+  const pasteGeneration = useRef(0)
+
+  /**
+   * Close whatever revert window is open, and disown anything still in flight.
+   *
+   * Every caller is the same fact said a different way: the field this window
+   * was opened against is not the field in front of the reader any more —
+   * because the composer is gone, because a second ⌘V replaced the question, or
+   * because the draft was sent.
+   */
+  const closeRevertWindow = useCallback(() => {
+    pasteGeneration.current += 1
+
+    if (revertPoll.current !== null) {
+      clearTimeout(revertPoll.current)
+      revertPoll.current = null
+    }
+  }, [])
+
+  /*
+    A window that outlived the composer would call `onChangeText` for a draft
+    nothing is showing any more.
+  */
+  useEffect(() => closeRevertWindow, [closeRevertWindow])
+
+  /*
+    An emptied field is a send: the draft this window was measuring against has
+    gone to the gateway, and whatever appears next is a NEW draft. Without this
+    a paste whose file reference never landed would keep looking, and a reader
+    who starts the next message with a path — or whose next message happens to
+    begin the way the sent one did — would watch it be undone into the message
+    they already sent.
+  */
+  useEffect(() => {
+    if (value === '') {
+      closeRevertWindow()
+    }
+  }, [closeRevertWindow, value])
 
   /**
    * Where the caret is, so a newline can be inserted at it rather than appended.
@@ -624,6 +724,20 @@ export function Composer({
   }
 
   /**
+   * Hand the draft over, and shut any open paste-revert window first.
+   *
+   * The window is also closed when `value` empties, which is what a send
+   * normally does to this component — but a send of an attachment with no text
+   * at all leaves `value` at the empty string on both sides of it, so that
+   * effect never runs and the window would outlive the message. This is the one
+   * seam that knows a send happened regardless of what the draft looked like.
+   */
+  const send = () => {
+    closeRevertWindow()
+    onSend(value)
+  }
+
+  /**
    * What Enter does: take the highlighted suggestion, or send, or nothing.
    *
    * The list first, and only while it is open — which is the rule every editor
@@ -650,7 +764,7 @@ export function Composer({
       return
     }
 
-    onSend(value)
+    send()
   }
 
   /**
@@ -771,7 +885,7 @@ export function Composer({
       return
     }
 
-    onSend(value)
+    send()
   }
 
   /** Stop, rather than send: a running turn and nothing typed. */
@@ -879,6 +993,39 @@ export function Composer({
    * keeps this from ever firing on the web, where `attachPasteListener` above is
    * the whole story and a second read of a pasteboard that does not exist here
    * would only be wasted work.
+   *
+   * ## The snapshot, and why it is taken here rather than never
+   *
+   * "The ordinary paste for plain text" above is not only for words: a file
+   * has a string representation too, once you ask `UIPasteboard` for one — see
+   * `paste-revert.ts`'s module comment for why, and why nothing on this seam
+   * can stop UIKit from inserting it before this handler's `await` even
+   * returns. `before` is the field the instant ⌘V fired, taken synchronously
+   * so nothing else can have touched it yet. Once the pasteboard answers with
+   * a file, `revertStrayPasteText` is asked what changed since — and only when
+   * that span reads as exactly one file reference does it come back out,
+   * leaving a plain-text paste, a field nothing touched, and anything the
+   * reader typed themselves alone.
+   *
+   * ## Why it looks more than once
+   *
+   * The pasteboard answering and the field reporting UIKit's insertion are two
+   * independent arrivals, and this handler is downstream of only one of them:
+   * `latestValue` moves when React commits a render from `onChangeText`, which
+   * has no relationship to when a native bridge call resolves. Asking once, at
+   * the moment the bridge answers, therefore gets the right answer only for the
+   * ordering where the render won the race — and in the other ordering it sees
+   * an untouched field, concludes there is nothing to undo, and leaves the path
+   * on screen. That is the reported bug, not a rare edge of it.
+   *
+   * So the look is repeated over `PASTE_REVERT_WINDOW_MS`, and it is the shape
+   * guard in `revertStrayPasteText` rather than the timing that keeps repeating
+   * it safe: every look that finds anything other than one bare file reference
+   * declines, so a reader typing through the window is never the thing that
+   * satisfies it. The window stops at the first revert rather than running out,
+   * and `closeRevertWindow` above shuts it on every event that makes its
+   * snapshot meaningless — unmount, the next ⌘V, and a send — so it can never
+   * reach a later draft.
    */
   useShortcut(
     'paste',
@@ -887,10 +1034,59 @@ export function Composer({
         return
       }
 
-      void readPasteboardAttachment().then(files => {
-        if (files.length) {
-          onPasteFiles(files)
+      // This ⌘V supersedes the one before it, whether that one was still
+      // looking or still waiting on the bridge.
+      closeRevertWindow()
+
+      const generation = pasteGeneration.current
+      const before: PasteSnapshot = { end: selection.current.end, start: selection.current.start, value }
+
+      /** When the window opened, which is when the pasteboard answered. */
+      let opened = 0
+
+      const look = () => {
+        revertPoll.current = null
+
+        if (pasteGeneration.current !== generation) {
+          return
         }
+
+        const reverted = revertStrayPasteText(before, latestValue.current)
+
+        if (reverted) {
+          onChangeText(reverted.value)
+          selection.current = { start: reverted.caret, end: reverted.caret }
+          setCaret({ start: reverted.caret, end: reverted.caret })
+
+          return
+        }
+
+        if (Date.now() - opened >= PASTE_REVERT_WINDOW_MS) {
+          return
+        }
+
+        revertPoll.current = setTimeout(look, PASTE_REVERT_POLL_MS)
+      }
+
+      void readPasteboardAttachment().then(files => {
+        if (!files.length) {
+          return
+        }
+
+        // The files are attached whatever happened to the window: the reader
+        // did paste them, and a superseding ⌘V is a second paste rather than a
+        // correction of this one.
+        onPasteFiles(files)
+
+        if (pasteGeneration.current !== generation) {
+          return
+        }
+
+        // The window opens when the pasteboard answers, not when ⌘V fired:
+        // before that there is no reason to believe a file was involved at all,
+        // and every look would be measuring a plain-text paste.
+        opened = Date.now()
+        look()
       })
     },
     HAS_NATIVE_PASTEBOARD && fieldFocus.focused
