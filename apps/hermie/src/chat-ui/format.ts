@@ -1,7 +1,8 @@
 /** Small, dependency-free formatters shared by the chat components. */
-import { type ChatPreview, chatRowPreview } from '@hermie/transcript'
+import { type ChatPreview, chatRowPreview, type MessageAuthor } from '@hermie/transcript'
 
 import { plainTextPreview } from '../markdown/plain-text'
+import { ACCENTS, SENDER_INK_ORDER, type Scheme } from '../ui/tokens'
 
 /** `12:48`, in the device's locale-independent 24h-or-not default. */
 export function formatClock(unixSeconds: number | undefined): string {
@@ -194,6 +195,62 @@ export function tintIndex(name: string, buckets: number): number {
   }
 
   return buckets > 0 ? hash % buckets : 0
+}
+
+/** How far a sender label or a stripped identity may run before it is cut. */
+const SENDER_NAME_LIMIT = 80
+
+/**
+ * One line, whitespace collapsed and cut — the same rule `contextTextOf`
+ * (`@hermie/gateway-client/context`) applies to a name before it reaches a
+ * system prompt. Duplicated rather than imported: the kit takes items and
+ * callbacks and carries no runtime dependency on the gateway layer, the same
+ * reason `attachmentName` here re-derives a shape `@hermie/transcript` already
+ * knows rather than importing its runtime. Two lines of arithmetic is a smaller
+ * risk than a kit component reaching across that line.
+ */
+function flattenSenderText(value: string, limit: number): string {
+  return value.split(/\s+/u).filter(Boolean).join(' ').slice(0, limit)
+}
+
+/** `authentik:7f3a…` → `7f3a…`, and an issuer URL used as a subject left alone. */
+const PROVIDER_PREFIX = /^[A-Za-z][A-Za-z0-9._-]*:(?!\/\/)(.+)$/u
+
+/**
+ * The name a sender's label shows with nothing but the row itself to go on.
+ *
+ * D4's rungs 2 and 3: the gateway's own stamped name, sanitised, or failing
+ * that the identity with its provider prefix stripped — never prettified,
+ * because guessing a person's name out of an opaque id would put a wrong name
+ * on screen. Rung 1, the `context.users` directory a teammate's own client
+ * writes when they share their display name, sits above this and is a later
+ * change (HERM-83 Task 4); this is what a bubble can always draw with nothing
+ * else, and it is what Task 4's resolver falls back to when the directory has
+ * no row for this identity either.
+ */
+export function fallbackSenderName(author: MessageAuthor): string {
+  const stamped = flattenSenderText(author.name ?? '', SENDER_NAME_LIMIT)
+
+  if (stamped) {
+    return stamped
+  }
+
+  const id = flattenSenderText(author.id, SENDER_NAME_LIMIT)
+
+  return flattenSenderText(PROVIDER_PREFIX.exec(id)?.[1] ?? id, SENDER_NAME_LIMIT)
+}
+
+/**
+ * The colour a sender's name and avatar circle are keyed to — deterministic
+ * from their IDENTITY, never their name (D5): a rename must not recolour a
+ * conversation, and two people who both call themselves the same thing must
+ * not merge. `ACCENT_ORDER` minus `default` is ten colours, so a teammate's
+ * ink is never mistaken for the chat's own accent.
+ */
+export function senderInk(authorId: string, scheme: Scheme): string {
+  const name = SENDER_INK_ORDER[tintIndex(authorId, SENDER_INK_ORDER.length)] ?? SENDER_INK_ORDER[0] ?? 'indigo'
+
+  return ACCENTS[name].text[scheme]
 }
 
 const DAY_SECONDS = 86_400

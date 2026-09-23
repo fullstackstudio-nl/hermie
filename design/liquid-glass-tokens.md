@@ -566,6 +566,39 @@ stops and a glass **Jump to latest** pill appears, centred above the composer, w
 the count of messages that arrived since. Tapping it returns to the bottom and
 resumes following.
 
+### 6.11 Who sent it
+
+In the shared **Bot Chat**, and only there, a message somebody else sent draws with
+a name over its first bubble and an avatar beside it — the way any messenger shows a
+group. **The gate is three things, all of them:** this is the group chat, not one of
+the reader's own conversations, a branch or a retired one; the row carries an
+author; and that author is not the reader. Miss any one and the row draws exactly as
+it always has — the reader's own silhouette, no name, no avatar. A row nobody
+attributed is the honest cost of there being no record, not a guess dressed up as
+one.
+
+**The run.** The name and the avatar sit on the FIRST bubble of a sender's run only;
+a run breaks the moment the sender changes, which is what makes the avatar read as
+"appearing when the sender changes" with no rule of its own beyond the grouping this
+document already describes in §6.1. The avatar's gutter is reserved for the WHOLE
+run, drawn or not, so every bubble in it keeps one left edge instead of stepping in
+and out as the avatar comes and goes.
+
+**Two palettes, kept apart on purpose.** The name is inked from `ACCENT_ORDER` minus
+`default` — ten colours, so a person's ink is never mistaken for the chat's own
+accent — indexed by a hash of their IDENTITY, never their display name: a rename
+must not recolour a conversation, and two people who both call themselves the same
+thing must not merge. The avatar circle keeps its own four-tint palette (§4,
+"inline avatar 26") unchanged; only what picks a slot from it moves, from the name to
+the same identity. **No new colour was added for either.** The eleven sender inks
+were already in `tokens.ts`; `scripts/check-contrast.ts` now measures all eleven
+against the panel, elevation e1/e2/e3 and the sunk tint, on every preset in both
+schemes, floor 4.5 — worst case measured 4.94 : 1.
+
+**The name is real text, not a caption on a picture.** It sits ahead of the bubble in
+reading order, so a screen reader says the name and then the message; the avatar is
+`aria-hidden`, as every avatar in this document already is.
+
 ---
 
 ## 7. Implementation notes

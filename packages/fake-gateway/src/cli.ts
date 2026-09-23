@@ -49,7 +49,11 @@ if (values.help) {
       '"delegate" fans out subagent events, anything else streams a reply with a tool call.',
       '',
       'Control endpoints (not part of the gateway contract):',
-      '  POST /__fake/inject  {profile, user, assistant}  inject a turn somebody else ran',
+      '  POST /__fake/inject  {profile, user, assistant, author?, session_id?}  inject a turn',
+      '                       somebody else ran; author {id, name?} stages the HERM-83 gateway',
+      '                       stamp (display_metadata.author) for testing sender attribution;',
+      '                       session_id (stored or runtime id) targets one exact conversation',
+      "                       instead of the profile's canonical Bot Chat — a sub-chat, once one exists",
       '  POST /__fake/request {profile, method, params}   raise a server→client request,',
       '                                                   e.g. method "clarify"'
     ].join('\n')

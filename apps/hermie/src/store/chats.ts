@@ -29,6 +29,7 @@ import {
   createChatState,
   dropSteer,
   markInterrupted,
+  type MessageAuthor,
   type ResumeSnapshot,
   prependHistory,
   reconcile,
@@ -94,8 +95,12 @@ export interface ChatsState {
   prependHistory: (botName: string, items: readonly TranscriptItem[]) => void
   applyTail: (botName: string, items: readonly TranscriptItem[]) => void
 
-  /** `attachments` are `@file:` / `@image:` references — see `UserItem.attachments`. */
-  beginTurn: (botName: string, text: string, attachments?: string[]) => void
+  /**
+   * `attachments` are `@file:` / `@image:` references — see `UserItem.attachments`.
+   * `author` is the reader's own identity, when the caller has one — see
+   * `beginLocalTurn` for why an optimistic bubble carries it at all.
+   */
+  beginTurn: (botName: string, text: string, attachments?: string[], author?: MessageAuthor) => void
   settleTurn: (botName: string, result: SubmitResult) => void
   /** Paint a steer into the turn already running; it starts no turn of its own. */
   beginSteer: (botName: string, text: string, attachments?: string[]) => void
@@ -208,8 +213,8 @@ export const useChatsStore = create<ChatsState>((set, get) => {
       patch(botName, state => reconcileTail(state, items))
     },
 
-    beginTurn(botName, text, attachments) {
-      patch(botName, state => beginLocalTurn(state, text, attachments))
+    beginTurn(botName, text, attachments, author) {
+      patch(botName, state => beginLocalTurn(state, text, attachments, undefined, author))
     },
 
     settleTurn(botName, result) {

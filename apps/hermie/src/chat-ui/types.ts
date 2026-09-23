@@ -15,6 +15,7 @@ export type {
   ClarifyQuestionItem,
   CronDeliveryItem,
   DispatchStatus,
+  MessageAuthor,
   NoticeItem,
   NoticeKind,
   Presentation,

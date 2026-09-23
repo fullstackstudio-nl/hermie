@@ -55,7 +55,7 @@ export {
   type TranscriptListProps
 } from './TranscriptList'
 export { TypingDots, TypingIndicator, type TypingIndicatorProps } from './TypingIndicator'
-export { attachmentName, UserBubble, type UserBubbleProps } from './UserBubble'
+export { attachmentName, UserBubble, type UserBubbleProps, type UserSender } from './UserBubble'
 
 export { Avatar, type AvatarProps } from './primitives/Avatar'
 export {
@@ -73,6 +73,7 @@ export { Chip, type ChipProps } from './primitives/Chip'
 export { Fold, useFoldHeight, type FoldProps } from './primitives/Fold'
 export { LedgerRow, type LedgerRowProps } from './primitives/LedgerRow'
 export { MetaLine, type MetaLineProps } from './primitives/MetaLine'
+export { SenderLabel, type SenderLabelProps } from './primitives/SenderLabel'
 export { Ticks, type TicksProps } from './primitives/Ticks'
 
 export { ExpandedProvider, useExpanded, useExpandedApi, type ExpandedApi } from './expanded'
@@ -82,6 +83,7 @@ export { dateStampFor, GROUP_WINDOW_SECONDS, layoutRows, speakerKey, type RowLay
 export { parseUnifiedDiff, summarizeDiff, type DiffLine, type DiffLineKind } from './diff'
 export {
   clipInline,
+  fallbackSenderName,
   formatBytes,
   formatClock,
   formatCount,
@@ -93,6 +95,7 @@ export {
   middleTruncate,
   needsReadingTreatment,
   previewLine,
+  senderInk,
   tintIndex
 } from './format'
 export { chatStrings } from './strings'

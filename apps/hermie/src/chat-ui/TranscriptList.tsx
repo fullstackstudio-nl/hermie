@@ -91,7 +91,7 @@ import { BubbleColumn } from './primitives/BubbleColumn'
 import { Chip } from './primitives/Chip'
 import { ExpandedProvider, useExpanded } from './expanded'
 import { isDmRow, rollupDmRuns, type DmRowRole } from './dm-rollup'
-import { clipInline } from './format'
+import { clipInline, fallbackSenderName } from './format'
 import { messageMenuItems, parseMessageMenuAction } from './message-menu'
 import { layoutRows, type RowLayout } from './grouping'
 import { chatStrings } from './strings'
@@ -99,11 +99,13 @@ import type {
   ApprovalItem,
   ClarifyItem,
   CronDeliveryItem,
+  MessageAuthor,
   Presentation,
   Receipt,
   Subagent,
   ToolItem,
   TranscriptItem,
+  UserItem,
   VisibleItem
 } from './types'
 
@@ -258,6 +260,35 @@ export interface TranscriptContext {
    * carries. Must be a stable object; it is part of the row memo's key.
    */
   images?: MarkdownImageSource
+  /**
+   * Whether this is the canonical GROUP chat, never a personal sub-chat, a
+   * branch or a retired conversation (HERM-83, D6, gate 1).
+   *
+   * The predicate is the host's, read off the same canonical-chat-key work
+   * the sub-chats feature already maintains — this list invents no second
+   * lookup. Absent (the default `ConversationViewScreen` leaves it at, for a
+   * branch or a retired conversation) draws every `user` row exactly as it
+   * always has: no name, no avatar, own silhouette, whatever `author` says.
+   */
+  groupChat?: boolean
+  /**
+   * The reader's own identity, `<provider>:<user_id>` exactly as the gateway
+   * spelled it — the value a row's `author.id` is compared against to decide
+   * own versus somebody else's (D3). Absent — including while `/api/auth/me`
+   * has not answered yet — is the safe default and draws every row as the
+   * reader's own, unchanged from before `author` existed.
+   */
+  ownAuthorId?: string
+  /**
+   * Name a foreign sender beyond what the row itself carries.
+   *
+   * D4's rung 1 — the `context.users` directory a teammate's own client
+   * writes when they share their display name — needs state this list does
+   * not hold, so it is the host's to supply (HERM-83 Task 4). Absent, or
+   * returning an empty string, falls back to rungs 2 and 3: the gateway's own
+   * stamped name, or the identity with its provider prefix stripped.
+   */
+  resolveSenderName?: (author: MessageAuthor) => string
 }
 
 // `onSelectText` is omitted rather than inherited: it is the list's own wiring to
@@ -534,11 +565,38 @@ function DmAsideRow({ entry, context, role }: { entry: VisibleItem; context: Tra
   return line
 }
 
+/**
+ * Is this row the READER'S OWN message?
+ *
+ * True unless three things all hold: the host says this is the group chat,
+ * the host knows the reader's own identity, and the row's `author` names
+ * somebody else (HERM-83, D3). Any one of those missing is the safe default —
+ * a personal sub-chat, a branch, a retired conversation, an identity not yet
+ * loaded, or a row with no `author` at all all draw exactly as they did before
+ * `author` existed: the reader's own, right-aligned, in the chat's accent.
+ */
+function isOwnUserItem(item: UserItem, context: TranscriptContext): boolean {
+  if (!context.groupChat || !context.ownAuthorId || !item.author) {
+    return true
+  }
+
+  return item.author.id === context.ownAuthorId
+}
+
 function RowView({ entry, context, receipt, layout, dmRole }: RowProps) {
   const { item, presentation } = entry
 
   switch (item.kind) {
-    case 'user':
+    case 'user': {
+      const own = isOwnUserItem(item, context)
+      const sender =
+        !own && item.author
+          ? {
+              authorId: item.author.id,
+              name: context.resolveSenderName?.(item.author) || fallbackSenderName(item.author)
+            }
+          : undefined
+
       return (
         <UserBubble
           {...(context.accent ? { accent: context.accent } : {})}
@@ -547,11 +605,14 @@ function RowView({ entry, context, receipt, layout, dmRole }: RowProps) {
           item={item}
           onLinkPress={context.onLinkPress}
           {...(context.onOpenAttachment ? { onOpenAttachment: context.onOpenAttachment } : {})}
+          own={own}
           presentation={presentation}
           receipt={receipt}
+          {...(sender ? { sender } : {})}
           tail={layout.tail}
         />
       )
+    }
 
     case 'assistant':
       return (
@@ -1325,7 +1386,10 @@ function TranscriptListBody({
       onReadAloud: handlers.onReadAloud,
       readingItemIds: handlers.readingItemIds,
       subagents: handlers.subagents ?? {},
-      typingHandles: handlers.typingHandles ?? EMPTY_HANDLES
+      typingHandles: handlers.typingHandles ?? EMPTY_HANDLES,
+      groupChat: handlers.groupChat,
+      ownAuthorId: handlers.ownAuthorId,
+      resolveSenderName: handlers.resolveSenderName
     }),
     [
       handlers.accent,
@@ -1350,7 +1414,10 @@ function TranscriptListBody({
       openAttachment,
       openSelectText,
       handlers.subagents,
-      handlers.typingHandles
+      handlers.typingHandles,
+      handlers.groupChat,
+      handlers.ownAuthorId,
+      handlers.resolveSenderName
     ]
   )
 
@@ -1364,7 +1431,14 @@ function TranscriptListBody({
    * every settled bubble on every token. Reusing the previous object wherever the
    * VALUE has not changed is what keeps `__tests__/chat-ui/transcript-memo` honest.
    */
-  const layout = useStable(useMemo(() => layoutRows(items), [items]))
+  /*
+    `speakerKey`'s own gate (HERM-83, D6): the group chat with the reader's
+    identity known, and `undefined` everywhere else, which is what keeps a
+    personal sub-chat, a branch and a retired conversation grouping exactly as
+    they did before a row could carry an author at all.
+  */
+  const attributionOwnId = context.groupChat ? context.ownAuthorId : undefined
+  const layout = useStable(useMemo(() => layoutRows(items, undefined, attributionOwnId), [items, attributionOwnId]))
   const dmRoles = useStable(useMemo(() => rollupDmRuns(items), [items]))
 
   // Inverted: newest first.
@@ -1384,13 +1458,16 @@ function TranscriptListBody({
 
   const lastOwnId = useMemo(() => {
     for (const entry of data) {
-      if (entry.item.kind === 'user' && !entry.item.unknownAuthor) {
+      // A colleague's message must never carry the reader's own receipt —
+      // that is the exact defect HERM-83 fixes (§3): a foreign-attributed row
+      // painted as the reader's own, ticks included.
+      if (entry.item.kind === 'user' && !entry.item.unknownAuthor && isOwnUserItem(entry.item, context)) {
         return entry.item.id
       }
     }
 
     return undefined
-  }, [data])
+  }, [context, data])
 
   /**
    * A streaming reply already on screen holds its own dots (§6.2), so the

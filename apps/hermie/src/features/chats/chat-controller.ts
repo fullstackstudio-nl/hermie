@@ -26,6 +26,7 @@ import {
   applySubagentSnapshot,
   type ChatState,
   lastMessageAt,
+  type MessageAuthor,
   type ResumeSnapshot,
   type RowShape,
   rowsToItems,
@@ -58,6 +59,7 @@ import type { ChatCache } from '../../platform/chat-cache'
 import type { Bot, BotCanonicalSession, BotsState } from '../../store/bots'
 import type { ChatsState, QueuedMessage } from '../../store/chats'
 import { liveChatNames } from '../../store/chats'
+import { useDeviceContextStore } from '../../store/device-context'
 import { usePluginStore } from '../../store/plugin'
 import {
   type BotsController,
@@ -1666,7 +1668,7 @@ export class ChatController {
     // `display` exists for one caller: a `send`/`skill` directive, whose `text`
     // is the expanded skill body the model is meant to read and NOT what the
     // reader typed. The bubble shows `/docx`; the gateway is sent the expansion.
-    this.chats.getState().beginTurn(botName, options.display ?? body, attachmentReferences(attachments))
+    this.chats.getState().beginTurn(botName, options.display ?? body, attachmentReferences(attachments), ownAuthorFor())
 
     // Read back rather than recomputed: `beginLocalTurn` mints the id, and a
     // second spelling of that rule here would be a second place for it to drift.
@@ -4353,6 +4355,28 @@ function resumeSnapshotOf(result: SessionResumeResult): ResumeSnapshot {
  */
 function asRecord(value: object | null | undefined): Record<string, unknown> | null {
   return value ? ({ ...value } as Record<string, unknown>) : null
+}
+
+/**
+ * The reader's own identity, in the shape a persisted row will eventually
+ * carry (`MessageAuthor`) — read off `useDeviceContextStore`, the same
+ * `/api/auth/me` answer `ChatRuntime` wrote into it (HERM-83, D2).
+ *
+ * `undefined` before an identity has been read at all, which is what keeps a
+ * turn begun before that happens exactly as unattributed as one always was —
+ * `beginLocalTurn` treats a missing author as "nobody knows", never a guess.
+ * `name` is the gateway's own display name, omitted when it sent none; it is
+ * carried for symmetry with the row this optimistic item stands in for and is
+ * never itself shown (D3: an own bubble is never named).
+ */
+function ownAuthorFor(): MessageAuthor | undefined {
+  const identity = useDeviceContextStore.getState()
+
+  if (!identity.userId) {
+    return undefined
+  }
+
+  return { id: identity.userId, ...(identity.displayName ? { name: identity.displayName } : {}) }
 }
 
 /**

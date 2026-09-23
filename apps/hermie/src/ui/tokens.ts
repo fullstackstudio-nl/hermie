@@ -354,6 +354,13 @@ export const ACCENT_ORDER: readonly AccentName[] = [
   'lime'
 ]
 
+/**
+ * The ten colours a group chat may ink a SENDER's name in — `ACCENT_ORDER`
+ * minus `default`, which stays reserved for the chat's own outgoing bubble so
+ * a teammate's ink is never mistaken for the chat's own accent (HERM-83, D5).
+ */
+export const SENDER_INK_ORDER: readonly AccentName[] = ACCENT_ORDER.filter(name => name !== 'default')
+
 /** The soft tint a chat's colour lays under a selected row or an icon well. */
 export function accentSoft(name: AccentName, scheme: Scheme): string {
   return withAlpha(ACCENTS[name].fill, scheme === 'dark' ? 0.26 : 0.13)

@@ -53,12 +53,25 @@ export interface AvatarProps {
    * shows an empty circle while its asset is still being fetched.
    */
   uri?: string
+  /**
+   * What the circle's tint is keyed on, when that has to be something other
+   * than `name`. Defaults to `name`, which is every caller before HERM-83: a
+   * bot's own circle has always been keyed on the one name it is drawn with.
+   *
+   * A group-chat sender's avatar passes `author.id` instead — the identity,
+   * not the display name a person can change — so a rename cannot recolour
+   * their circle and two people who happen to share a name cannot share one
+   * (D5). The circle's own 4-tint palette is untouched either way; only what
+   * picks a slot from it moves.
+   */
+  tintKey?: string
+  testID?: string
 }
 
-export function Avatar({ name, size = 40, style, uri }: AvatarProps) {
+export function Avatar({ name, size = 40, style, uri, tintKey, testID }: AvatarProps) {
   const theme = useTheme()
   const palette = theme.scheme === 'dark' ? DARK_TINTS : LIGHT_TINTS
-  const tint = palette[tintIndex(name, palette.length)] ?? palette[0]
+  const tint = palette[tintIndex(tintKey ?? name, palette.length)] ?? palette[0]
   const [broken, setBroken] = useState(false)
 
   useEffect(() => {
@@ -79,6 +92,7 @@ export function Avatar({ name, size = 40, style, uri }: AvatarProps) {
           { backgroundColor: tint?.background, borderRadius: size / 2, height: size, width: size },
           style as ImageStyle
         ]}
+        testID={testID}
       />
     )
   }
@@ -101,6 +115,7 @@ export function Avatar({ name, size = 40, style, uri }: AvatarProps) {
         },
         style
       ]}
+      testID={testID}
     >
       <Text style={{ color: tint?.foreground, fontSize: Math.round(size * 0.44), fontWeight: '600' }}>
         {initialFor(name)}

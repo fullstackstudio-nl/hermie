@@ -60,6 +60,40 @@ describe('speakerKey', () => {
     expect(speakerKey(user('b', AT, { unknownAuthor: true }).item)).toBe('foreign')
   })
 
+  // HERM-83, D6: `ownAuthorId` is the whole of the attribution gate. Nothing
+  // about an `author` matters unless a caller passes it — a personal
+  // sub-chat, a branch and a retired conversation never do.
+  it('ignores an attributed author entirely when no own id is given', () => {
+    const authored = user('a', AT, { author: { id: 'authentik:someone-else' } }).item
+
+    expect(speakerKey(authored)).toBe('own')
+  })
+
+  it('keys the reader’s own attributed row as own', () => {
+    const mine = user('a', AT, { author: { id: 'authentik:me' } }).item
+
+    expect(speakerKey(mine, 'authentik:me')).toBe('own')
+  })
+
+  it('keys a colleague’s attributed row by their identity, not their name', () => {
+    const theirs = user('a', AT, { author: { id: 'authentik:writer', name: 'Robin' } }).item
+
+    expect(speakerKey(theirs, 'authentik:me')).toBe('user:authentik:writer')
+  })
+
+  it('gives two different colleagues two different keys', () => {
+    const first = user('a', AT, { author: { id: 'authentik:writer' } }).item
+    const second = user('b', AT, { author: { id: 'authentik:researcher' } }).item
+
+    expect(speakerKey(first, 'authentik:me')).not.toBe(speakerKey(second, 'authentik:me'))
+  })
+
+  it('keeps the unknown-author placeholder its own key even with an own id given', () => {
+    const placeholder = user('a', AT, { unknownAuthor: true }).item
+
+    expect(speakerKey(placeholder, 'authentik:me')).toBe('foreign')
+  })
+
   it('separates an interim note from the answer', () => {
     const answer = assistant('a', AT).item
     const note = { ...answer, id: 'b', interim: true } as TranscriptItem
@@ -168,6 +202,53 @@ describe('layoutRows', () => {
     expect(layout.a?.dateStamp).toBe('Today')
     expect(layout.b?.dateStamp).toBe('Yesterday')
     expect(layout.c?.dateStamp).toBe('Today')
+  })
+
+  // HERM-83, D6: with the group-chat gate open (an `ownAuthorId` given), two
+  // people alternating break each other's runs — the same rule that makes an
+  // avatar appear "when the sender changes".
+  describe('with attribution active', () => {
+    const me = 'authentik:me'
+    const writer = { id: 'authentik:writer' }
+    const researcher = { id: 'authentik:researcher' }
+
+    it('groups three consecutive messages from one colleague into one run', () => {
+      const layout = layoutRows(
+        [
+          user('a', AT, { author: writer }),
+          user('b', AT + 5, { author: writer }),
+          user('c', AT + 10, { author: writer })
+        ],
+        undefined,
+        me
+      )
+
+      expect(layout.a?.grouped).toBe(false)
+      expect(layout.b?.grouped).toBe(true)
+      expect(layout.c?.grouped).toBe(true)
+      expect(layout.c?.tail).toBe(true)
+    })
+
+    it('breaks the run when two colleagues alternate', () => {
+      const layout = layoutRows(
+        [user('a', AT, { author: writer }), user('b', AT + 5, { author: researcher })],
+        undefined,
+        me
+      )
+
+      expect(layout.a?.tail).toBe(true)
+      expect(layout.b?.grouped).toBe(false)
+    })
+
+    it('keeps the reader’s own attributed row out of a colleague’s run', () => {
+      const layout = layoutRows(
+        [user('a', AT, { author: writer }), user('b', AT + 5, { author: { id: me } })],
+        undefined,
+        me
+      )
+
+      expect(layout.b?.grouped).toBe(false)
+    })
   })
 })
 

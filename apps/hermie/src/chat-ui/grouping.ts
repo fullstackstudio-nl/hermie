@@ -47,11 +47,30 @@ export interface RowLayout {
  * A human turn whose author is not yet known (`unknownAuthor`, a turn somebody
  * else started in this session) is deliberately its own key: grouping it with
  * the owner's own bubbles would claim it was theirs.
+ *
+ * `ownAuthorId` is the reader's own identity, `<provider>:<user_id>` exactly
+ * as the gateway spelled it — and it is also the whole of the attribution
+ * gate (HERM-83, D6). A caller passes it only where a row's `author` may be
+ * trusted and shown at all (the group chat, with the reader's own identity
+ * known); everywhere else it is left `undefined`, which is what keeps a
+ * personal sub-chat, a branch and a retired conversation drawing exactly as
+ * they did before this field existed — every `user` row its own silhouette,
+ * `author` or not. With it, a row whose author is not the reader keys its OWN
+ * run by identity (`user:<id>`) rather than folding into `'own'`, which is
+ * what lets two people alternating in the group chat break each other's runs.
  */
-export function speakerKey(item: TranscriptItem): string | null {
+export function speakerKey(item: TranscriptItem, ownAuthorId?: string): string | null {
   switch (item.kind) {
     case 'user':
-      return item.unknownAuthor ? 'foreign' : 'own'
+      if (item.unknownAuthor) {
+        return 'foreign'
+      }
+
+      if (ownAuthorId && item.author) {
+        return item.author.id === ownAuthorId ? 'own' : `user:${item.author.id}`
+      }
+
+      return 'own'
     case 'assistant':
       // An interim note and the answer are the same bot, but the note is muted
       // and the answer is not, so a run that mixes them reads as a rendering
@@ -113,8 +132,15 @@ export function dateStampFor(unixSeconds: number, now = Date.now() / 1000): stri
  *
  * Indexed by item id rather than by position, so the caller can reverse the
  * array for an inverted `FlatList` without the layout going with it.
+ *
+ * `ownAuthorId` is `speakerKey`'s own gate, passed through unchanged: absent
+ * everywhere but the group chat with the reader's identity known (HERM-83, D6).
  */
-export function layoutRows(entries: readonly VisibleItem[], now = Date.now() / 1000): Record<string, RowLayout> {
+export function layoutRows(
+  entries: readonly VisibleItem[],
+  now = Date.now() / 1000,
+  ownAuthorId?: string
+): Record<string, RowLayout> {
   const layout: Record<string, RowLayout> = {}
   let lastStamp: string | undefined
 
@@ -126,7 +152,7 @@ export function layoutRows(entries: readonly VisibleItem[], now = Date.now() / 1
     }
 
     const item = entry.item
-    const key = speakerKey(item)
+    const key = speakerKey(item, ownAuthorId)
 
     // A hidden row is not on the screen, so it must not break a run either —
     // otherwise turning Quiet on would visibly re-group the conversation.
@@ -134,9 +160,13 @@ export function layoutRows(entries: readonly VisibleItem[], now = Date.now() / 1
     const next = nextVisible(entries, index)
 
     const grouped =
-      key !== null && previous !== undefined && speakerKey(previous) === key && withinWindow(previous.ts, item.ts)
+      key !== null &&
+      previous !== undefined &&
+      speakerKey(previous, ownAuthorId) === key &&
+      withinWindow(previous.ts, item.ts)
 
-    const tail = key === null || next === undefined || speakerKey(next) !== key || !withinWindow(item.ts, next.ts)
+    const tail =
+      key === null || next === undefined || speakerKey(next, ownAuthorId) !== key || !withinWindow(item.ts, next.ts)
 
     const pair = dmPairKey(item)
     const ledgerRun = pair !== null && previous !== undefined && dmPairKey(previous) === pair

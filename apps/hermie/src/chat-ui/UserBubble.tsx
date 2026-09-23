@@ -1,25 +1,48 @@
 /**
- * The human's own turn: right-aligned, the chat's flat accent, white text,
- * a tail on the last of a run, the clock on the body's last line and — on the last
+ * A human turn.
+ *
+ * The reader's own: right-aligned, the chat's flat accent, white text, a tail
+ * on the last of a run, the clock on the body's last line and — on the last
  * sent message only — ticks beside it.
  *
- * The body is real Markdown, not raw characters. A person who types `**done**` or
- * a path in backticks was writing markup, and the reply beside it renders the
- * same markup: showing the asterisks on one side and bold on the other is the
- * app disagreeing with itself. Links are underlined in white rather than in the
- * accent, which on its own fill would be invisible.
+ * Somebody else's, in the group chat, when the gateway said who they are
+ * (HERM-83): left-aligned, the reading bubble, normal ink — the same
+ * silhouette `AssistantBubble` draws — with their name over the first bubble
+ * of their run in their own colour and their avatar beside it, in a gutter
+ * reserved for the whole run so every bubble in it keeps one left edge. `own`
+ * defaults to `true`, which is every caller before this field existed: a row
+ * the host has not proven is somebody else's draws exactly as it always has
+ * (D3) — no name, no avatar, the reader's own silhouette.
+ *
+ * The body is real Markdown, not raw characters. A person who types `**done**`
+ * or a path in backticks was writing markup, and the reply beside it renders
+ * the same markup: showing the asterisks on one side and bold on the other is
+ * the app disagreeing with itself. An outgoing bubble underlines a link in
+ * white rather than in the accent, which on its own fill would be invisible;
+ * an incoming one reads exactly as `AssistantBubble`'s does.
  */
 import { View } from 'react-native'
 
 import { Markdown } from '../markdown'
 import { useTheme } from '../ui/theme'
+import { AVATAR_SIZE } from '../ui/tokens'
 import { AttachmentGallery, type GalleryAttachment } from './AttachmentGallery'
-import { Bubble, useBubbleContentWidth } from './primitives/Bubble'
+import { Avatar } from './primitives/Avatar'
+import { Bubble, bubblePaddingX, TAIL_REACH, useBubbleContentWidth } from './primitives/Bubble'
 import { Chip } from './primitives/Chip'
 import { MetaLine } from './primitives/MetaLine'
-import { formatClock } from './format'
+import { SenderLabel } from './primitives/SenderLabel'
+import { formatClock, needsReadingTreatment } from './format'
 import { chatStrings } from './strings'
 import type { Presentation, Receipt, UserItem } from './types'
+
+/** Who to draw above an incoming bubble — already resolved and sanitised. */
+export interface UserSender {
+  /** Real text, ready to show as-is. */
+  name: string
+  /** The identity the ink and the avatar circle are keyed on. Never the name. */
+  authorId: string
+}
 
 export interface UserBubbleProps {
   item: UserItem
@@ -44,6 +67,27 @@ export interface UserBubbleProps {
   attachmentUri?: (reference: string) => string | undefined
   /** Open one: the full-screen viewer for a picture, the system for a file. */
   onOpenAttachment?: (attachment: GalleryAttachment) => void
+  /**
+   * Is this the READER'S OWN message?
+   *
+   * Default `true` — unchanged from before `UserItem.author` existed (D3).
+   * Only a caller that has proven this row is somebody else's — the group
+   * chat, the reader's own identity known, and an `author` that names somebody
+   * else — passes `false`. Everywhere that proof is missing, `true` is the
+   * honest answer: it is either actually the reader's, or nobody can say it
+   * is not, and painting it any other way would be a guess this component is
+   * not allowed to make.
+   */
+  own?: boolean
+  /**
+   * Who to draw above the bubble when `own` is `false`.
+   *
+   * Absent still draws the INCOMING silhouette — the row is known not to be
+   * the reader's regardless of whether anybody can be named for it — but with
+   * no name and no avatar, which is the honest answer for a foreign row with
+   * nothing to attribute it to.
+   */
+  sender?: UserSender
 }
 
 /**
@@ -71,13 +115,17 @@ export function UserBubble({
   accent,
   onLinkPress,
   attachmentUri,
-  onOpenAttachment
+  onOpenAttachment,
+  own = true,
+  sender
 }: UserBubbleProps) {
   const theme = useTheme()
   // An outgoing bubble never takes the reading treatment, so its padding — and
-  // therefore the room a block in it has — is the plain one. Above the early
-  // returns, because a hook cannot sit below one.
-  const contentWidth = useBubbleContentWidth(false)
+  // therefore the room a block in it has — is the plain one. An incoming one
+  // takes it exactly as `AssistantBubble` does. Above the early returns,
+  // because a hook cannot sit below one.
+  const reading = !own && Boolean(item.text) && needsReadingTreatment(item.text)
+  const contentWidth = useBubbleContentWidth(own ? false : reading)
 
   if (presentation === 'hidden-placeholder') {
     return null
@@ -89,8 +137,10 @@ export function UserBubble({
 
   const time = formatClock(item.ts)
   const bubble = accent ?? theme.accent().bubble
+  const variant = reading ? 'inRead' : 'in'
+  const recipe = theme.bubbles[variant]
 
-  return (
+  const message = (
     <Bubble
       accent={bubble}
       grouped={grouped}
@@ -99,7 +149,9 @@ export function UserBubble({
         appear where the engine has a receipt to report — which is the last sent
         message and nothing else, because a receipt is one fact about the
         conversation rather than one per message. Painting a tick on an older
-        bubble would be inventing a delivery the gateway never confirmed.
+        bubble would be inventing a delivery the gateway never confirmed. And
+        never on a row that is not the reader's own: a colleague's message is
+        not something this device has a delivery state for at all.
       */
       meta={
         <MetaLine
@@ -111,34 +163,39 @@ export function UserBubble({
             ABOVE it.
           */
           marker={item.displayKind === 'steer' ? chatStrings.queue.steeredMarker : undefined}
-          onAccent
-          receipt={receipt}
+          onAccent={own}
+          receipt={own ? receipt : undefined}
           testID={`user-meta-${item.id}`}
           time={time}
         />
       }
-      side="own"
+      side={own ? 'own' : 'other'}
       tail={tail}
       testID={`user-${item.id}`}
+      {...(own ? {} : { variant })}
     >
       {item.text ? (
         <Markdown
-          // White on the accent. The accent link colour is the bubble's own
-          // fill, so it would vanish into it.
-          color="onAccent"
-          // A table's cells are transparent, so its edge dissolves into the
-          // accent the bubble is filled with.
-          fadeTo={bubble}
-          linkColor={theme.colors.onAccent}
+          {...(own
+            ? {
+                // White on the accent. The accent link colour is the bubble's
+                // own fill, so it would vanish into it.
+                color: 'onAccent' as const,
+                mutedColor: 'onAccent' as const,
+                // A code chip inside a white-on-accent bubble needs a light
+                // wash. The default steps DOWN from the surface it sits on,
+                // which on a saturated fill reads as a redaction bar.
+                inlineCodeBackground: 'rgba(255,255,255,0.22)',
+                inlineCodeBorderColor: 'rgba(255,255,255,0.32)',
+                surface: 'rgba(255,255,255,0.16)'
+              }
+            : {})}
+          // A table's cells are transparent, so its edge dissolves into
+          // whatever the bubble is filled with.
+          fadeTo={own ? bubble : recipe.tail}
+          linkColor={own ? theme.colors.onAccent : theme.accent().text}
           maxContentWidth={contentWidth}
-          mutedColor="onAccent"
           onLinkPress={onLinkPress}
-          // A code chip inside a white-on-accent bubble needs a light wash. The
-          // default steps DOWN from the surface it sits on, which on a saturated
-          // fill reads as a redaction bar.
-          inlineCodeBackground="rgba(255,255,255,0.22)"
-          inlineCodeBorderColor="rgba(255,255,255,0.32)"
-          surface="rgba(255,255,255,0.16)"
           text={item.text}
         />
       ) : null}
@@ -156,12 +213,53 @@ export function UserBubble({
 
               return { name: attachmentName(reference), reference, ...(uri ? { uri } : {}) }
             })}
-            onAccent
+            onAccent={own}
             {...(onOpenAttachment ? { onOpen: onOpenAttachment } : {})}
             testID={`user-file-${item.id}`}
           />
         </View>
       ) : null}
     </Bubble>
+  )
+
+  if (own || !sender) {
+    return message
+  }
+
+  /*
+    Somebody else's message in the group chat (HERM-83, D6): their name over
+    the first bubble of their run, their avatar beside it — in a gutter
+    reserved for the WHOLE run, grouped or not, so every bubble in it keeps
+    the same left edge instead of stepping in and out as the avatar comes and
+    goes. `Avatar` is `aria-hidden` by design (D7); the name is real text, in
+    reading order ahead of the bubble, which is the whole of the attribution a
+    screen reader gets from this row.
+  */
+  return (
+    <View style={{ flexDirection: 'row' }} testID={`user-sender-${item.id}`}>
+      <View style={{ marginRight: theme.space.sm, width: AVATAR_SIZE.inline }}>
+        {grouped ? null : (
+          <Avatar
+            name={sender.name}
+            size={AVATAR_SIZE.inline}
+            testID={`user-sender-avatar-${item.id}`}
+            tintKey={sender.authorId}
+          />
+        )}
+      </View>
+
+      <View style={{ flex: 1 }}>
+        {grouped ? null : (
+          <SenderLabel
+            authorId={sender.authorId}
+            name={sender.name}
+            style={{ marginBottom: theme.space.xxs, marginLeft: TAIL_REACH + bubblePaddingX(theme.space, reading) }}
+            testID={`user-sender-name-${item.id}`}
+          />
+        )}
+
+        {message}
+      </View>
+    </View>
   )
 }

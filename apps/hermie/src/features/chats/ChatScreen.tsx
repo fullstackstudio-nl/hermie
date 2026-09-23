@@ -64,6 +64,7 @@ import { presenceOf } from '../bots/presence'
 import { MemoryBotsScreen } from '../memory'
 import { botNames, useHideHandleWhenNamed } from '../../store/bot-names'
 import { useBotsStore } from '../../store/bots'
+import { useDeviceContextStore } from '../../store/device-context'
 import {
   useBotLabel,
   useChatAccent,
@@ -427,6 +428,17 @@ function Conversation({
   const canCreate = Boolean(runtime?.userChats?.available)
   const currentOwnId = useCurrentConversation(botName)
   const conversationList = useConversationList(botName, canCreate)
+
+  /*
+    HERM-83, D6: a name and an avatar are drawn only in the canonical GROUP
+    chat, never in one of the reader's own — and `currentOwnId` alone already
+    says which one this screen is showing, the same fact the label above reads.
+    A branch or a retired conversation never reaches `ChatScreen` at all (they
+    open in `ConversationViewScreen`, which passes neither prop), so nothing
+    further is needed to keep them unnamed.
+  */
+  const groupChat = currentOwnId === undefined
+  const ownAuthorId = useDeviceContextStore(state => state.userId) || undefined
 
   /*
     The header's second line, while sub-chats are on: `Group chat` for the
@@ -2240,7 +2252,9 @@ function Conversation({
                 }
                 {...(highlightId ? { highlightItemId: highlightId } : {})}
                 attachmentUri={attachmentUri}
+                groupChat={groupChat}
                 images={images}
+                {...(ownAuthorId ? { ownAuthorId } : {})}
                 onOpenAttachment={openAttachment}
                 items={chat.items}
                 newMessageCount={newCount}

@@ -3384,20 +3384,45 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       // never submitted.
       const body = await readBody(req)
       const profile = String(body.profile ?? 'researcher')
-      const session = [...state.sessions.values()].find(entry => entry.profile === profile)
+      /*
+       * `session_id` (a stored or runtime id) targets one exact conversation —
+       * a bot has more than one once sub-chats exist, and "the profile's
+       * first session" is always its canonical Bot Chat. Omitted, the lookup
+       * is the original one, unchanged.
+       */
+      const session =
+        typeof body.session_id === 'string' && body.session_id
+          ? resolveSession(body.session_id)
+          : [...state.sessions.values()].find(entry => entry.profile === profile)
 
       if (!session) {
-        json(res, 404, { detail: `No session for profile ${profile}` })
+        json(res, 404, {
+          detail:
+            typeof body.session_id === 'string' && body.session_id
+              ? `No session ${body.session_id}`
+              : `No session for profile ${profile}`
+        })
 
         return
       }
+
+      const author =
+        body.author && typeof body.author === 'object' && typeof (body.author as { id?: unknown }).id === 'string'
+          ? {
+              id: (body.author as { id: string }).id,
+              ...(typeof (body.author as { name?: unknown }).name === 'string'
+                ? { name: (body.author as { name: string }).name }
+                : {})
+            }
+          : undefined
 
       injectForeignTurn(session, {
         user: String(body.user ?? 'Message from 🤖 Writer (@writer): the draft is ready.'),
         assistant: String(body.assistant ?? 'Noted — I will fold that in.'),
         stream: body.stream !== false,
         ...(typeof body.status === 'string' ? { status: body.status } : {}),
-        ...(typeof body.error === 'string' ? { error: body.error } : {})
+        ...(typeof body.error === 'string' ? { error: body.error } : {}),
+        ...(author ? { author } : {})
       })
 
       json(res, 200, { injected: true, session_id: session.id, stored_session_id: session.storedId })
@@ -7344,7 +7369,19 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
    */
   function injectForeignTurn(
     session: FakeSession,
-    turn: { user: string; assistant: string; stream: boolean; status?: string; error?: string }
+    turn: {
+      user: string
+      assistant: string
+      stream: boolean
+      status?: string
+      error?: string
+      /**
+       * HERM-83: stages what the gateway fork stamps on a submitted turn —
+       * `display_metadata.author` — so a client can be checked against a row
+       * attributed to somebody who is not the reader, without a second login.
+       */
+      author?: { id: string; name?: string }
+    }
   ): void {
     const sid = session.storedId
 
@@ -7352,7 +7389,8 @@ export async function startFakeGateway(options: FakeGatewayOptions = {}): Promis
       role: 'user',
       text: turn.user,
       row_id: session.messages.length + 1,
-      timestamp: nowSeconds()
+      timestamp: nowSeconds(),
+      ...(turn.author ? { display_metadata: { author: turn.author } } : {})
     })
 
     if (turn.stream) {
