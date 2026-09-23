@@ -149,15 +149,13 @@ export function adminSignInPage(input: {
     strings: input.strings,
     body: `<p class="lede">${admin.signIn.intro}</p>
     ${input.notice ? `<p class="banner bad">${escapeHtml(input.notice)}</p>` : ''}
-    ${card({
-      body: `<form method="post" action="/admin/sign-in">
-        ${csrfField(input.csrf)}
-        <label for="secret">${common.administratorSecret}</label>
-        <input id="secret" name="secret" type="password" autocomplete="current-password">
-        <p class="note">${admin.signIn.secretNote}</p>
-        <div class="actions"><button type="submit">${common.signIn}</button></div>
-      </form>`
-    })}`
+    <form method="post" action="/admin/sign-in">
+      ${csrfField(input.csrf)}
+      <label for="secret">${common.administratorSecret}</label>
+      <input id="secret" name="secret" type="password" autocomplete="current-password">
+      <p class="note">${admin.signIn.secretNote}</p>
+      <div class="actions"><button type="submit">${common.signIn}</button></div>
+    </form>`
   })
 }
 

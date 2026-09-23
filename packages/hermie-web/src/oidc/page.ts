@@ -64,16 +64,15 @@ export function signInPage(input: SignInPageInput): string {
     locale: input.locale,
     strings: input.strings,
     body: `${input.notice ? `<p class="banner bad">${escapeHtml(input.notice)}</p>` : ''}
-    ${card({
-      body: `<form method="post" action="/oidc/authorize?${escapeHtml(input.query)}">
+    <form method="post" action="/oidc/authorize?${escapeHtml(input.query)}">
       ${csrfField(input.csrf)}
       ${
         input.wantsSecondFactor
           ? `<input type="hidden" name="username" value="${escapeHtml(input.username)}">
       <label for="totp">${text.totp}</label>
-      <input id="totp" name="totp" inputmode="numeric" autocomplete="one-time-code" autofocus>
+      <input id="totp" name="totp" type="text" inputmode="numeric" autocomplete="one-time-code" autofocus>
       <label for="recovery">${text.recovery}</label>
-      <input id="recovery" name="recovery" autocomplete="off">`
+      <input id="recovery" name="recovery" type="text" autocomplete="off">`
           : `<label for="username">${text.username}</label>
       <input id="username" name="username" type="text" value="${escapeHtml(
         input.username
@@ -85,7 +84,6 @@ export function signInPage(input: SignInPageInput): string {
         <button type="submit">${input.wantsSecondFactor ? text.verify : input.strings.common.signIn}</button>
       </div>
     </form>`
-    })}`
   })
 }
 
@@ -197,8 +195,7 @@ export function invitePage(input: InvitePageInput): string {
     strings: input.strings,
     body: `<p class="lede"><code>${escapeHtml(input.username)}</code></p>
     ${input.notice ? `<p class="banner bad">${escapeHtml(input.notice)}</p>` : ''}
-    ${card({
-      body: `<form method="post" action="/oidc/invite">
+    <form method="post" action="/oidc/invite">
       ${csrfField(input.csrf)}
       <input type="hidden" name="token" value="${escapeHtml(input.token)}">
       <label for="password">${text.password}</label>
@@ -206,8 +203,7 @@ export function invitePage(input: InvitePageInput): string {
       <label for="confirm">${text.again}</label>
       <input id="confirm" name="confirm" type="password" autocomplete="new-password">
       <div class="actions"><button type="submit">${text.submit}</button></div>
-    </form>`
-    })}
+    </form>
     <p class="note">${text.note}</p>`
   })
 }
@@ -245,8 +241,7 @@ export function enrolPage(input: {
     strings: input.strings,
     body: `<p class="lede"><code>${escapeHtml(input.username)}</code></p>
     ${input.notice ? `<p class="banner bad">${escapeHtml(input.notice)}</p>` : ''}
-    ${card({
-      body: `<ol>
+    <ol>
       <li>${text.addToAuthenticator}<br><code>${escapeHtml(input.secret)}</code></li>
       <li>${text.orOpen} <code>${escapeHtml(input.uri)}</code></li>
       <li>${text.typeTheCode}</li>
@@ -254,10 +249,9 @@ export function enrolPage(input: {
     <form method="post" action="/oidc/enrol">
       ${csrfField(input.csrf)}
       <label for="totp">${text.totp}</label>
-      <input id="totp" name="totp" inputmode="numeric" autocomplete="one-time-code">
+      <input id="totp" name="totp" type="text" inputmode="numeric" autocomplete="one-time-code">
       <div class="actions"><button type="submit">${text.confirm}</button></div>
-    </form>`
-    })}
+    </form>
     ${
       input.recoveryCodes.length
         ? card({

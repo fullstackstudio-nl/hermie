@@ -56,6 +56,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   selected one. A selected row carries a name and a line of state and was in no row of that table, so
   a reader could have lost the label of the row they were standing on with every ratio still green.
   All three clear AA in all three themes, both schemes.
+- **The sign-in family (sign in, set a password, the invitation, two-factor enrolment, and every
+  refusal or done page in between) is redesigned as one centred glass card instead of a form pinned
+  to the upper-left corner of an empty page.** The Hermie mark and the deployment's name now sit
+  above the card at a size that carries the page, the card itself uses the same flat "glassSheet"
+  material and edge highlight the rest of the app's Liquid Glass surfaces use (no gradients, no new
+  colours), and the submit button runs the full width of the card the way the app's own primary
+  actions do. A refusal (a wrong password, a locked account, a stale invitation) now reads as a
+  designed state — a tinted banner with a small danger mark ahead of it — rather than a bare
+  paragraph. Presentation only: nothing about what a form posts, how it is validated, or how a
+  session or a provider works has changed.
+- Fixed a browser-only bug in the same style sheet: every `font` shorthand that ended in `inherit`
+  (`font: 700 26px/30px inherit`) is invalid CSS whenever it also sets a size or a weight, so
+  browsers silently dropped the whole declaration and these pages were rendering with the browser's
+  own default type sizes throughout, not the ones the style sheet specified. The font stack itself
+  now lives in one `--ui-font` custom property on `:root`, used by `body` and every one of those
+  shorthands, rather than the literal stack repeated in each.
 
 ### Fixed
 

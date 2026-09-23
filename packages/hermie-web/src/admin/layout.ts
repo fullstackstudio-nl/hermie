@@ -64,8 +64,14 @@ export const ADMIN_SECTION_PATHS: Record<AdminSection, string> = {
  *
  * The backdrop is the accent fill from `tokens.ts` rather than the icon's own
  * vertical gradient: these pages carry no gradients.
+ *
+ * Sized rather than fixed at 28px: the thin dashboard header wants it small,
+ * and the sign-in family's hero wants it big enough to carry the page on its
+ * own — the same mark, the same corner radius ratio, at whatever size the
+ * caller needs. `class="mark"` stays literal either way; a test greps for it.
  */
-const MARK = `<svg class="mark" viewBox="0 0 1024 1024" width="28" height="28" aria-hidden="true" focusable="false">
+const mark = (size: number): string =>
+  `<svg class="mark" viewBox="0 0 1024 1024" width="${size}" height="${size}" aria-hidden="true" focusable="false">
   <rect x="0" y="0" width="1024" height="1024" rx="224" fill="#1668E3"/>
   <path d="M 424 656 C 420 732 358 790 222 818 C 288 752 306 700 304 644 Z" fill="#FFFFFF"/>
   <rect x="168" y="216" width="688" height="464" rx="140" fill="#FFFFFF"/>
@@ -93,7 +99,15 @@ export const STYLE = `
   :root {
     color-scheme: light dark;
     --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 20px; --s6: 24px; --s8: 32px;
-    --r-card: 18px; --r-inset: 12px; --r-pill: 999px;
+    --r-card: 18px; --r-inset: 12px; --r-pill: 999px; --r-sheet: 28px;
+    /*
+      What the interface is set in, once. Every "font" shorthand below ends in
+      this rather than repeating the stack, because a shorthand that ends in
+      "inherit" instead is invalid CSS the moment it also sets a size or a
+      weight — see the note on "body" below — and twelve copies of the literal
+      stack were twelve places the next change to it could miss one.
+    */
+    --ui-font: -apple-system, "SF Pro Text", system-ui, sans-serif;
     /* Blue, light: the elevation ladder from apps/hermie/src/ui/themes.ts. */
     --bg: #eaf3ff;
     --panel: #f4f8fe;
@@ -124,6 +138,20 @@ export const STYLE = `
     */
     --switch-line: #737d8d;
     --switch-knob: #5d6675;
+    /*
+      The sign-in family's glass sheet, and the specular edge on it.
+
+      design/liquid-glass-tokens.md's own first rule ("no gradients,
+      anywhere") is what turns "glassSheet"'s two-stop wash into one flat
+      alpha — the thinner of the two stops the doc still lists, which is the
+      one already checked against --ink. --edge-* draws the same doc's "Edge
+      highlights": three inset lines, never a blurred fourth.
+    */
+    --glass-sheet: rgba(255, 255, 255, 0.72);
+    --edge-hi: rgba(255, 255, 255, 0.92);
+    --edge-lo: rgba(255, 255, 255, 0.4);
+    --edge-ring: rgba(255, 255, 255, 0.3);
+    --auth-shadow: 0 30px 64px -22px rgba(14, 40, 86, 0.4), 0 10px 26px -14px rgba(14, 40, 86, 0.28);
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -146,12 +174,18 @@ export const STYLE = `
       --hair-soft: rgba(190, 212, 255, 0.13);
       --switch-line: #93a3bd;
       --switch-knob: #c2cee2;
+      /* glassSheet, dark: #334670 at 0.92 (§1.4), the panel shadow in black (§2). */
+      --glass-sheet: rgba(51, 70, 112, 0.92);
+      --edge-hi: rgba(255, 255, 255, 0.34);
+      --edge-lo: rgba(255, 255, 255, 0.1);
+      --edge-ring: rgba(255, 255, 255, 0.12);
+      --auth-shadow: 0 30px 64px -22px rgba(0, 0, 0, 0.72), 0 10px 26px -14px rgba(0, 0, 0, 0.5);
     }
   }
 
   * { box-sizing: border-box }
   body {
-    font: 400 16px/1.55 -apple-system, "SF Pro Text", system-ui, sans-serif;
+    font: 400 16px/1.55 var(--ui-font);
     margin: 0;
     background: var(--bg);
     color: var(--ink);
@@ -168,7 +202,7 @@ export const STYLE = `
     background: var(--panel);
   }
   .brand { display: flex; align-items: center; gap: var(--s2); text-decoration: none; color: inherit }
-  .brand-name { font: 600 17px/22px inherit; letter-spacing: -0.01em }
+  .brand-name { font: 600 17px/22px var(--ui-font); letter-spacing: -0.01em }
   .mark { display: block; border-radius: var(--s2) }
   .where { color: var(--muted); font-size: 0.9rem; margin-left: auto }
 
@@ -211,8 +245,8 @@ export const STYLE = `
   .footer-inner form { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; margin: 0 0 0 auto }
 
   /* ---- type ---- */
-  h1 { font: 700 26px/30px inherit; letter-spacing: -0.022em; margin: 0 0 var(--s2) }
-  h2 { font: 600 17px/22px inherit; margin: 0 0 var(--s2) }
+  h1 { font: 700 26px/30px var(--ui-font); letter-spacing: -0.022em; margin: 0 0 var(--s2) }
+  h2 { font: 600 17px/22px var(--ui-font); margin: 0 0 var(--s2) }
   p { color: var(--muted); margin: 0 0 var(--s4) }
   p:last-child { margin-bottom: 0 }
   .lede { margin-bottom: var(--s5) }
@@ -258,7 +292,7 @@ export const STYLE = `
   table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin: 0 0 var(--s4) }
   caption { text-align: left; color: var(--muted); font-size: 0.85rem; padding-bottom: var(--s2) }
   th, td { text-align: left; padding: var(--s2) var(--s2) var(--s2) 0; border-bottom: 1px solid var(--hair-soft); vertical-align: top }
-  th { color: var(--muted); font: 600 0.85rem/1.4 inherit }
+  th { color: var(--muted); font: 600 0.85rem/1.4 var(--ui-font) }
   /* A count is compared with the count above it, so counts line up on the right. */
   th.num, td.num { text-align: right; padding-right: 0; font-variant-numeric: tabular-nums }
   /* A column of checkboxes reads as a column, so the box sits under its header. */
@@ -294,7 +328,7 @@ export const STYLE = `
     color: inherit;
   }
   button {
-    font: 600 0.95rem/1.2 inherit;
+    font: 600 0.95rem/1.2 var(--ui-font);
     padding: var(--s3) var(--s5);
     border: 0;
     border-radius: var(--r-pill);
@@ -347,7 +381,7 @@ export const STYLE = `
     border-radius: var(--r-pill);
     background: var(--hair-soft);
     color: var(--muted);
-    font: 500 0.7rem/1.6 inherit;
+    font: 500 0.7rem/1.6 var(--ui-font);
     white-space: nowrap;
   }
   .pill.on { background: var(--accent-soft); color: var(--accent-ink) }
@@ -391,7 +425,7 @@ export const STYLE = `
       different tables glued together. There is one rule now, sized for the
       narrowest header cell the switches columns give it.
     */
-    font: 600 0.72rem/1.3 inherit;
+    font: 600 0.72rem/1.3 var(--ui-font);
   }
   .roster-head > span { min-width: 0 }
   .roster-list { list-style: none; margin: 0; padding: 0; color: var(--ink); font-size: 0.9rem }
@@ -451,7 +485,7 @@ export const STYLE = `
     place-items: center;
     background: var(--av-bg);
     color: var(--av-ink);
-    font: 600 0.72rem/1 inherit;
+    font: 600 0.72rem/1 var(--ui-font);
   }
   .av-0 { --av-bg: rgba(22, 104, 227, 0.13); --av-ink: #0b57c4 }
   .av-1 { --av-bg: rgba(123, 63, 196, 0.13); --av-ink: #6a2fb4 }
@@ -526,7 +560,7 @@ export const STYLE = `
   */
   .panel { display: none }
   .panel:target { display: block; padding: var(--s2) var(--s1) var(--s4) }
-  .panel h3 { font: 600 0.9rem/1.3 inherit; margin: var(--s3) 0 var(--s2) }
+  .panel h3 { font: 600 0.9rem/1.3 var(--ui-font); margin: var(--s3) 0 var(--s2) }
   /* A role picker with three words in it does not need the whole row. */
   .panel .fields > div { flex: 0 1 14rem }
   .panel dl { font-size: 0.85rem }
@@ -602,6 +636,106 @@ export const STYLE = `
     .panel:target { padding: 0 var(--s3) var(--s3) }
     .grid2 { grid-template-columns: minmax(0, 1fr) }
   }
+
+  /*
+    ---- the sign-in family: one centred glass card, never a dashboard ----
+
+    This used to reuse the dashboard's ".shell" grid and top bar — built for a
+    13rem nav rail beside a wide column, asked to hold one form. The result was
+    "Inloggen" pinned to the upper-left corner of an otherwise empty screen. The
+    sign-in family gets its own shell instead: centred both ways, the mark and
+    the deployment's name carrying the page above a glass card that holds
+    whatever the page actually is (a form, a refusal, a done page).
+  */
+  .auth-shell {
+    min-height: 100dvh;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--s6);
+    padding: var(--s8) var(--s4);
+  }
+  .auth-hero {
+    width: 100%;
+    max-width: var(--auth-width, 26rem);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--s1);
+    text-align: center;
+  }
+  /*
+    The mark "at a size that carries the page" (56px, up from the dashboard
+    header's 28px) and the corner radius kept at the source icon's own ratio
+    (rx 224 of 1024) rather than the dashboard's fixed --s2.
+  */
+  .auth-hero .mark { display: block; border-radius: var(--s4) }
+  .auth-hero .brand-name { display: block; font: 700 21px/26px var(--ui-font); letter-spacing: -0.016em }
+  /*
+    The page's own heading, doing double duty as the context line under the
+    brand name: "signing in", "the sign-in did not work", "the password is set"
+    already say what the page is and, with the brand name just above them,
+    where. A second, separate sentence would repeat one of the two, so none of
+    those sentences is spelled out literally here — every page in this family
+    has that heading embedded in its own translated copy, not in the style
+    sheet, and this style sheet ships on every one of them verbatim.
+  */
+  .auth-hero h1 { font: 400 15px/20px var(--ui-font); color: var(--muted); margin: 0 }
+  .auth-card {
+    width: 100%;
+    max-width: var(--auth-width, 26rem);
+    box-sizing: border-box;
+    background: var(--glass-sheet);
+    -webkit-backdrop-filter: blur(46px) saturate(180%);
+    backdrop-filter: blur(46px) saturate(180%);
+    border-radius: var(--r-sheet);
+    padding: var(--s6);
+    box-shadow:
+      inset 1.5px 1.5px 0 -0.5px var(--edge-hi),
+      inset -1px -1px 0 -0.5px var(--edge-lo),
+      inset 0 0 0 1px var(--edge-ring),
+      var(--auth-shadow);
+  }
+  .auth-card > :last-child { margin-bottom: 0 }
+  /*
+    Something nested inside the sheet — the enrolment page's recovery codes —
+    is information beside the form, never a second sheet: "never nest glass
+    more than one level" (design/liquid-glass-tokens.md §7.2). It drops to a
+    flat tint with a hairline instead of the dashboard's own opaque .card.
+  */
+  .auth-card .card {
+    background: var(--sunk);
+    border: 1px solid var(--hair-soft);
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  /* The one action on the card reaches edge to edge, the way a sheet's does. */
+  .auth-card .actions { justify-content: stretch }
+  .auth-card .actions button[type="submit"] { width: 100% }
+  /* A refusal reads as a refusal: a small danger-filled mark ahead of it. */
+  .auth-card .banner.bad {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s2);
+  }
+  .auth-card .banner.bad::before {
+    content: "!";
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+    border-radius: var(--r-pill);
+    background: var(--danger);
+    color: var(--on-accent);
+    font: 700 12px/18px var(--ui-font);
+    text-align: center;
+  }
+  @media (max-width: 26rem) {
+    .auth-shell { padding: var(--s6) var(--s4); gap: var(--s5) }
+    .auth-hero .mark { width: 48px; height: 48px }
+  }
 `
 
 const head = (locale: WebLocale, title: string): string =>
@@ -664,7 +798,7 @@ export function adminShell(chrome: AdminChrome, page: { title: string; intro?: s
 
   return `${head(chrome.locale, `${page.title} — ${chrome.brand}`)}<body>
 <header class="top">
-  <a class="brand" href="/admin">${MARK}<span class="brand-name">${escapeHtml(chrome.brand)}</span></a>
+  <a class="brand" href="/admin">${mark(28)}<span class="brand-name">${escapeHtml(chrome.brand)}</span></a>
   <span class="where">${strings.common.administration}</span>
 </header>
 <div class="shell">
@@ -705,7 +839,7 @@ export function adminShell(chrome: AdminChrome, page: { title: string; intro?: s
  */
 export function barePage(input: {
   brand: string
-  /** The `<h1>`. */
+  /** The `<h1>`. Doubles as the context line under the brand name — see `.auth-hero h1`. */
   title: string
   /**
    * The whole `<title>`, where the heading plus the brand will not do.
@@ -723,15 +857,16 @@ export function barePage(input: {
   const column = input.width === 'narrow' ? '26rem' : '34rem'
 
   return `${head(input.locale, input.documentTitle ?? `${input.title} — ${input.brand}`)}<body>
-<header class="top">
-  <span class="brand">${MARK}<span class="brand-name">${escapeHtml(input.brand)}</span></span>
-</header>
-<div class="shell" style="grid-template-columns: minmax(0, ${column})">
-  <main>
+<main class="auth-shell" style="--auth-width: ${column}">
+  <div class="auth-hero">
+    ${mark(56)}
+    <span class="brand-name">${escapeHtml(input.brand)}</span>
     <h1>${escapeHtml(input.title)}</h1>
+  </div>
+  <div class="auth-card">
     ${input.body}
-  </main>
-</div>
+  </div>
+</main>
 </body>
 </html>
 `
