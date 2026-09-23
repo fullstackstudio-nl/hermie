@@ -580,6 +580,7 @@ export const app: Translation<typeof strings> = {
     address: 'Adresse',
     viaHermieWeb: 'über Hermie Web',
     user: 'Angemeldet als',
+    email: 'E-Mail',
     authModeToken: 'Session-Token',
 
     webUpdate: {

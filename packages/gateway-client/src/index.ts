@@ -80,9 +80,11 @@ export {
   DEFAULT_REST_TIMEOUT_MS,
   GatewayHttp,
   type GatewayHttpOptions,
+  type PictureFetchOutcome,
   type RequestOptions,
   type WsTicket
 } from './http'
+export { bytesToBase64 } from './base64'
 export {
   AuthChangedError,
   type AccessTokenOptions,
@@ -171,6 +173,8 @@ export {
 } from './ui-meta'
 export {
   apiUrl,
+  AUTH_PICTURE_PATH,
+  authPicturePath,
   BLOCKED_HEADER_NAMES,
   GATEWAY_WS_PATH,
   hasExplicitScheme,

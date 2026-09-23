@@ -78,6 +78,15 @@ export interface StoredGatewayConfig {
   providerDisplayName?: string
   version?: string
   userDisplayName?: string
+  /** The signed-in person's email, as `/api/auth/me` sent it. Empty or absent draws no email row. */
+  userEmail?: string
+  /**
+   * Where their picture lives, relative to `baseUrl` — `/api/auth/me`'s own
+   * `picture_url`, unchanged. Absent on a gateway that never sent one (an
+   * upstream Hermes, or a fork account with no picture held), which draws the
+   * initial exactly as before HERM-120.
+   */
+  userPictureUrl?: string
 }
 
 export interface GatewaySetup {

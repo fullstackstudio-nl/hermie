@@ -1,4 +1,5 @@
 import { type AuthTimelineSink, NULL_AUTH_TIMELINE } from './auth-timeline'
+import { bytesToBase64 } from './base64'
 import { bearerFrom, type CredentialProvider } from './credentials'
 import { type FetchLike, parseJsonBody, requestText } from './fetch-json'
 import { apiUrl, normalizeHeaders } from './url'
@@ -29,12 +30,31 @@ export interface AuthIdentity {
   orgId: string
   provider: string
   expiresAt: number
+  /**
+   * Where this person's picture lives, relative — `/api/auth/picture?id=…` —
+   * or empty when the gateway is not holding one right now.
+   *
+   * Present only on a fork that sends it at all (HERM-120); an upstream
+   * Hermes gateway answers `/api/auth/me` without the field, which parses the
+   * same as an empty string. Join it onto the gateway's base URL with
+   * `apiUrl` before fetching it — it is already the full path, including the
+   * query, not a bare id.
+   */
+  pictureUrl: string
 }
 
 export interface WsTicket {
   ticket: string
   ttlSeconds: number
 }
+
+/** What fetching `/api/auth/picture` (or a `picture_url`) came back with. */
+export type PictureFetchOutcome =
+  | { kind: 'ready'; dataUri: string }
+  /** The gateway does not have this picture — an unknown id, or none held. */
+  | { kind: 'missing' }
+  /** Anything else: refused, unreachable, or an answer that was not an image. */
+  | { kind: 'error' }
 
 /**
  * The REST half of a gateway connection: everything that is not the JSON-RPC
@@ -93,8 +113,43 @@ export class GatewayHttp {
       displayName: typeof body.display_name === 'string' ? body.display_name : '',
       orgId: typeof body.org_id === 'string' ? body.org_id : '',
       provider: typeof body.provider === 'string' ? body.provider : '',
-      expiresAt: typeof body.expires_at === 'number' ? body.expires_at : 0
+      expiresAt: typeof body.expires_at === 'number' ? body.expires_at : 0,
+      pictureUrl: typeof body.picture_url === 'string' ? body.picture_url : ''
     }
+  }
+
+  /**
+   * `GET` an authenticated picture — `/api/auth/picture?id=…`, or the exact
+   * `picture_url` `/api/auth/me` handed back — and return it as a `data:` URI.
+   *
+   * Bytes rather than a URL, on purpose: the caller (an `Image`) never gets
+   * the authenticated address itself, only what it drew, so nothing downstream
+   * can log it, export it, or hand it to a second `Image` implementation that
+   * would need to be taught this gateway's auth all over again. It carries the
+   * same 401-then-retry the rest of this class gives every call, since the
+   * endpoint sits behind the same auth as everything else here.
+   *
+   * `path` must already be relative to this gateway's base URL — `apiUrl`
+   * joins it, exactly as every other call on this class does.
+   */
+  async fetchAuthenticatedPicture(path: string, options: RequestOptions = {}): Promise<PictureFetchOutcome> {
+    const first = await this.attemptBinary(path, options, {})
+
+    if (first.status !== 401) {
+      return outcomeOf(first)
+    }
+
+    ;(this.options.timeline ?? NULL_AUTH_TIMELINE).record({ event: 'rest.unauthorized', kind: 'auth', status: 401 })
+
+    const verdict = await this.options.credentials.onRejected(first.usedToken)
+
+    if (verdict === 'reauth') {
+      return { kind: 'error' }
+    }
+
+    const retry = await this.attemptBinary(path, options, { forceRefresh: false })
+
+    return outcomeOf(retry)
   }
 
   /**
@@ -169,6 +224,76 @@ export class GatewayHttp {
     return { ...response, url, ...(usedToken === undefined ? {} : { usedToken }) }
   }
 
+  /**
+   * `attempt`'s binary sibling: a plain `GET`, read as bytes rather than text.
+   *
+   * `requestText` cannot serve `fetchAuthenticatedPicture` — it always resolves
+   * `response.text()` — so this goes straight to the injected `fetchImpl` (or
+   * the platform's own `fetch`) instead. It still honours the same timeout,
+   * the same extra headers, the same credential mode, and the same signal a
+   * caller passed in; it does not honour `TLS`/`timeout` classification, since
+   * a picture that failed to load is `'error'` regardless of why.
+   */
+  private async attemptBinary(
+    path: string,
+    options: RequestOptions,
+    authOptions: { forceRefresh?: boolean }
+  ): Promise<{ status: number; ok: boolean; buffer: ArrayBuffer | null; contentType: string; usedToken?: string }> {
+    const url = apiUrl(this.options.baseUrl, path)
+    const auth = await this.options.credentials.httpAuthHeaders(authOptions)
+    const usedToken = bearerFrom(auth)
+    const fetchImpl = this.options.fetchImpl ?? fetch
+    const timeoutMs = options.timeoutMs ?? this.options.defaultTimeoutMs ?? DEFAULT_REST_TIMEOUT_MS
+    const controller = new AbortController()
+    const timer = timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : undefined
+    const abortOuter = () => controller.abort()
+
+    options.signal?.addEventListener('abort', abortOuter, { once: true })
+
+    try {
+      const response = await fetchImpl(url, {
+        method: 'GET',
+        headers: { ...this.extraHeaders, ...auth },
+        cache: 'no-store',
+        ...(this.options.credentials.fetchCredentials === undefined
+          ? {}
+          : { credentials: this.options.credentials.fetchCredentials }),
+        signal: controller.signal
+      })
+
+      if (!response.ok) {
+        return {
+          status: response.status,
+          ok: false,
+          buffer: null,
+          contentType: '',
+          ...(usedToken === undefined ? {} : { usedToken })
+        }
+      }
+
+      const buffer = await response.arrayBuffer()
+      const contentType = response.headers?.get('content-type') ?? ''
+
+      return {
+        status: response.status,
+        ok: true,
+        buffer,
+        contentType,
+        ...(usedToken === undefined ? {} : { usedToken })
+      }
+    } catch {
+      // Network failure, abort, a fetch double that throws — all the same
+      // answer here: this picture could not be loaded this time.
+      return { status: 0, ok: false, buffer: null, contentType: '', ...(usedToken === undefined ? {} : { usedToken }) }
+    } finally {
+      if (timer !== undefined) {
+        clearTimeout(timer)
+      }
+
+      options.signal?.removeEventListener('abort', abortOuter)
+    }
+  }
+
   private unwrap<T>(
     response: { status: number; ok: boolean; text: string; url: string },
     method: string,
@@ -232,5 +357,26 @@ function detailOf(text: string): string | null {
     return typeof detail === 'string' && detail.trim() ? detail : null
   } catch {
     return null
+  }
+}
+
+/** `attemptBinary`'s raw answer, turned into the outcome a caller actually wants. */
+function outcomeOf(response: {
+  status: number
+  ok: boolean
+  buffer: ArrayBuffer | null
+  contentType: string
+}): PictureFetchOutcome {
+  if (response.status === 404) {
+    return { kind: 'missing' }
+  }
+
+  if (!response.ok || !response.buffer) {
+    return { kind: 'error' }
+  }
+
+  return {
+    kind: 'ready',
+    dataUri: `data:${response.contentType || 'image/png'};base64,${bytesToBase64(new Uint8Array(response.buffer))}`
   }
 }

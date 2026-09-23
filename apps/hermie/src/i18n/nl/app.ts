@@ -568,6 +568,7 @@ export const app: Translation<typeof strings> = {
     address: 'Adres',
     version: 'Versie',
     user: 'Ingelogd als',
+    email: 'E-mail',
 
     webUpdate: {
       running: 'Draait',

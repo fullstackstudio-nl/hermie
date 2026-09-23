@@ -133,3 +133,59 @@ describe('TranscriptList, sender attribution (HERM-83)', () => {
     expect(screen.getByTestId('user-sender-name-a')).toHaveTextContent('A Whole New Name')
   })
 })
+
+/**
+ * HERM-120: `resolveSenderPictureUri` is asked for exactly the rows `RowView`
+ * has already proven are somebody else's, and never for the reader's own or
+ * an unattributed one — the same gate `resolveSenderName` answers to, and the
+ * same reason a colleague's picture must never be requested for a row that
+ * turns out to be the reader's own.
+ */
+describe('TranscriptList, resolveSenderPictureUri (HERM-120)', () => {
+  beforeEach(() => {
+    seq = 0
+  })
+
+  it('is asked for a colleague’s row, by their author id, and draws what it returns', () => {
+    const resolveSenderPictureUri = jest.fn((author: MessageAuthor) =>
+      author.id === WRITER.id ? 'data:image/png;base64,AAAA' : undefined
+    )
+
+    renderList([user('a', { author: WRITER })], { groupChat: true, ownAuthorId: ME, resolveSenderPictureUri })
+
+    expect(resolveSenderPictureUri).toHaveBeenCalledWith(WRITER)
+    expect(screen.getByTestId('user-sender-avatar-a', HIDDEN).props.source).toMatchObject({
+      uri: 'data:image/png;base64,AAAA'
+    })
+  })
+
+  it('is never asked for the reader’s own attributed message', () => {
+    const resolveSenderPictureUri = jest.fn(() => 'data:image/png;base64,AAAA')
+
+    renderList([user('a', { author: { id: ME, name: 'Me' } })], {
+      groupChat: true,
+      ownAuthorId: ME,
+      resolveSenderPictureUri
+    })
+
+    expect(resolveSenderPictureUri).not.toHaveBeenCalled()
+  })
+
+  it('is never asked for an unattributed row', () => {
+    const resolveSenderPictureUri = jest.fn(() => 'data:image/png;base64,AAAA')
+
+    renderList([user('a')], { groupChat: true, ownAuthorId: ME, resolveSenderPictureUri })
+
+    expect(resolveSenderPictureUri).not.toHaveBeenCalled()
+  })
+
+  it('draws the tinted initial, not a broken image, when it answers undefined', () => {
+    const resolveSenderPictureUri = jest.fn(() => undefined)
+
+    renderList([user('a', { author: WRITER })], { groupChat: true, ownAuthorId: ME, resolveSenderPictureUri })
+
+    const avatar = screen.getByTestId('user-sender-avatar-a', HIDDEN)
+
+    expect(avatar.props.source).toBeUndefined()
+  })
+})

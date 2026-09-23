@@ -42,6 +42,15 @@ export interface UserSender {
   name: string
   /** The identity the ink and the avatar circle are keyed on. Never the name. */
   authorId: string
+  /**
+   * Their picture, already fetched and ready to draw (HERM-120).
+   *
+   * Absent draws the tinted initial `Avatar` always has — no host, not asked
+   * for, still loading, a 404, any other error, or a gateway that never grew
+   * the endpoint all look the same here, on purpose: this component does not
+   * need to tell them apart to draw the right thing.
+   */
+  pictureUri?: string
 }
 
 export interface UserBubbleProps {
@@ -244,6 +253,7 @@ export function UserBubble({
             size={AVATAR_SIZE.inline}
             testID={`user-sender-avatar-${item.id}`}
             tintKey={sender.authorId}
+            {...(sender.pictureUri ? { uri: sender.pictureUri } : {})}
           />
         )}
       </View>

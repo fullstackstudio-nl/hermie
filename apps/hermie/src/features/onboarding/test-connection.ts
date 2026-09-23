@@ -122,12 +122,16 @@ export async function runConnectionTest(
 
   try {
     let userDisplayName = ''
+    let userEmail = ''
+    let userPictureUrl = ''
 
     onStage('rest')
 
     if (authMode !== 'session_token') {
       const identity = await connection.http.authMe()
       userDisplayName = identity.displayName || identity.email || identity.userId
+      userEmail = identity.email
+      userPictureUrl = identity.pictureUrl
     } else {
       // An ungated gateway has no identity to report, so the equivalent check is
       // simply that an authenticated read succeeds with the session token.
@@ -149,6 +153,8 @@ export async function runConnectionTest(
     return {
       key: connectionPayloadKey(tested),
       userDisplayName,
+      userEmail,
+      userPictureUrl,
       botCount: (result.profiles ?? []).length,
       // Read off the roster this stage just fetched: the plugin publishes its
       // advert into the gateway's own `ui_meta`, so "is it installed" is

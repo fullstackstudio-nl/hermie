@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A face on the people in Hermie, not just their name.** Signing in through a gateway that hands
+  back an email and a picture now shows both: Settings → Account draws the signed-in person's picture
+  where it drew an initial before, and their email underneath their name; a colleague's picture
+  appears beside their name at the head of their run in the shared Bot Chat, fetched by their
+  identity and cached per gateway so two gateways never mix up whose picture is whose. A gateway that
+  sends neither — an upstream Hermes, or a fork account with nothing held — keeps drawing the tinted
+  initial exactly as before, and a picture that 404s or fails to load falls back to it too, without
+  asking again for the rest of the session.
 - **A name on every message in the shared Bot Chat.** Somebody else's message now draws as an
   incoming bubble — their name over its first line in their own colour, their avatar beside it — the
   way any messenger shows a group, instead of the reader's own silhouette it drew before regardless

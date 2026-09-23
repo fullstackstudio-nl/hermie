@@ -289,6 +289,15 @@ export interface TranscriptContext {
    * stamped name, or the identity with its provider prefix stripped.
    */
   resolveSenderName?: (author: MessageAuthor) => string
+  /**
+   * A colleague's picture, fetched by `author.id` (HERM-120).
+   *
+   * `undefined` — no host, not asked, still loading, a 404, any error, or a
+   * gateway that never sent the endpoint — draws the tinted initial exactly as
+   * `UserBubble` always has; nothing here distinguishes those cases from one
+   * another, because `Avatar` draws the same fallback for all of them.
+   */
+  resolveSenderPictureUri?: (author: MessageAuthor) => string | undefined
 }
 
 // `onSelectText` is omitted rather than inherited: it is the list's own wiring to
@@ -589,11 +598,13 @@ function RowView({ entry, context, receipt, layout, dmRole }: RowProps) {
   switch (item.kind) {
     case 'user': {
       const own = isOwnUserItem(item, context)
+      const senderPictureUri = !own && item.author ? context.resolveSenderPictureUri?.(item.author) : undefined
       const sender =
         !own && item.author
           ? {
               authorId: item.author.id,
-              name: context.resolveSenderName?.(item.author) || fallbackSenderName(item.author)
+              name: context.resolveSenderName?.(item.author) || fallbackSenderName(item.author),
+              ...(senderPictureUri ? { pictureUri: senderPictureUri } : {})
             }
           : undefined
 
@@ -1389,7 +1400,8 @@ function TranscriptListBody({
       typingHandles: handlers.typingHandles ?? EMPTY_HANDLES,
       groupChat: handlers.groupChat,
       ownAuthorId: handlers.ownAuthorId,
-      resolveSenderName: handlers.resolveSenderName
+      resolveSenderName: handlers.resolveSenderName,
+      resolveSenderPictureUri: handlers.resolveSenderPictureUri
     }),
     [
       handlers.accent,
@@ -1417,7 +1429,8 @@ function TranscriptListBody({
       handlers.typingHandles,
       handlers.groupChat,
       handlers.ownAuthorId,
-      handlers.resolveSenderName
+      handlers.resolveSenderName,
+      handlers.resolveSenderPictureUri
     ]
   )
 

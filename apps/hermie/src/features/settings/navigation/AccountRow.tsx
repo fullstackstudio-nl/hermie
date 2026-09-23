@@ -27,6 +27,14 @@
  * suites that stand in for the gateway context with the two or three fields they
  * care about, and a row at the top of the list is not worth a crash in any of
  * them.
+ *
+ * ## The picture (HERM-120)
+ *
+ * `config.userPictureUrl` is `/api/auth/me`'s own `picture_url`, captured at
+ * sign-in alongside `userDisplayName`. `useOwnPictureUri` fetches and caches
+ * the bytes behind it; while that is unresolved, or where the gateway never
+ * sent one, `Avatar` draws the initial exactly as it always has — this row
+ * never blocks on the picture to show a name.
  */
 import { Pressable, View } from 'react-native'
 
@@ -34,6 +42,7 @@ import { Avatar } from '../../../chat-ui'
 import { useGateway } from '../../../gateway'
 import { describeGatewayAddress } from '../../../gateway/gateway-stop'
 import { strings } from '../../../i18n/strings'
+import { useOwnPictureUri } from '../../people/use-own-picture'
 import { Icon, ICON_SIZE } from '../../../ui/Icon'
 import { Text } from '../../../ui/primitives'
 import { useTheme } from '../../../ui/theme'
@@ -46,6 +55,7 @@ export interface AccountRowProps {
 export function AccountRow({ onPress }: AccountRowProps) {
   const theme = useTheme()
   const { config } = useGateway()
+  const pictureUri = useOwnPictureUri(config?.userPictureUrl)
   const summary = strings.settings.categories.summary
   // The old single fallback: what the row said, in full, before there was a
   // host to prefer over it. Still exactly right for the one case that has
@@ -100,7 +110,7 @@ export function AccountRow({ onPress }: AccountRowProps) {
         }}
       >
         {config?.userDisplayName ? (
-          <Avatar name={config.userDisplayName} size={size} />
+          <Avatar name={config.userDisplayName} size={size} {...(pictureUri ? { uri: pictureUri } : {})} />
         ) : (
           <View
             style={{

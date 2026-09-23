@@ -62,6 +62,7 @@ import { strings } from '../../i18n/strings'
 import { haptic } from '../../platform/haptics'
 import { presenceOf } from '../bots/presence'
 import { MemoryBotsScreen } from '../memory'
+import { useSenderPictureResolver } from '../people/use-sender-picture-resolver'
 import { botNames, useHideHandleWhenNamed } from '../../store/bot-names'
 import { useBotsStore } from '../../store/bots'
 import { useDeviceContextStore } from '../../store/device-context'
@@ -439,6 +440,11 @@ function Conversation({
   */
   const groupChat = currentOwnId === undefined
   const ownAuthorId = useDeviceContextStore(state => state.userId) || undefined
+  // A colleague's picture at the head of their run, fetched by `author.id`
+  // and cached per gateway (HERM-120). `RowView` only ever calls this for a
+  // row already proven to be somebody else's, so it never fires for the
+  // reader's own messages or for an unattributed row.
+  const resolveSenderPictureUri = useSenderPictureResolver()
 
   /*
     The header's second line, while sub-chats are on: `Group chat` for the
@@ -2256,6 +2262,7 @@ function Conversation({
                 images={images}
                 {...(ownAuthorId ? { ownAuthorId } : {})}
                 onOpenAttachment={openAttachment}
+                resolveSenderPictureUri={resolveSenderPictureUri}
                 items={chat.items}
                 newMessageCount={newCount}
                 loadingOlder={loadingOlder}

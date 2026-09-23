@@ -57,6 +57,10 @@ export interface ConnectionTestOutcome {
   /** The payload this result was produced for; a mismatch means "test again". */
   key: string
   userDisplayName: string
+  /** `/api/auth/me`'s `email`, from the same round trip. Empty where it sent none. */
+  userEmail: string
+  /** `/api/auth/me`'s `picture_url`, from the same round trip. Empty where it held no picture. */
+  userPictureUrl: string
   botCount: number
   /**
    * The gateway plugin's advert, out of the roster the test already read.
@@ -310,6 +314,8 @@ export function configFromDraft(draft: OnboardingDraft): StoredGatewayConfig {
       ? { provider: draft.provider.name, providerDisplayName: draft.provider.displayName }
       : {}),
     ...(draft.probe?.version ? { version: draft.probe.version } : {}),
-    ...(draft.test?.userDisplayName ? { userDisplayName: draft.test.userDisplayName } : {})
+    ...(draft.test?.userDisplayName ? { userDisplayName: draft.test.userDisplayName } : {}),
+    ...(draft.test?.userEmail ? { userEmail: draft.test.userEmail } : {}),
+    ...(draft.test?.userPictureUrl ? { userPictureUrl: draft.test.userPictureUrl } : {})
   }
 }

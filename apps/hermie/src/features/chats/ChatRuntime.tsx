@@ -25,6 +25,7 @@ import { useBotsStore } from '../../store/bots'
 import { currentTargetOf, useChatLayoutStore } from '../../store/chat-layout'
 import { useChatsStore } from '../../store/chats'
 import { OWNER_USER_ID, useDeviceContextStore } from '../../store/device-context'
+import { usePeoplePicturesStore } from '../people/people-pictures'
 import { useVoiceSettingsStore } from '../voice/voice-settings'
 import { useMcpProbeStore } from '../mcp'
 import { usePluginStore } from '../../store/plugin'
@@ -196,6 +197,12 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     // gateway, so the next one cannot READ them; this is about not keeping the
     // previous account's server names in this process.
     useMcpProbeStore.getState().reset()
+    // Pictures are already keyed per gateway (HERM-120), so this is not for
+    // correctness — it is so a sign-out-then-back-in on the SAME gateway picks
+    // up a picture that changed at the provider, the other half of "refetch on
+    // the next app start or sign-in" alongside this cache simply not surviving
+    // a relaunch.
+    usePeoplePicturesStore.getState().reset()
 
     hydrated.current = Promise.all([
       useSettingsStore.getState().hydrate(ns),

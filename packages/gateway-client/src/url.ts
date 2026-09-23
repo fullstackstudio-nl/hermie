@@ -95,6 +95,21 @@ export function apiUrl(baseUrl: string, path: string): string {
   return `${normalized}${suffix}`
 }
 
+/** Where a colleague's (or the reader's own) picture lives, behind the gateway's auth. */
+export const AUTH_PICTURE_PATH = '/api/auth/picture'
+
+/**
+ * `/api/auth/picture?id=<provider:sub>`, relative — join it onto a base URL
+ * with `apiUrl` the same way `picture_url` from `/api/auth/me` is joined.
+ *
+ * `id` is `author.id` exactly as a message row carries it (HERM-83's
+ * `MessageAuthor.id`), so it is encoded here rather than trusted to already be
+ * URL-safe.
+ */
+export function authPicturePath(id: string): string {
+  return `${AUTH_PICTURE_PATH}?id=${encodeURIComponent(id)}`
+}
+
 export function isBlockedHeaderName(name: string): boolean {
   return BLOCKED_HEADER_NAMES.has(name.trim().toLowerCase())
 }

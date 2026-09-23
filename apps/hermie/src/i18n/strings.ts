@@ -1026,6 +1026,8 @@ const stringsEn = {
     provider: 'Provider',
     version: 'Version',
     user: 'Signed in as',
+    /** Settings → Account, when `/api/auth/me` sent one (HERM-120). Empty draws no row at all. */
+    email: 'Email',
     authModeToken: 'Session token',
 
     /** Browser build only: the Hermie Web server this page came from. */
