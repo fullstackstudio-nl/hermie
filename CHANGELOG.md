@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Settings → Gateways is "Gateway", singular, in the browser.** Hermie Web is proxied to one
+  gateway by the server in front of it, so there is no second one to list, add, switch to or forget —
+  the category there is now purely informative: the address, the version, the connection's state and
+  whether the plugin is running, and nothing else. The category's line of state drops the count too
+  (the host alone, never "· 1 gateway"), and `GatewayDetail`/`GatewayAdd` are no longer part of the
+  registry the browser build runs — the route walk that proves every page's back control works now
+  covers that shape as well as the app's. Joins the conditional the address, host, scheme and port
+  rows already hid there rather than adding a second one; nothing changes off the web.
 - **Settings looks like something.** HERM-108 gave it the right structure — twelve categories, a page
   each, one back control per route — and the owner's verdict on the result was that it does not look
   like anything. The rows, the pages and the sidebar are redrawn against an iPadOS Settings reference

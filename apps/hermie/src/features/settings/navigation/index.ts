@@ -11,6 +11,7 @@ export { CategoryHeaderCard, type CategoryHeaderCardProps } from './CategoryHead
 export { CategoryMark, type CategoryMarkProps, type CategoryMarkSize } from './CategoryMark'
 export { CategoryRow, type CategoryRowProps, type CategoryRowVariant } from './CategoryRow'
 export {
+  isSettingsRouteVisible,
   SETTINGS_ROUTE_META,
   settingsChain,
   settingsDescendants,
@@ -30,6 +31,7 @@ export {
   settingsCategory,
   visibleCategories,
   visibleCategoryGroups,
+  visibleSettingsRouteNames,
   type SettingsCategory,
   type SettingsRoute
 } from './routes'

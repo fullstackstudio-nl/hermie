@@ -516,6 +516,7 @@ export const app: Translation<typeof strings> = {
     categories: {
       account: 'Account',
       gateways: 'Gateways',
+      gateway: 'Gateway',
       chats: 'Chats en berichten',
       notifications: 'Meldingen',
       context: 'Context over jou',
@@ -529,6 +530,7 @@ export const app: Translation<typeof strings> = {
       blurb: {
         account: 'Met welk account dit apparaat is ingelogd, en hoe je eruit stapt.',
         gateways: 'De gateway waarmee dit apparaat praat, en de andere die het kent.',
+        gateway: 'Welke gateway dit is, en hoe het daarmee gaat.',
         chats: 'Wat een nieuw gesprek laat zien, en hoe een bot wordt aangesproken.',
         notifications: 'Wanneer een bot je mag bereiken, en hoeveel een melding zegt.',
         context: 'Wat een bot over jou en dit apparaat te horen krijgt.',
@@ -544,6 +546,7 @@ export const app: Translation<typeof strings> = {
         signedOut: 'Niet ingelogd',
         gateways: (host: string, count: number) =>
           count === 1 ? `${host} · 1 gateway` : `${host} · ${count} gateways`,
+        gateway: (host: string) => host,
         on: 'Aan',
         off: 'Uit',
         notificationKinds: (count: number) => (count === 1 ? 'Aan · 1 soort' : `Aan · ${count} soorten`),

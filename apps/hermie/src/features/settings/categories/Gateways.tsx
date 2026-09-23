@@ -1,6 +1,11 @@
 /**
  * Settings → Gateways: the one this device is talking to, in the parts a reader
  * checks it by, and every other one it knows about.
+ *
+ * Hermie Web has no "every other one": the server in front of it already
+ * proxied it to a single gateway (`WEB_GATEWAY_BASE_URL`), so the page there
+ * is purely informative — the category is "Gateway", singular, its summary is
+ * the host alone, and the list, add and manage rows below do not draw at all.
  */
 import { isExposedCleartext } from '@hermie/gateway-client'
 import { useNavigation, type NavigationProp } from '@react-navigation/native'
@@ -29,7 +34,11 @@ export function useSummary(): string {
   const { config, registry } = useGateway()
   const host = describeGatewayAddress(config?.baseUrl).host
 
-  return strings.settings.categories.summary.gateways(host, registry?.gateways.length ?? 1)
+  // Hermie Web can only ever have the one it is proxied to — the host on its
+  // own, never "· n gateways" for a build that cannot count past it.
+  return WEB_GATEWAY_BASE_URL
+    ? strings.settings.categories.summary.gateway(host)
+    : strings.settings.categories.summary.gateways(host, registry?.gateways.length ?? 1)
 }
 
 export function Page() {

@@ -27,7 +27,7 @@ import * as Voice from '../categories/Voice'
 import { GatewayAddPage, GatewayDetailPage } from '../GatewaysScreen'
 import { LicencesPage } from './LicencesPage'
 import { LockThresholdPage } from './LockThresholdPage'
-import { SETTINGS_ROUTE_META, type SettingsRouteMeta } from './route-meta'
+import { isSettingsRouteVisible, SETTINGS_ROUTE_META, type SettingsRouteMeta } from './route-meta'
 import { SETTINGS_CATEGORIES, type SettingsCategoryName, type SettingsRouteName } from './route-names'
 import { SettingsRoot } from './SettingsRoot'
 
@@ -81,6 +81,17 @@ export const SETTINGS_ROUTES = Object.fromEntries(
     { ...SETTINGS_ROUTE_META[name], component: COMPONENTS[name] }
   ])
 ) as Record<SettingsRouteName, SettingsRoute>
+
+/**
+ * Every route this build actually has, in registry order.
+ *
+ * What the stack registers screens from — a route hidden on Hermie Web
+ * (`isSettingsRouteVisible`) gets no screen there, so it cannot be navigated
+ * to even by something that still names it, such as a stale dev launch intent.
+ */
+export function visibleSettingsRouteNames(): SettingsRouteName[] {
+  return (Object.keys(SETTINGS_ROUTES) as SettingsRouteName[]).filter(isSettingsRouteVisible)
+}
 
 /**
  * What a category DOES, as opposed to what it looks like.

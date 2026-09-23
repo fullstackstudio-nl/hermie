@@ -932,6 +932,12 @@ const stringsEn = {
     categories: {
       account: 'Account',
       gateways: 'Gateways',
+      /**
+       * Hermie Web is proxied to one gateway by the server in front of it
+       * (`WEB_GATEWAY_BASE_URL`), so there is no list to browse — singular,
+       * because a page about one thing is not called by the plural of it.
+       */
+      gateway: 'Gateway',
       chats: 'Chats & messages',
       notifications: 'Notifications',
       context: 'Context about you',
@@ -954,6 +960,7 @@ const stringsEn = {
       blurb: {
         account: 'Who this device is signed in as, and the ways of leaving.',
         gateways: 'The gateway this device talks to, and the others it knows about.',
+        gateway: 'Which gateway this is, and how it is doing.',
         chats: 'What a new conversation shows, and how a bot is addressed.',
         notifications: 'When a bot may reach you, and how much a notification says.',
         context: 'What a bot is told about you and this device.',
@@ -969,6 +976,8 @@ const stringsEn = {
         signedOut: 'Not signed in',
         gateways: (host: string, count: number) =>
           count === 1 ? `${host} · 1 gateway` : `${host} · ${count} gateways`,
+        /** Hermie Web: the host alone. A build that can only ever have one is not counted. */
+        gateway: (host: string) => host,
         on: 'On',
         off: 'Off',
         notificationKinds: (count: number) => (count === 1 ? 'On · 1 kind' : `On · ${count} kinds`),

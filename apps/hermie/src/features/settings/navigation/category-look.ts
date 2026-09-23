@@ -47,6 +47,7 @@
  * reads a colour the gate is already holding to a floor rather than inventing
  * one, and a category given any accent at all stays legible.
  */
+import { WEB_GATEWAY_BASE_URL } from '../../../gateway/web-config'
 import { strings } from '../../../i18n/strings'
 import type { IconName } from '../../../ui/Icon'
 import { ACCENTS, type AccentName } from '../../../ui/tokens'
@@ -82,7 +83,9 @@ const blurb = () => strings.settings.categories.blurb
 
 export const SETTINGS_CATEGORY_LOOK: Record<SettingsCategoryName, SettingsCategoryLook> = {
   Account: { icon: 'person', tint: 'default', blurb: () => blurb().account },
-  Gateways: { icon: 'server', tint: 'teal', blurb: () => blurb().gateways },
+  // Singular on Hermie Web: the server in front of it already fixed the
+  // gateway, so there is no "others it knows about" to mention there.
+  Gateways: { icon: 'server', tint: 'teal', blurb: () => (WEB_GATEWAY_BASE_URL ? blurb().gateway : blurb().gateways) },
   ChatsMessages: { icon: 'chats', tint: 'indigo', blurb: () => blurb().chats },
   Notifications: { icon: 'bell', tint: 'orange', blurb: () => blurb().notifications },
   Context: { icon: 'idCard', tint: 'magenta', blurb: () => blurb().context },

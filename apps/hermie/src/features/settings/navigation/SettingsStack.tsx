@@ -17,7 +17,7 @@ import { StackTitleContext } from '../../../ui/chrome'
 import { useGlassDepth } from '../../../ui/glass'
 import { settingsChain, settingsTitle } from './route-meta'
 import type { SettingsParamList, SettingsRouteName } from './route-names'
-import { SETTINGS_ROUTES } from './routes'
+import { SETTINGS_ROUTES, visibleSettingsRouteNames } from './routes'
 
 const Stack = createNativeStackNavigator<SettingsParamList>()
 
@@ -62,7 +62,7 @@ export function SettingsStack({ initialRoute = 'Root', initialParams, withRoot =
   const inPanel = useGlassDepth() > 0
   const chain = useRef<PendingChain | null>(null)
   const applied = useRef<string | null>(null)
-  const names = useMemo(() => Object.keys(SETTINGS_ROUTES) as SettingsRouteName[], [])
+  const names = useMemo(() => visibleSettingsRouteNames(), [])
   const route = settingsChain(initialRoute, { withRoot })
   const bottom = route[0] ?? 'Root'
   const key = route.join('>')
