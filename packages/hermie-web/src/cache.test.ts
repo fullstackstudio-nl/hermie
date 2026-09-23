@@ -399,6 +399,58 @@ describe('eviction', () => {
   })
 })
 
+describe('display_metadata.author', () => {
+  it('round-trips a sender the gateway attributed, and a row it did not, byte for byte', async () => {
+    const cache = open()
+    // A real `GET /api/sessions/{id}/messages` body, run through the same
+    // reader the proxy tee uses — not a hand-rolled row. `cache.ts` claims
+    // rows are stored "exactly as the gateway sent them"; this is that claim
+    // turned into a gate for the one field this feature adds.
+    const body = {
+      messages: [
+        {
+          role: 'user',
+          row_id: 1,
+          text: 'ship it',
+          display_metadata: { author: { id: 'google:118439', name: 'Robin' } }
+        },
+        // No author at all — a message from before the stamp existed, from the
+        // Hermes dashboard, or from a plain-upstream gateway. Nothing here may
+        // add one.
+        {
+          role: 'user',
+          row_id: 2,
+          text: 'from before the stamp existed'
+        }
+      ]
+    }
+    const rows = rowsOfMessagesBody(body)
+
+    await cache.put({
+      sessionId: 'tip-authors',
+      bot: 'researcher',
+      owner: '',
+      storedId: '',
+      shape: 'rest',
+      rows,
+      updatedAt: 1
+    })
+
+    const entry = await cache.get('tip-authors')
+
+    // The whole row, not just the field — a cache that altered anything else
+    // about an attributed row would be as much a defect as one that dropped
+    // the author.
+    expect(entry?.rows).toEqual(rows)
+    expect(JSON.stringify(entry?.rows)).toBe(JSON.stringify(rows))
+
+    expect(entry?.rows[0]?.display_metadata).toEqual({ author: { id: 'google:118439', name: 'Robin' } })
+    // The unattributed row stays unattributed: no `display_metadata` key was
+    // invented for it on the way through.
+    expect(entry?.rows[1]).not.toHaveProperty('display_metadata')
+  })
+})
+
 describe('what is worth copying off the proxy', () => {
   it('finds the session id in a transcript read, and only there', () => {
     expect(sessionIdOfMessagesPath('/api/sessions/tip-1/messages')).toBe('tip-1')
