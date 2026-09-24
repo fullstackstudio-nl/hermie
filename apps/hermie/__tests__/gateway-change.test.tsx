@@ -10,6 +10,7 @@
 import { type ConnectionStatus, type GatewayError, type ProbeResult } from '@hermie/gateway-client'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native'
 
+import { useOwnAuthorStore } from '../src/features/chats/own-author'
 import { OnboardingNavigator } from '../src/features/onboarding'
 import { GatewayProvider, useGateway } from '../src/gateway'
 import { renderScreen, withProviders } from './support/render'
@@ -121,6 +122,7 @@ beforeEach(() => {
   mockStatusHandlers.length = 0
   jest.clearAllMocks()
   probeGateway.mockResolvedValue(GATED)
+  useOwnAuthorStore.getState().reset()
 })
 
 /** The provider's answer, read the way the app's own root reads it. */
@@ -259,5 +261,55 @@ describe('the wizard it opens', () => {
 
     expect(deleted.includes(`hermie.auth.access_token-${mockGatewayId}`)).toBe(cleared)
     expect(keyValueStore.setJson).toHaveBeenCalled()
+  })
+})
+
+/**
+ * HERM-83 polish: the id a gateway signed the reader in AS does not survive
+ * the two acts that actually end that: signing out of it, and forgetting it
+ * outright. Neither is "the connection was merely rebuilt" — the case
+ * `own-author.ts` now deliberately keeps the last answer for, across a launch
+ * and across a reconnect — so both are asserted here rather than left to that
+ * safer default.
+ */
+describe('signing out or forgetting a gateway forgets who the reader was on it', () => {
+  it('clears the remembered author on sign-out', async () => {
+    useOwnAuthorStore.getState().set(mockGatewayId, { id: 'authentik:previous-owner' })
+
+    let gateway: ReturnType<typeof useGateway> | null = null
+
+    renderScreen(
+      <GatewayProvider>
+        <Harness onRead={value => (gateway = value)} />
+      </GatewayProvider>
+    )
+
+    await waitFor(() => expect(gateway?.phase).toBe('connected'))
+
+    await act(async () => {
+      await gateway?.signOut()
+    })
+
+    expect(useOwnAuthorStore.getState().byGateway[mockGatewayId]).toBeUndefined()
+  })
+
+  it('clears it on forgetGateway too', async () => {
+    useOwnAuthorStore.getState().set(mockGatewayId, { id: 'authentik:previous-owner' })
+
+    let gateway: ReturnType<typeof useGateway> | null = null
+
+    renderScreen(
+      <GatewayProvider>
+        <Harness onRead={value => (gateway = value)} />
+      </GatewayProvider>
+    )
+
+    await waitFor(() => expect(gateway?.phase).toBe('connected'))
+
+    await act(async () => {
+      await gateway?.forgetGateway()
+    })
+
+    expect(useOwnAuthorStore.getState().byGateway[mockGatewayId]).toBeUndefined()
   })
 })

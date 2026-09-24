@@ -201,28 +201,37 @@ export function tintIndex(name: string, buckets: number): number {
 const SENDER_NAME_LIMIT = 80
 
 /**
- * Invisible characters that change how the text AROUND them is laid out, and
- * so have no place in a one-line name: the bidi embeddings and overrides
- * (U+202A..U+202E), the bidi isolates (U+2066..U+2069), the directional marks
- * (U+200E, U+200F, U+061C), the zero-width space (U+200B) and the BOM
- * (U+FEFF). A colleague called "\u202Eetaged" otherwise reverses every line
- * their name leads — the chat-list preview, an export line.
+ * Unicode's own bucket for this: category Cf, "format" — text with no shape
+ * and no width of its own, present only to change how the characters AROUND it
+ * lay out or render. The bidi embeddings and overrides (U+202A..U+202E), the
+ * bidi isolates (U+2066..U+2069), the directional marks (U+200E, U+200F,
+ * U+061C), the zero-width space (U+200B) and the BOM (U+FEFF) are all members
+ * of it — a colleague called "\u202Eetaged" otherwise reverses every line their
+ * name leads, the chat-list preview and an export line included.
  *
- * ZERO WIDTH JOINER (U+200D) is deliberately NOT here: an emoji sequence — a
- * family, a profession, a skin tone on a couple — is several code points held
- * together by it, and stripping it breaks the emoji apart. Nor is ZERO WIDTH
- * NON-JOINER (U+200C), which Persian and other scripts need to spell a word.
+ * A whole category is dropped, rather than that hand-picked list, because Cf
+ * is bigger than the characters anyone had reason to test with: the WORD
+ * JOINER (U+2060, invisible and just as capable of hiding a name as U+200B)
+ * and the 128 TAG characters (U+E0000..U+E007F, an invisible sub-alphabet
+ * Unicode reserves for language-tagging and for the flag-sequence encodings
+ * built on it) both slipped through the old list untested and unnoticed. The
+ * category test needs no such list kept in step with Unicode by hand.
+ *
+ * Two members are kept, because dropping them changes what a name's
+ * characters ARE rather than how they lay out: ZERO WIDTH JOINER (U+200D),
+ * without which an emoji sequence — a family, a profession, a skin tone on a
+ * couple — falls apart into its plain pieces, and ZERO WIDTH NON-JOINER
+ * (U+200C), which Persian and other scripts need to keep two letters from
+ * ligating into one.
  */
+const FORMAT_CHAR = /\p{Cf}/u
+
 function isStrippedFormatChar(codePoint: number): boolean {
-  return (
-    (codePoint >= 0x202a && codePoint <= 0x202e) ||
-    (codePoint >= 0x2066 && codePoint <= 0x2069) ||
-    codePoint === 0x200b ||
-    codePoint === 0x200e ||
-    codePoint === 0x200f ||
-    codePoint === 0x061c ||
-    codePoint === 0xfeff
-  )
+  if (codePoint === 0x200c || codePoint === 0x200d) {
+    return false
+  }
+
+  return FORMAT_CHAR.test(String.fromCodePoint(codePoint))
 }
 
 /** C0 and C1 controls, DEL included: never text, but they may separate two words. */
@@ -235,26 +244,52 @@ function isLoneSurrogate(codePoint: number): boolean {
   return codePoint >= 0xd800 && codePoint <= 0xdfff
 }
 
+/** Unicode's combining marks (Mn, Mc, Me): drawn ON TOP of the character before them, not beside it. */
+const COMBINING_MARK = /\p{M}/u
+
+/**
+ * How many combining marks may stack on one base character before the rest
+ * are dropped. A name is one line among many in a list or a transcript, and a
+ * base letter is drawn once; every mark past a handful adds height rather than
+ * meaning, drawing tall over the row above it, and there is no legitimate
+ * script this cuts into — ordinary combining stacks, Vietnamese and Hebrew
+ * cantillation among the tallest, run to two or three marks.
+ */
+const MAX_COMBINING_MARKS = 3
+
 /**
  * One line of a name, safe to lead a line with: controls become a space, the
- * layout-changing invisibles above and any lone surrogate are dropped,
- * whitespace is collapsed, and the result is cut at `limit` CODE POINTS — never
- * UTF-16 units, which could leave half of an astral character behind.
+ * layout-changing invisibles above and any lone surrogate are dropped, a run
+ * of combining marks longer than `MAX_COMBINING_MARKS` is cut back to it,
+ * whitespace is collapsed, and the result is cut at `limit` CODE POINTS —
+ * never UTF-16 units, which could leave half of an astral character behind.
  *
- * The same idea as `contextTextOf` (`@hermie/gateway-client/context`), restated
- * rather than imported: the kit takes items and callbacks and carries no
- * runtime dependency on the gateway layer.
+ * Written here rather than imported from anywhere: the chat kit takes items
+ * and callbacks and carries no runtime dependency on the gateway layer.
  */
 function cleanSenderText(value: string, limit = Number.POSITIVE_INFINITY): string {
   let spaced = ''
+  // Resets on anything that is not itself a combining mark: a space, a
+  // control turned into one, or an ordinary base character starts a new run.
+  let combiningRun = 0
 
   for (const character of Array.from(value)) {
     const codePoint = character.codePointAt(0) ?? 0
 
     if (isControl(codePoint)) {
       spaced += ' '
-    } else if (!isStrippedFormatChar(codePoint) && !isLoneSurrogate(codePoint)) {
+      combiningRun = 0
+    } else if (isStrippedFormatChar(codePoint) || isLoneSurrogate(codePoint)) {
+      continue
+    } else if (COMBINING_MARK.test(character)) {
+      combiningRun += 1
+
+      if (combiningRun <= MAX_COMBINING_MARKS) {
+        spaced += character
+      }
+    } else {
       spaced += character
+      combiningRun = 0
     }
   }
 
@@ -262,6 +297,22 @@ function cleanSenderText(value: string, limit = Number.POSITIVE_INFINITY): strin
   const points = Array.from(flat)
 
   return points.length > limit ? points.slice(0, limit).join('').trimEnd() : flat
+}
+
+/**
+ * Hangul reserves three JAMO FILLER code points (U+115F, U+1160, U+3164) to
+ * hold a syllable block together when one of its parts is left out — visible
+ * to Unicode as ordinary letters, so `isStrippedFormatChar` never touches
+ * them, and visible to a reader as nothing at all. Beside the two joiners
+ * `isStrippedFormatChar` deliberately keeps, which draw nothing without a real
+ * character on either side, and whitespace: a name built only from this set
+ * survives cleaning as a non-empty string and still shows no name.
+ */
+const BLANK_WHEN_ALONE = /^(?:\s|\u115f|\u1160|\u200c|\u200d|\u3164)*$/u
+
+/** Whether a cleaned name has no character left in it that a reader could see. */
+function isBlankName(value: string): boolean {
+  return BLANK_WHEN_ALONE.test(value)
 }
 
 /** `authentik:7f3a…` → `7f3a…`, and an issuer URL used as a subject left alone. */
@@ -288,13 +339,17 @@ const PROVIDER_PREFIX = /^[A-Za-z][A-Za-z0-9._-]*:(?!\/\/)(.+)$/u
 export function senderLabel(author: MessageAuthor, directory?: (author: MessageAuthor) => string): string {
   const fromDirectory = cleanSenderText(directory?.(author) ?? '', SENDER_NAME_LIMIT)
 
-  if (fromDirectory) {
+  // `isBlankName` catches what a plain emptiness check cannot: a name built
+  // only from a Hangul filler, a lone joiner or whitespace cleans to a
+  // NON-empty string that still shows nothing, and an invisible label is worse
+  // than falling through to the next rung.
+  if (!isBlankName(fromDirectory)) {
     return fromDirectory
   }
 
   const stamped = cleanSenderText(author.name ?? '', SENDER_NAME_LIMIT)
 
-  if (stamped) {
+  if (!isBlankName(stamped)) {
     return stamped
   }
 
@@ -366,6 +421,24 @@ export function formatListTime(unixSeconds: number | undefined, now = Date.now()
 }
 
 /**
+ * FIRST STRONG ISOLATE (U+2068) … POP DIRECTIONAL ISOLATE (U+2069): the pair
+ * that tells the bidi algorithm "read what is between these on its own
+ * direction, decided from its own first strong character, then hand control
+ * straight back and forget it was ever there". A right-to-left name — "שרה" —
+ * joined into a line ahead of a body that opens with a digit or punctuation
+ * would otherwise let the RTL run bleed past the colon and reorder the
+ * neutral characters after it; isolating the name is enough, because FSI reads
+ * an LTR name's own direction the same way and leaves it exactly as it was.
+ *
+ * For a name that stands ALONE — the sender label above a bubble, with
+ * nothing else on its line to protect — this buys nothing and is not applied;
+ * only a name JOINED with other text into one line needs it.
+ */
+function isolate(text: string): string {
+  return `\u2068${text}\u2069`
+}
+
+/**
  * A chat-list preview line.
  *
  * The gateway's preview for an inbound teammate message is the raw row text,
@@ -405,8 +478,11 @@ export function formatChatPreview(preview: ChatPreview | null): string {
     // Somebody else's turn in the group chat (HERM-83, D6) — already resolved
     // and sanitised by whoever built this preview (`fallbackSenderName` or its
     // caller), so it goes on as-is, with no bot emoji: this is a person, not a
-    // teammate handle.
-    return clipInline(`${preview.senderName}: ${plainTextPreview(preview.text)}`)
+    // teammate handle. Isolated (HERM-83 polish) because it is joined here with
+    // the message body into ONE line: a right-to-left name — "שרה" — ahead of a
+    // body that opens with a digit or punctuation would otherwise let its
+    // direction bleed into what follows, on a row with no bubble to contain it.
+    return clipInline(`${isolate(preview.senderName)}: ${plainTextPreview(preview.text)}`)
   }
 
   const match = preview.text.match(/^Message from\s+(?:🤖\s*)?([^(:]+?)(?:\s*\(@([^)]+)\))?\s*:\s*([\s\S]*)$/)

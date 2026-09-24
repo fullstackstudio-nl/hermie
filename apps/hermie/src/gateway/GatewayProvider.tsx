@@ -13,6 +13,7 @@ import { describeFrontDoor } from '@hermie/gateway-client'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { seedDevGateway } from '../dev/seed-gateway'
+import { useOwnAuthorStore } from '../features/chats/own-author'
 import type { ResumeAccess } from '../features/onboarding/draft'
 import { retirePushRegistration } from '../features/push/runtime'
 import { createPersistentAuthTimeline } from './auth-timeline'
@@ -453,6 +454,11 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
 
     if (ns) {
       await clearCredentials(ns)
+      // HERM-83 polish: the id this gateway signed the reader in AS is not this
+      // account's to keep once they have signed out of it. Somebody else can
+      // sign into the same address next, and a stale id would draw their first
+      // messages as this reader's own until `/api/auth/me` corrected it.
+      useOwnAuthorStore.getState().set(ns.id, undefined)
     }
 
     setSetup(null)
@@ -495,6 +501,9 @@ export function GatewayProvider({ children }: { children: ReactNode }) {
 
     if (registry.activeGatewayId) {
       await clearGateway(namespace(registry.activeGatewayId))
+      // As in `signOut`: the gateway itself is leaving, so nothing it stamped
+      // messages with belongs to any future one.
+      useOwnAuthorStore.getState().set(registry.activeGatewayId, undefined)
     }
 
     // And out of the list, which is the record of what this device knows about

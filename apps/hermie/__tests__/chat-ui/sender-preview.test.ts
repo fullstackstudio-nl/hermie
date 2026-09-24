@@ -10,10 +10,14 @@
  */
 import { formatChatPreview } from '../../src/chat-ui'
 
+/** FIRST STRONG ISOLATE / POP DIRECTIONAL ISOLATE (HERM-83 polish): see `format.ts`'s `isolate`. */
+const FSI = '\u2068'
+const PDI = '\u2069'
+
 describe('formatChatPreview, a group-chat sender leading the line', () => {
   it('leads with the sender’s name, plainly — no bot emoji, that is for a teammate handle', () => {
     expect(formatChatPreview({ text: 'draft is ready', senderName: 'Robin', system: false })).toBe(
-      'Robin: draft is ready'
+      `${FSI}Robin${PDI}: draft is ready`
     )
   })
 
@@ -33,5 +37,19 @@ describe('formatChatPreview, a group-chat sender leading the line', () => {
 
   it('draws the reader’s own and an unattributed row exactly as before — no prefix at all', () => {
     expect(formatChatPreview({ text: 'ship it', system: false })).toBe('ship it')
+  })
+
+  /**
+   * HERM-83 polish: a right-to-left name — "שרה" — leading a body that opens
+   * with digits or punctuation is exactly the shape that lets the bidi
+   * algorithm's own rules reorder the line: without an isolate, the RTL run
+   * can swallow the colon and the leading digits into itself and show them in
+   * the wrong order. Wrapping the name in FSI…PDI keeps its direction from
+   * touching what comes after it.
+   */
+  it('isolates a right-to-left sender name so it cannot reorder what follows', () => {
+    expect(formatChatPreview({ text: '12 new files', senderName: 'שרה', system: false })).toBe(
+      `${FSI}שרה${PDI}: 12 new files`
+    )
   })
 })

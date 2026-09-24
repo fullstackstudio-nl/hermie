@@ -154,6 +154,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   brought back, however old it really was. `YESTERDAY` then rendered below `TODAY`'s messages
   instead of above them. Both now keep the place their own timestamp says they belong, the same way
   an answered approval card already did.
+- **A cold open no longer draws a colleague's messages as the reader's own for a moment before
+  moving them to the left.** The id that decides whose bubble is whose used to be wiped back to
+  "unknown" the instant a connection was rebuilt — a launch, a reconnect, a gateway switch — and
+  "unknown" reads as "everything is mine", so a cached transcript painted every colleague's bubble
+  on the right, receipt included, until `/api/auth/me` answered a moment later and they jumped left.
+  The last confirmed id is now kept on disk per gateway and shown while the real answer is on its
+  way, corrected the instant it lands, and forgotten only by an actual sign-out, by forgetting the
+  gateway, or when the gateway answers that it has nobody to name — never by a reconnect on its own.
+- **A colleague's name in the shared Bot Chat can no longer draw as blank, run tall over the bubble
+  above it, or read backwards on the chat-list preview.** A name built only from invisible
+  characters Unicode itself calls "format" — the word joiner, the invisible tag alphabet a
+  flag-sequence emoji is built from — used to slip through the cleaning pass untouched; one built
+  only from a Hangul filler blank survived it as text that still shows nothing; and an unbounded run
+  of combining accent marks stacked as tall as the sender put them. All three now fall back or are
+  capped the way a stray control character already was, and a right-to-left name leading the
+  chat-list preview — "שרה: 12 new files" — no longer lets its direction reorder the digits after it.
 
 ## [0.1.7] - 2026-09-23
 

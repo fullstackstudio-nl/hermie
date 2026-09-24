@@ -235,7 +235,13 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       // The list's arrangement, on the same key. "Change gateway" now edits an
       // entry rather than replacing the one gateway, so an arrangement follows
       // an address correction instead of being dropped by it (ADR-0012, amended).
-      useChatLayoutStore.getState().load(gatewayId)
+      useChatLayoutStore.getState().load(gatewayId),
+      // HERM-83 polish: the reader's own author, last seen on THIS gateway —
+      // read before the connection effect below has a chance to run, so the
+      // cached first paint already knows a colleague's row from the reader's
+      // own instead of guessing "everything is mine" for a stretch. See
+      // `own-author.ts` for why this is a guess to be corrected, not a trust.
+      useOwnAuthorStore.getState().hydrate(ns)
     ]).catch(() => undefined)
   }, [gatewayId])
 
@@ -321,16 +327,16 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
 
     const gateway = chatGatewayFor(connection)
     /*
-      HERM-83: who the reader is on THIS connection is unknown until its own
-      `/api/auth/me` answers (the ready effect below). A new connection can be
-      a new sign-in on the same gateway, so what the last one said is forgotten
-      rather than trusted: until the answer lands every row draws as the
-      reader's own, which is the safe default.
+      HERM-83 polish: who the reader is on THIS connection is unconfirmed until
+      its own `/api/auth/me` answers (the ready effect below) — a new connection
+      can be a new sign-in on the same gateway. It used to be FORGOTTEN here,
+      which read as "everything is mine" for the whole stretch until the answer
+      landed and drew a cached transcript's colleagues on the right, receipt and
+      all, only to jump left a moment later. What is bound below is the gateway
+      the id is read FOR; the id itself is whatever `hydrate` most recently found
+      on disk, or whatever `set` last confirmed — a guess either way, and the
+      ready effect is what turns it into an answer.
     */
-    if (gatewayId) {
-      useOwnAuthorStore.getState().set(gatewayId, undefined)
-    }
-
     useOwnAuthorStore.getState().bind(gatewayId)
     // One cache per gateway. Two gateways can both have a `researcher`, and a
     // cache that could not tell them apart would paint one machine's
@@ -684,14 +690,20 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       const identity = await readIdentity(config, http).catch(() => null)
 
       /*
-        HERM-83: the reader's own author id, from the same answer. Filed under
-        the gateway that gave it, so an answer that lands after a gateway switch
-        is never read as the next gateway's. A refusal, or a gateway that names
-        no provider, leaves it empty: nothing is "own" by id then, and every row
-        draws as the reader's own, as it did before `author` existed.
+        HERM-83 polish: the reader's own author id, from the same answer. Filed
+        under the gateway that gave it, so an answer that lands after a gateway
+        switch is never read as the next gateway's. `identity` is only ever
+        `null` on a REFUSAL (the `.catch` above) — no answer, not a "no" — and a
+        refusal must not overwrite the last one this gateway gave; that is the
+        one this whole file exists to keep showing while the retry is pending.
+        `identity.author` itself is `undefined` for the two cases that ARE an
+        answer of "no": a session-token gateway (no accounts to be a provider
+        for) and a gateway that named no provider at all. Both clear it, same as
+        before `author` existed — nothing is "own" by id, so every row draws as
+        the reader's own.
       */
-      if (gatewayId) {
-        useOwnAuthorStore.getState().set(gatewayId, identity?.author)
+      if (gatewayId && identity) {
+        useOwnAuthorStore.getState().set(gatewayId, identity.author)
       }
 
       if (identity) {

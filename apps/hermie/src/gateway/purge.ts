@@ -15,6 +15,7 @@
  * **It never throws.** A removal that failed halfway would leave a row the
  * reader has already been told is gone. Each step is independent.
  */
+import { OWN_AUTHOR_KEY } from '../features/chats/own-author'
 import { chatCacheFor } from '../platform/chat-cache'
 import { keyValueStore } from '../platform/key-value-store'
 import { BOT_LAST_SEEN_KEY } from '../store/bots'
@@ -26,7 +27,13 @@ import { clearGateway } from './config'
 import type { GatewayNamespace } from './namespace'
 
 /** The namespaced key-value keys, besides the configuration `clearGateway` takes. */
-const NAMESPACED_KEYS: readonly string[] = [AUTH_TIMELINE_KEY, BOT_LAST_SEEN_KEY, CHAT_VIEW_KEY, PUSH_KEY]
+const NAMESPACED_KEYS: readonly string[] = [
+  AUTH_TIMELINE_KEY,
+  BOT_LAST_SEEN_KEY,
+  CHAT_VIEW_KEY,
+  OWN_AUTHOR_KEY,
+  PUSH_KEY
+]
 
 /**
  * Drop this gateway's entry from the arrangement blob.

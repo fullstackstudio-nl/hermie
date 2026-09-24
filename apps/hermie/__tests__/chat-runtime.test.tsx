@@ -267,13 +267,65 @@ describe('ChatRuntimeProvider and the reader’s own author', () => {
     expect(mockControllerOptions?.ownAuthor?.()).toBeUndefined()
   })
 
-  it('forgets a previous sign-in’s id when a new connection is built, until it is asked again', async () => {
+  /**
+   * HERM-83 polish: rebuilding the connection used to wipe this back to
+   * "unknown", which reads as "everything is mine" and drew a cached
+   * transcript's colleagues on the right — with a receipt — until the next
+   * `/api/auth/me` answered and they jumped left. The id is a guess either way;
+   * the fix is which guess a cold open starts from.
+   */
+  it('keeps a previously confirmed id across a rebuilt connection, not merely until it is asked again', async () => {
     useOwnAuthorStore.getState().set('gateway-one', { id: 'authentik:somebody-before' })
     mockGatewayExtras = { gatewayId: 'gateway-one' }
 
     renderRuntime()
 
     await waitFor(() => expect(mockPaintFromCache).toHaveBeenCalled())
-    expect(useOwnAuthorStore.getState().byGateway['gateway-one']).toBeUndefined()
+    expect(useOwnAuthorStore.getState().byGateway['gateway-one']).toEqual({ id: 'authentik:somebody-before' })
+  })
+
+  it('replaces the remembered id once `/api/auth/me` answers with a different one', async () => {
+    useOwnAuthorStore.getState().set('gateway-one', { id: 'authentik:somebody-before' })
+
+    readyOn('gateway-one')
+
+    await waitFor(() =>
+      expect(useOwnAuthorStore.getState().byGateway['gateway-one']).toEqual({
+        id: AUTH_ME_STAMP,
+        name: AUTH_ME_BODY.display_name
+      })
+    )
+  })
+
+  it('keeps the remembered id when `/api/auth/me` refuses rather than answering "nobody"', async () => {
+    useOwnAuthorStore.getState().set('gateway-one', { id: 'authentik:somebody-before' })
+
+    mockStatus = 'ready'
+    mockGatewayExtras = {
+      gatewayId: 'gateway-one',
+      http: {
+        authMe: async () => {
+          throw new Error('offline')
+        }
+      },
+      config: { baseUrl: 'https://gateway.example.test', authMode: 'native_pkce' }
+    }
+
+    renderRuntime()
+
+    await waitFor(() => expect(mockRefresh).toHaveBeenCalled())
+    await act(async () => undefined)
+    expect(useOwnAuthorStore.getState().byGateway['gateway-one']).toEqual({ id: 'authentik:somebody-before' })
+  })
+
+  it('never lets one gateway’s remembered id leak into another it is bound to', async () => {
+    useOwnAuthorStore.getState().set('gateway-one', { id: 'authentik:alex' })
+    mockGatewayExtras = { gatewayId: 'gateway-two' }
+
+    renderRuntime()
+
+    await waitFor(() => expect(mockPaintFromCache).toHaveBeenCalled())
+    expect(useOwnAuthorStore.getState().gatewayId).toBe('gateway-two')
+    expect(useOwnAuthorStore.getState().byGateway['gateway-two']).toBeUndefined()
   })
 })

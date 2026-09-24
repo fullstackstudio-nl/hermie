@@ -85,6 +85,62 @@ describe('senderLabel, cleaning a sender name on read', () => {
     expect(label(`${RLO}\u200B\uFEFF\u0000`, 'authentik:7f3a')).toBe('7f3a')
   })
 
+  /**
+   * HERM-83 polish: `isStrippedFormatChar` used to name the format characters
+   * it dropped one by one, and the WORD JOINER (U+2060) and the 128 invisible
+   * TAG characters (U+E0000..U+E007F) were never on that list \u2014 both slip
+   * through untested. Dropping the whole Cf category catches every member,
+   * named or not.
+   */
+  it('strips the word joiner U+2060', () => {
+    expect(label('Rob\u2060in')).toBe('Robin')
+  })
+
+  it('strips the invisible tag characters U+E0000..U+E007F', () => {
+    // TAG LATIN SMALL LETTER U (U+E0075) and TAG LATIN SMALL LETTER S
+    // (U+E0073): the sub-alphabet a flag-sequence emoji is built from,
+    // unrelated to and indistinguishable from plain text once typed into a name.
+    expect(label('Rob\u{E0075}\u{E0073}in')).toBe('Robin')
+    expect(label('\u{E0001}Robin\u{E007F}')).toBe('Robin')
+  })
+
+  /**
+   * HERM-83 polish: a name built only from a HANGUL FILLER (U+3164, and its
+   * two syllable-block counterparts) or the two joiners `isStrippedFormatChar`
+   * keeps is not itself dropped by cleaning \u2014 Unicode calls the filler an
+   * ordinary letter \u2014 but it shows nothing, so `senderLabel` must still treat
+   * it as empty and fall to the next rung.
+   */
+  it('falls to the identity when the stamped name is nothing but a Hangul filler', () => {
+    expect(label('\u3164', 'authentik:7f3a')).toBe('7f3a')
+    expect(label('\u3164 \u3164', 'authentik:7f3a')).toBe('7f3a')
+  })
+
+  it('falls to the identity when the stamped name is nothing but joiners and spaces', () => {
+    expect(label(' \u200D\u200C ', 'authentik:7f3a')).toBe('7f3a')
+  })
+
+  it('falls through a host directory answer that is nothing but a Hangul filler', () => {
+    expect(senderLabel({ id: 'authentik:7f3a', name: 'Robin' }, () => '\u3164')).toBe('Robin')
+  })
+
+  /**
+   * HERM-83 polish: a name is one line among many in a list or a transcript,
+   * and an unbounded run of combining marks stacked on one base character
+   * draws taller than the row that holds it, over whatever is above it.
+   */
+  it('caps a long run of combining marks on one base character', () => {
+    const stacked = `e${'\u0301'.repeat(12)}`
+
+    expect(label(stacked)).toBe(`e${'\u0301'.repeat(3)}`)
+  })
+
+  it('resets the combining-mark cap at the next base character', () => {
+    const stacked = `a${'\u0301'.repeat(5)}b${'\u0301'.repeat(5)}`
+
+    expect(label(stacked)).toBe(`a${'\u0301'.repeat(3)}b${'\u0301'.repeat(3)}`)
+  })
+
   it('cleans the identity rung too', () => {
     expect(senderLabel({ id: `authentik:${RLO}7f3a` })).toBe('7f3a')
   })
@@ -137,9 +193,12 @@ describe('the same cleaned name everywhere it is shown', () => {
       rowsToItems([{ role: 'user', row_id: 1, text: 'draft is ready', display_metadata: { author: hostile } }], 'rpc')
     )
 
+    // FSI…PDI (HERM-83 polish): the preview joins the name into one line with
+    // the message body, so it is isolated the way the bubble's own standalone
+    // label is not; see `sender-preview.test.ts` for the RTL case this guards.
     expect(
       formatChatPreview(chatRowPreview(chat, '', { groupChat: true, ownAuthorId: ME, resolveSenderName: senderLabel }))
-    ).toBe('etaged Robin: draft is ready')
+    ).toBe('\u2068etaged Robin\u2069: draft is ready')
   })
 
   it('in the .txt and .md export lines', () => {

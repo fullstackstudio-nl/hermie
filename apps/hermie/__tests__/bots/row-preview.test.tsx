@@ -20,6 +20,9 @@ import { useChatsStore } from '../../src/store/chats'
 
 const ME = 'authentik:me'
 const GATEWAY = 'gateway-one'
+/** FIRST STRONG ISOLATE / POP DIRECTIONAL ISOLATE (HERM-83 polish): see `format.ts`'s `isolate`. */
+const FSI = '\u2068'
+const PDI = '\u2069'
 const GROUP = { id: 'stored-researcher', resolvedId: 'stored-researcher', preview: '', lastActive: 1, messageCount: 1 }
 const OWN = { id: 'stored-own', resolvedId: 'stored-own', preview: '', lastActive: 2, messageCount: 1 }
 
@@ -64,7 +67,7 @@ describe('useRowPreview', () => {
 
     const { result } = renderHook(() => useRowPreview('researcher', ''))
 
-    expect(result.current.text).toBe('Robin Vale: draft is ready')
+    expect(result.current.text).toBe(`${FSI}Robin Vale${PDI}: draft is ready`)
     expect(result.current.system).toBe(false)
   })
 
@@ -117,7 +120,7 @@ describe('useRowPreview', () => {
 
     const { result } = renderHook(() => useRowPreview('researcher', ''))
 
-    expect(result.current.text).toBe('Robin Vale: draft is ready')
+    expect(result.current.text).toBe(`${FSI}Robin Vale${PDI}: draft is ready`)
 
     // The reader picks their own chat: the memory moves first, the chat under
     // the key is dropped, and then the switch is refused and the group chat
@@ -125,14 +128,14 @@ describe('useRowPreview', () => {
     act(() => {
       useChatLayoutStore.setState({ current: { researcher: OWN.id }, myChats: { researcher: true } })
     })
-    expect(result.current.text).toBe('Robin Vale: draft is ready')
+    expect(result.current.text).toBe(`${FSI}Robin Vale${PDI}: draft is ready`)
 
     act(() => {
       useChatsStore.getState().forget('researcher')
       useChatLayoutStore.setState({ current: {}, myChats: {} })
       seedChat([COLLEAGUE_ROW])
     })
-    expect(result.current.text).toBe('Robin Vale: draft is ready')
+    expect(result.current.text).toBe(`${FSI}Robin Vale${PDI}: draft is ready`)
   })
 
   it('reads the reader’s own id under the gateway it is bound to, not another gateway’s', () => {
@@ -147,6 +150,6 @@ describe('useRowPreview', () => {
     act(() => {
       useOwnAuthorStore.getState().set('gateway-two', { id: 'authentik:somebody-else' })
     })
-    expect(result.current.text).toBe('me: ship it')
+    expect(result.current.text).toBe(`${FSI}me${PDI}: ship it`)
   })
 })
