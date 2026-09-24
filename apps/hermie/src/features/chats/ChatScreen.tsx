@@ -112,7 +112,7 @@ import { findMatchingItem } from '../search'
 import { connectionNotice, RETRY_OFFER_MS } from './connection-notice'
 import { openAttachmentFile } from './open-attachment'
 import { countsAsRead, readWatermark } from './read-watermark'
-import { regenerateLastTurn } from './regenerate'
+import { regenerateLastTurn, regenerateTargetIsOwn } from './regenerate'
 import { useComposerDictation } from '../voice/useComposerDictation'
 import { useDictationLanguages } from '../voice/useDictationLanguages'
 import { useVoiceMode } from '../voice/useVoiceMode'
@@ -1760,7 +1760,11 @@ function Conversation({
    * to the screen: turning an outcome into a notice.
    */
   const regenerate = useCallback(() => {
-    void regenerateLastTurn(chat)
+    // HERM-83: the same two facts the menu was already hidden on
+    // (`regeneratePromptIsOwn`, below) travel with the request itself, so a
+    // gateway that has no `/retry` falls back to `lastPrompt`'s own refusal
+    // rather than a second, independent notion of "mine".
+    void regenerateLastTurn({ ...chat, groupChat, ownAuthorId })
       .then(outcome => {
         if (outcome.kind === 'busy') {
           setNotice(openFailed(chatStrings.menu.turnRunning))
@@ -1773,7 +1777,23 @@ function Conversation({
         }
       })
       .catch(error => setNotice(openFailed(messageOf(error))))
-  }, [chat])
+  }, [chat, groupChat, ownAuthorId])
+
+  /**
+   * Whether `Regenerate` is honest to offer on the newest reply at all
+   * (HERM-83).
+   *
+   * Read off the same `chat.items` the screen already has and the same
+   * `groupChat`/`ownAuthorId` facts `regenerate` above sends along — computed
+   * once here rather than by each row, exactly as `lastAssistantId` is.
+   * `false` only for a colleague's newest turn in the group chat; everywhere
+   * else (a personal chat, an unattributed row, the reader's own turn) this is
+   * `true` and the menu draws exactly as it did before this flag existed.
+   */
+  const regeneratePromptIsOwn = useMemo(
+    () => regenerateTargetIsOwn(chat.items, { groupChat, ownAuthorId }),
+    [chat.items, groupChat, ownAuthorId]
+  )
 
   /**
    * Write the conversation out and hand it to the platform.
@@ -2285,6 +2305,7 @@ function Conversation({
                 {...(lastAssistantId ? { lastAssistantId } : {})}
                 onEditResend={editResend}
                 onRegenerate={regenerate}
+                regeneratePromptIsOwn={regeneratePromptIsOwn}
                 {...(runtime ? { onBranch: branchHere } : {})}
                 turnRunning={chat.turnActive}
                 {...(readAloud.available ? { onReadAloud: readAloud.toggle } : {})}

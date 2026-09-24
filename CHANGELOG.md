@@ -128,6 +128,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`Regenerate` and `Edit and resend` in the shared Bot Chat no longer touch a colleague's message
+  under the reader's own name.** `Regenerate` was offered on every reply regardless of who asked the
+  question it would repeat, and its no-`/retry` fallback pulled the newest `user` row from anybody at
+  all despite its own comment claiming otherwise — so pressing it after a colleague's question could
+  resend their words as a fresh message from the reader. `Regenerate` is now hidden, not disabled,
+  whenever the turn it would repeat is a colleague's, and if a colleague has spoken since the
+  reader's own last turn it refuses outright rather than answering their older question instead of
+  the one just asked. `Edit and resend` is now offered only on the reader's own messages. Both keep
+  working exactly as before outside the shared chat and on a message no gateway attributed to
+  anybody.
 - **Pasting a file into the composer on the Mac no longer attaches it twice or drops its path into
   the draft as text.** Both were one cause each, not one shared bug: a Finder copy of an image FILE
   puts both a file reference and a rendered image on the general pasteboard, and reading both handed

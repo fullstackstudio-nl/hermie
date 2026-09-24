@@ -112,3 +112,79 @@ describe('the menu a transcript row is handed', () => {
     expect(menuFor(userItem.id)).not.toContain('readAloud')
   })
 })
+
+/**
+ * HERM-83: whose turn `Edit and resend` and `Regenerate` can touch, in the
+ * group chat. Both facts — a row's own `author` for Edit, and the host's
+ * `regeneratePromptIsOwn` for Regenerate — arrive as plain context here, the
+ * same way `groupChat` and `ownAuthorId` already did for names; this proves
+ * the MENU reads them, not just the bubble.
+ */
+describe('whose turn a menu can touch, in the group chat', () => {
+  const ME = 'authentik:me'
+  const COLLEAGUE = { id: 'authentik:robin', name: 'Robin Vale' }
+
+  it('hides Edit and resend on a colleague’s message', () => {
+    renderScreen(
+      <TranscriptList
+        groupChat
+        items={[{ item: { ...userItem, author: COLLEAGUE }, presentation: 'full' }]}
+        onEditResend={() => undefined}
+        ownAuthorId={ME}
+      />
+    )
+
+    expect(menuFor(userItem.id)).not.toContain('editResend')
+  })
+
+  it('offers Edit and resend on the reader’s own message', () => {
+    renderScreen(
+      <TranscriptList
+        groupChat
+        items={[{ item: { ...userItem, author: { id: ME } }, presentation: 'full' }]}
+        onEditResend={() => undefined}
+        ownAuthorId={ME}
+      />
+    )
+
+    expect(menuFor(userItem.id)).toContain('editResend|')
+  })
+
+  it('still offers Edit and resend on an unattributed message', () => {
+    renderScreen(
+      <TranscriptList
+        groupChat
+        items={[{ item: userItem, presentation: 'full' }]}
+        onEditResend={() => undefined}
+        ownAuthorId={ME}
+      />
+    )
+
+    expect(menuFor(userItem.id)).toContain('editResend|')
+  })
+
+  it('does not offer Regenerate when the host says the prompt it would resend is a colleague’s', () => {
+    renderScreen(
+      <TranscriptList
+        items={[{ item: assistantItem, presentation: 'full' }]}
+        lastAssistantId={assistantItem.id}
+        onRegenerate={() => undefined}
+        regeneratePromptIsOwn={false}
+      />
+    )
+
+    expect(menuFor(assistantItem.id)).not.toContain('regenerate')
+  })
+
+  it('still offers Regenerate when the host says nothing about it, unchanged from before this flag existed', () => {
+    renderScreen(
+      <TranscriptList
+        items={[{ item: assistantItem, presentation: 'full' }]}
+        lastAssistantId={assistantItem.id}
+        onRegenerate={() => undefined}
+      />
+    )
+
+    expect(menuFor(assistantItem.id)).toContain('regenerate|')
+  })
+})

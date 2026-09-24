@@ -235,6 +235,21 @@ export interface TranscriptContext {
    * list would be a scan per open menu per row.
    */
   lastAssistantId?: string
+  /**
+   * Whether the user turn `Regenerate` would resend is the reader's own, or
+   * carries no author at all (HERM-83).
+   *
+   * The host's answer, not this list's: only it can walk `items` backwards
+   * past `lastAssistantId` to find the prompt a retry would repeat, and only
+   * it knows the reader's own identity. Absent means "yes" — a personal chat,
+   * a host that predates this flag, or the developer gallery all draw exactly
+   * as before `author` existed. `false` is the one case that matters: the
+   * newest turn in the group chat is a colleague's, and offering `Regenerate`
+   * there would let the reader resend a colleague's words under their own
+   * name (see `regenerate.ts`'s `lastPrompt`, which refuses the same turn for
+   * the same reason).
+   */
+  regeneratePromptIsOwn?: boolean
   /** A turn is running on this chat, so the two turn-starting lines are greyed. */
   turnRunning?: boolean
   /**
@@ -962,11 +977,22 @@ function useMessageMenu(
   const items = useMemo(
     () =>
       messageMenuItems({
-        canEditResend: Boolean(context.onEditResend),
+        // A colleague's turn in the group chat is never put back in the
+        // composer under the reader's own name (HERM-83); `isOwnUserItem`
+        // is the one place that question is answered, and it already draws
+        // every row as the reader's own outside the group chat, before an
+        // identity has loaded, or with no author at all.
+        canEditResend: Boolean(context.onEditResend) && (item.kind !== 'user' || isOwnUserItem(item, context)),
         canOpenBot: Boolean(context.onOpenBot),
-        // Both halves of the question, answered by the only thing that can:
-        // the host can regenerate at all, and this row is the newest reply.
-        canRegenerate: Boolean(context.onRegenerate) && context.lastAssistantId === item.id,
+        // Three questions, answered by the only things that can: the host can
+        // regenerate at all, this row is the newest reply, and — HERM-83 — the
+        // turn a retry would repeat is the reader's own or unattributed. A
+        // colleague's newest turn in the group chat fails the third and hides
+        // the line rather than offering it disabled with an error.
+        canRegenerate:
+          Boolean(context.onRegenerate) &&
+          context.lastAssistantId === item.id &&
+          (context.regeneratePromptIsOwn ?? true),
         canBranch: Boolean(context.onBranch),
         // A capability, not a preference: the host passes a handler only where
         // the platform has a synthesiser at all.
@@ -985,13 +1011,16 @@ function useMessageMenu(
     // menu's Copy lines and its links without deep-comparing the text.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
+      context.groupChat,
       context.lastAssistantId,
       context.onBranch,
       context.onEditResend,
       context.onOpenBot,
       context.onReadAloud,
       context.onRegenerate,
+      context.ownAuthorId,
       context.readingItemIds,
+      context.regeneratePromptIsOwn,
       context.turnRunning,
       expanded,
       hasDetails,
@@ -1434,6 +1463,7 @@ function TranscriptListBody({
       onRegenerate: handlers.onRegenerate,
       turnRunning: handlers.turnRunning,
       ...(handlers.lastAssistantId ? { lastAssistantId: handlers.lastAssistantId } : {}),
+      regeneratePromptIsOwn: handlers.regeneratePromptIsOwn,
       onReadAloud: handlers.onReadAloud,
       readingItemIds: handlers.readingItemIds,
       subagents: handlers.subagents ?? {},
@@ -1463,6 +1493,7 @@ function TranscriptListBody({
       handlers.onRegenerate,
       handlers.turnRunning,
       handlers.lastAssistantId,
+      handlers.regeneratePromptIsOwn,
       handlers.onReadAloud,
       handlers.readingItemIds,
       openAttachment,
