@@ -462,6 +462,22 @@ docker run -d --name hermie-web \
 which is not where `hermes serve` is. Inside a container the self-update endpoint reports
 `canSelfUpdate: false` and points at `docker pull`, because the image is the version.
 
+### Available tags
+
+`.github/workflows/hermie-web-image.yml` builds `packages/hermie-web/Dockerfile` for
+`linux/amd64,linux/arm64` and pushes it to GHCR on every `v*` release tag (and, for a one-off
+rebuild of a specific commit, on a manual dispatch):
+
+| Tag                                                     | What it points at                                                           |
+| ------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `ghcr.io/fullstackstudio-nl/hermie-web:<version>`       | That release, e.g. `:0.2.0`.                                                |
+| `ghcr.io/fullstackstudio-nl/hermie-web:<version>-<sha>` | That exact build, pinned to the commit it came from.                        |
+| `ghcr.io/fullstackstudio-nl/hermie-web:latest`          | The newest tagged release. Not set by a one-off rebuild of an older commit. |
+
+Pick a version or version-sha tag for anything you run more than once; `latest` is for trying it
+out. There is no `npm i` in the image build, so the same `docker pull` gets you the exact bytes
+`hermie-web.zip` on that release would have given you.
+
 ## OIDC: Hermie Web must share the gateway's public hostname (another port)
 
 If your gateway signs people in with OIDC, this is the one rule that decides whether the sign-in can
