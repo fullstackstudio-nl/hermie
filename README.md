@@ -391,7 +391,7 @@ by hand.
 Until then, and any time you would rather build it yourself:
 
 ```sh
-git clone https://github.com/fullstackstudio-nl/hermie.git
+git clone https://github.com/fullstackstudio-org/hermie.git
 cd hermie
 nvm use                 # Node 22 or newer
 npm ci

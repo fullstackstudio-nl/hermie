@@ -38,7 +38,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: hermie-web
-          image: ghcr.io/fullstackstudio-nl/hermie-web:latest
+          image: ghcr.io/fullstackstudio-org/hermie-web:latest
           # Pin this to a released version in anything you run more than
           # once — see ../web/README.md#docker.
           ports:

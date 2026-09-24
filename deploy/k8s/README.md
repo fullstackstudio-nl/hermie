@@ -25,9 +25,9 @@ not need to.
 
 | Image                                             | What it is                                                                                                                                                                                                 |
 | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ghcr.io/fullstackstudio-nl/hermie-web:<version>` | A tagged release. Pin this in anything you run more than once.                                                                                                                                             |
-| `ghcr.io/fullstackstudio-nl/hermie-web:latest`    | The newest tagged release. Fine for trying this out, not for a pin.                                                                                                                                        |
-| `ghcr.io/fullstackstudio-nl/hermes-agent:main`    | The Hermes gateway. See **The Hermes container's variables** below — the names below are set by a companion change to that image; build it after that change lands, or the gateway will not read them yet. |
+| `ghcr.io/fullstackstudio-org/hermie-web:<version>` | A tagged release. Pin this in anything you run more than once.                                                                                                                                             |
+| `ghcr.io/fullstackstudio-org/hermie-web:latest`    | The newest tagged release. Fine for trying this out, not for a pin.                                                                                                                                        |
+| `ghcr.io/fullstackstudio-org/hermes-agent:main`    | The Hermes gateway. See **The Hermes container's variables** below — the names below are set by a companion change to that image; build it after that change lands, or the gateway will not read them yet. |
 
 ## The two shapes
 

@@ -30,8 +30,8 @@ import { extractZip, readZip } from './zip'
  * against the shape it will meet.
  */
 const RELEASE_JSON = {
-  url: 'https://api.github.com/repos/fullstackstudio-nl/hermie/releases/198342001',
-  html_url: 'https://github.com/fullstackstudio-nl/hermie/releases/tag/v0.2.0',
+  url: 'https://api.github.com/repos/fullstackstudio-org/hermie/releases/198342001',
+  html_url: 'https://github.com/fullstackstudio-org/hermie/releases/tag/v0.2.0',
   tag_name: 'v0.2.0',
   name: 'v0.2.0',
   draft: false,
@@ -42,15 +42,15 @@ const RELEASE_JSON = {
     {
       name: 'Hermie-android-release.apk',
       browser_download_url:
-        'https://github.com/fullstackstudio-nl/hermie/releases/download/v0.2.0/Hermie-android-release.apk'
+        'https://github.com/fullstackstudio-org/hermie/releases/download/v0.2.0/Hermie-android-release.apk'
     },
     {
       name: 'hermie-web.zip',
-      browser_download_url: 'https://github.com/fullstackstudio-nl/hermie/releases/download/v0.2.0/hermie-web.zip'
+      browser_download_url: 'https://github.com/fullstackstudio-org/hermie/releases/download/v0.2.0/hermie-web.zip'
     },
     {
       name: 'SHA256SUMS',
-      browser_download_url: 'https://github.com/fullstackstudio-nl/hermie/releases/download/v0.2.0/SHA256SUMS'
+      browser_download_url: 'https://github.com/fullstackstudio-org/hermie/releases/download/v0.2.0/SHA256SUMS'
     }
   ]
 }

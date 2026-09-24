@@ -3064,4 +3064,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `expo-glass-effect`, `expo-blur` and `expo-linear-gradient` are new dependencies. `npx expo-doctor`
   stays at 18/18.
 
-[Unreleased]: https://github.com/fullstackstudio-nl/hermie/compare/main...HEAD
+[Unreleased]: https://github.com/fullstackstudio-org/hermie/compare/main...HEAD

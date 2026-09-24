@@ -53,7 +53,7 @@ Hermie is not a hosted service: it does not include an AI model or a gateway.
 OPEN SOURCE
 
 Hermie is free software under the MIT licence. The source code, the roadmap and
-the issue tracker are at https://github.com/fullstackstudio-nl/hermie and
+the issue tracker are at https://github.com/fullstackstudio-org/hermie and
 https://hermie.dev.
 
 Hermie is an independent project and is not affiliated with Nous Research.
@@ -110,7 +110,7 @@ tailnet. Hermie is geen gehoste dienst: er zit geen AI-model of gateway in.
 OPEN SOURCE
 
 Hermie is vrije software onder de MIT-licentie. De broncode, de roadmap en de
-issue-tracker staan op https://github.com/fullstackstudio-nl/hermie en
+issue-tracker staan op https://github.com/fullstackstudio-org/hermie en
 https://hermie.dev.
 
 Hermie is een onafhankelijk project en is niet verbonden aan Nous Research.

@@ -37,7 +37,7 @@ import path from 'node:path'
 
 import { extractZip } from './zip'
 
-export const RELEASES_URL = 'https://api.github.com/repos/fullstackstudio-nl/hermie/releases/latest'
+export const RELEASES_URL = 'https://api.github.com/repos/fullstackstudio-org/hermie/releases/latest'
 export const RELEASE_ASSET = 'hermie-web.zip'
 export const CHECKSUM_ASSET = 'SHA256SUMS'
 /** How long a release listing is trusted before it is fetched again. */

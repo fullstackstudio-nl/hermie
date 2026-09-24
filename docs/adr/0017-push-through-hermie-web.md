@@ -254,7 +254,7 @@ A plugin inside `hermes serve` removes, rather than adds:
 ### What is decided
 
 **Push is delivered by the `hermie` plugin, installed into the gateway with
-`hermes plugins install fullstackstudio-nl/hermie-plugin --enable`.**
+`hermes plugins install fullstackstudio-org/hermie-plugin --enable`.**
 `hermie-web --push` remains supported for a gateway where a plugin cannot be
 installed, and the two must not both run: they would notify the same device
 twice.

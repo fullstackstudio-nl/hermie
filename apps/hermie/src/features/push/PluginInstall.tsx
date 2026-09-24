@@ -38,7 +38,7 @@ export const PLUGIN_GUIDE_URL = 'https://hermie.dev/plugin'
  * the first would find the advert still missing and no reason why.
  */
 export const PLUGIN_INSTALL_COMMANDS = [
-  'hermes plugins install fullstackstudio-nl/hermie-plugin --enable',
+  'hermes plugins install fullstackstudio-org/hermie-plugin --enable',
   'hermes gateway restart'
 ] as const
 

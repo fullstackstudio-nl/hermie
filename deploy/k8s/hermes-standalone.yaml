@@ -35,7 +35,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: hermes
-          image: ghcr.io/fullstackstudio-nl/hermes-agent:main
+          image: ghcr.io/fullstackstudio-org/hermes-agent:main
           ports:
             - containerPort: 9119
           envFrom:

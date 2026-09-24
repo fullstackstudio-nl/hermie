@@ -98,7 +98,7 @@ What that means for an operator:
 - **Without `--push` it still works**, filled by proxied reads alone: a chat you have opened is a
   chat your next device opens instantly.
 
-[ADR-0025](https://github.com/fullstackstudio-nl/hermie/blob/main/docs/adr/0025-hermie-web-is-a-service-layer.md)
+[ADR-0025](https://github.com/fullstackstudio-org/hermie/blob/main/docs/adr/0025-hermie-web-is-a-service-layer.md)
 has the reasoning.
 
 ## Administration
@@ -224,15 +224,15 @@ phone signing in never talks to this issuer: the gateway brokers that flow, and 
 redirect is registered with the gateway, not here. The list is editable for a deployment that
 genuinely has a second client.
 
-[ADR-0025](https://github.com/fullstackstudio-nl/hermie/blob/main/docs/adr/0025-hermie-web-is-a-service-layer.md)
+[ADR-0025](https://github.com/fullstackstudio-org/hermie/blob/main/docs/adr/0025-hermie-web-is-a-service-layer.md)
 has the reasoning and the whole threat model.
 
 ## Documentation
 
-- [How Hermie Web works](https://github.com/fullstackstudio-nl/hermie/blob/main/docs/web.md) — the
+- [How Hermie Web works](https://github.com/fullstackstudio-org/hermie/blob/main/docs/web.md) — the
   design: why the gateway is reached _through_ this process, how signing in works in a browser, and
   what the self-update does and does not verify.
-- [Running it on your own server](https://github.com/fullstackstudio-nl/hermie/blob/main/deploy/web/README.md) —
+- [Running it on your own server](https://github.com/fullstackstudio-org/hermie/blob/main/deploy/web/README.md) —
   the runbook: gateway settings, a release-zip install, systemd, Docker, TLS with Caddy, nginx or
   Tailscale Serve, and a troubleshooting table.
 

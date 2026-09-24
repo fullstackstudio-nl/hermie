@@ -9,7 +9,7 @@ import { useTheme } from '../ui/theme'
  * `hermes config set` line to change, which is the entire fix.
  */
 export const REFRESH_DOCS_URL =
-  'https://github.com/fullstackstudio-nl/hermie/blob/main/docs/test-gateway.md#refresh-tokens-and-offline_access'
+  'https://github.com/fullstackstudio-org/hermie/blob/main/docs/test-gateway.md#refresh-tokens-and-offline_access'
 
 export interface RefreshNoticeProps {
   /** Nothing is said unless this is explicitly false. */

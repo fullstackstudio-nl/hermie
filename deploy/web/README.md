@@ -400,8 +400,8 @@ the token in an `EnvironmentFile` rather than on the `ExecStart` line, where it 
 
 ```sh
 VERSION=0.2.0
-curl -fLO "https://github.com/fullstackstudio-nl/hermie/releases/download/v$VERSION/hermie-web.zip"
-curl -fLO "https://github.com/fullstackstudio-nl/hermie/releases/download/v$VERSION/SHA256SUMS"
+curl -fLO "https://github.com/fullstackstudio-org/hermie/releases/download/v$VERSION/hermie-web.zip"
+curl -fLO "https://github.com/fullstackstudio-org/hermie/releases/download/v$VERSION/SHA256SUMS"
 sha256sum --check --ignore-missing SHA256SUMS
 
 sudo mkdir -p /opt/hermie-web/releases
@@ -464,7 +464,7 @@ docker run -d --name hermie-web \
   --restart unless-stopped \
   -p 127.0.0.1:9120:9120 \
   --add-host host.docker.internal:host-gateway \
-  ghcr.io/fullstackstudio-nl/hermie-web:latest \
+  ghcr.io/fullstackstudio-org/hermie-web:latest \
   --gateway http://host.docker.internal:9119 \
   --public-url https://hermes.example.com
 ```
@@ -481,9 +481,9 @@ rebuild of a specific commit, on a manual dispatch):
 
 | Tag                                                     | What it points at                                                           |
 | ------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `ghcr.io/fullstackstudio-nl/hermie-web:<version>`       | That release, e.g. `:0.2.0`.                                                |
-| `ghcr.io/fullstackstudio-nl/hermie-web:<version>-<sha>` | That exact build, pinned to the commit it came from.                        |
-| `ghcr.io/fullstackstudio-nl/hermie-web:latest`          | The newest tagged release. Not set by a one-off rebuild of an older commit. |
+| `ghcr.io/fullstackstudio-org/hermie-web:<version>`       | That release, e.g. `:0.2.0`.                                                |
+| `ghcr.io/fullstackstudio-org/hermie-web:<version>-<sha>` | That exact build, pinned to the commit it came from.                        |
+| `ghcr.io/fullstackstudio-org/hermie-web:latest`          | The newest tagged release. Not set by a one-off rebuild of an older commit. |
 
 Pick a version or version-sha tag for anything you run more than once; `latest` is for trying it
 out. There is no `npm i` in the image build, so the same `docker pull` gets you the exact bytes
