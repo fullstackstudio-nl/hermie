@@ -11,6 +11,12 @@
  * `-Proto` / `-Host`, which is where the gateway looks for it when it trusts the
  * proxy (`dashboard.trusted_proxies`).
  *
+ * `--pass-host` is the other way round, for a gateway that lists Hermie Web's
+ * own origin in `dashboard.public_urls` (the fullstackstudio-org fork): `Host`
+ * is Hermie Web's own public host and the browser's `Origin` and `Referer` are
+ * left alone, so the gateway knows which of its origins the browser is on and
+ * finishes an OIDC sign-in there. `ProxyTarget.passHostOrigin` decides which.
+ *
  * Cookies pass both ways untouched except for two attributes, and both edits
  * exist so a cookie set for one origin is accepted on another:
  *
@@ -36,6 +42,18 @@ export interface ProxyTarget {
   gatewayUrl: string
   /** The origin the gateway believes it is served on. */
   publicUrl: string
+  /**
+   * Hermie Web's own public origin while `--pass-host` is in effect, else
+   * `null` (or absent): rewrite to `publicUrl`, the ordinary behaviour. Set
+   * back to `null` by `server.ts` when the gateway refuses this origin.
+   */
+  passHostOrigin?: string | null
+  /**
+   * Hermie Web's own configured public origin (`--web-public-url`), whether
+   * or not `--pass-host` is in effect: one of the origins `ownOrigins` counts
+   * as "a browser on this service". `null` or absent when not configured.
+   */
+  webOrigin?: string | null
 }
 
 /** Headers a hop owns; forwarding them corrupts the next hop. */
@@ -107,23 +125,126 @@ export function upstreamHeaders(request: IncomingMessage, target: ProxyTarget): 
   const forwardedFor = request.headers['x-forwarded-for']
   const clientAddress = request.socket.remoteAddress ?? ''
 
-  headers.host = publicUrl.host
-  // Only when the browser sent one. A same-origin GET has no Origin header, and
-  // inventing one would make an ordinary navigation look like a cross-site
-  // request to anything downstream that cares.
-  if (request.headers.origin !== undefined) {
-    headers.origin = publicUrl.origin
-  }
+  const passing = target.passHostOrigin ? new URL(target.passHostOrigin) : null
 
-  if (request.headers.referer !== undefined) {
-    headers.referer = String(request.headers.referer).replace(/^https?:\/\/[^/]+/, publicUrl.origin)
+  if (passing) {
+    // `--pass-host`: this service's own public host, and the browser's own
+    // `Origin` and `Referer` exactly as it sent them (copied above). The
+    // gateway holds all three to its listed origins itself.
+    headers.host = passing.host
+  } else {
+    headers.host = publicUrl.host
+    rewriteOwnOrigin(request, target, headers)
   }
 
   headers['x-forwarded-proto'] = proto
-  headers['x-forwarded-host'] = String(request.headers.host ?? publicUrl.host)
+  headers['x-forwarded-host'] = String(request.headers.host ?? (passing ?? publicUrl).host)
   headers['x-forwarded-for'] = forwardedFor ? `${String(forwardedFor)}, ${clientAddress}` : clientAddress
 
   return headers
+}
+
+/**
+ * The origins a browser on THIS service sends: `--web-public-url` when it is
+ * set (exactly), and whatever this request says it was addressed to — its
+ * `Host`, and the `X-Forwarded-Host` Hermie Web's own TLS proxy set — on
+ * either scheme. A page on another origin cannot forge any of these on a
+ * cross-site request: `Host` is the target the browser was sent to, and a
+ * browser does not let script set either header without a preflight that
+ * fails. Both schemes, because a TLS proxy that sends no `X-Forwarded-Proto`
+ * leaves this service believing `http` while the browser's `Origin` says
+ * `https`; the host and port are what cannot be forged, not the scheme.
+ */
+export function ownOrigins(request: IncomingMessage, target: ProxyTarget): Set<string> {
+  const out = new Set<string>()
+  const add = (candidate: string): void => {
+    try {
+      out.add(new URL(candidate).origin)
+    } catch {
+      // A header that does not make an origin names nothing to match.
+    }
+  }
+
+  if (target.webOrigin) {
+    add(target.webOrigin)
+  }
+
+  for (const name of ['host', 'x-forwarded-host'] as const) {
+    const raw = request.headers[name]
+    const host = (Array.isArray(raw) ? raw[0] : raw)?.split(',')[0]?.trim()
+
+    if (host && !/[\s/\\@?#]/.test(host)) {
+      add(`http://${host}`)
+      add(`https://${host}`)
+    }
+  }
+
+  return out
+}
+
+/** The origin of a web (`http:`/`https:`) URL, or `null` for anything else. */
+function webOriginOf(value: string): string | null {
+  try {
+    const url = new URL(value)
+
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.origin : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The default (rewrite) mode's `Origin` and `Referer`, on a plain request and
+ * on an upgrade alike.
+ *
+ * The gateway has never heard of Hermie Web's own origin, so a browser on it
+ * has its `Origin` rewritten to the gateway's `publicUrl` — and ONLY a
+ * browser on it. Every other `Origin` passes through untouched, so the
+ * gateway's own guards (its WebSocket `Origin` check, and the fork's
+ * write-request check) refuse it unless it is one they list. Rewriting ANY
+ * `Origin` would launder a cross-site one — a script on a sibling subdomain
+ * sending a credentialed form POST, say, with the `SameSite=Lax` session
+ * cookie attached because the two are the same site — into the gateway's
+ * own, which every such check accepts.
+ *
+ *  - No `Origin`: none is invented.
+ *  - A non-web one (`null`, `file://`, `app://`, `tauri://`, `capacitor://`):
+ *    passed through; the gateway classifies those itself, as it would for a
+ *    client that reached it directly.
+ *  - `Referer`: rewritten only when it is on an own origin, else passed
+ *    through.
+ */
+function rewriteOwnOrigin(
+  request: IncomingMessage,
+  target: ProxyTarget,
+  headers: Record<string, string | string[]>
+): void {
+  const publicOrigin = new URL(target.publicUrl).origin
+  const own = ownOrigins(request, target)
+  const origin = request.headers.origin
+
+  if (typeof origin === 'string') {
+    const web = webOriginOf(origin.trim())
+
+    if (web && own.has(web)) {
+      headers.origin = publicOrigin
+    }
+  }
+
+  const referer = request.headers.referer
+
+  if (typeof referer === 'string') {
+    const web = webOriginOf(referer)
+
+    if (web && own.has(web)) {
+      // Rebuilt from the parsed URL rather than sliced from the raw string, so
+      // an uppercase host, an explicit default port or userinfo in it cannot
+      // shift where the path starts.
+      const url = new URL(referer)
+
+      headers.referer = `${publicOrigin}${url.pathname}${url.search}`
+    }
+  }
 }
 
 /** Rewrite one `Set-Cookie` line for the origin the browser actually used. */
@@ -338,9 +459,11 @@ export function proxyUpgrade(
   // back deliberately — they are the whole point of this request.
   headers.connection = 'Upgrade'
   headers.upgrade = String(request.headers.upgrade ?? 'websocket')
-  // An upgrade always carries an Origin from a browser, and the gateway checks
-  // it even when the plain HTTP guard would not have.
-  headers.origin = new URL(target.publicUrl).origin
+  // `upstreamHeaders` already applied the same Origin rule the plain request
+  // gets: under `--pass-host` the browser's own Origin, otherwise Hermie Web's
+  // own origin rewritten to the gateway's and every other one passed through
+  // for the gateway to judge. None is invented: a client that sent no Origin
+  // (not a browser) is left to the gateway's credential check.
 
   const proxied = agentFor(gateway).request({
     protocol: gateway.protocol,

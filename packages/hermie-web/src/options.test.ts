@@ -173,6 +173,52 @@ describe('HERMIE_OIDC', () => {
   })
 })
 
+describe('--pass-host', () => {
+  it('is off by default, and on from the flag or HERMIE_PASS_HOST', () => {
+    expect(resolveOptions({ env: {} }).passHost).toBe(false)
+    expect(
+      resolveOptions({ env: { HERMIE_PASS_HOST: '1', HERMIE_WEB_PUBLIC_URL: 'https://app.example.com' } }).passHost
+    ).toBe(true)
+    expect(resolveOptions({ env: {}, passHost: true, webPublicUrl: 'https://app.example.com/x' })).toMatchObject({
+      passHost: true,
+      webPublicUrl: 'https://app.example.com'
+    })
+  })
+
+  it('needs Hermie Web’s own public URL, and says which variable', () => {
+    expect(() => resolveOptions({ env: { HERMIE_PASS_HOST: '1' } })).toThrow(/HERMIE_WEB_PUBLIC_URL/)
+  })
+
+  it('wants that URL with its scheme, rather than guessing one', () => {
+    expect(() => resolveOptions({ env: { HERMIE_WEB_PUBLIC_URL: 'app.example.com' } })).toThrow(/scheme/)
+    expect(() => resolveOptions({ env: { HERMIE_WEB_PUBLIC_URL: 'ftp://app.example.com' } })).toThrow(/scheme/)
+  })
+
+  it('leaves --public-url meaning the gateway’s own address', () => {
+    const options = resolveOptions({
+      env: {},
+      publicUrl: 'https://hermes.example.com',
+      passHost: true,
+      webPublicUrl: 'https://app.example.com'
+    })
+
+    expect(options.publicUrl).toBe('https://hermes.example.com')
+    expect(options.webPublicUrl).toBe('https://app.example.com')
+  })
+
+  it('defaults loginReturn to none under --pass-host, and to / without it', () => {
+    expect(resolveOptions({ env: {}, passHost: true, webPublicUrl: 'https://app.example.com' }).loginReturn).toBe('')
+    expect(resolveOptions({ env: {} }).loginReturn).toBe('/')
+  })
+
+  it('still honours an explicit loginReturn under --pass-host', () => {
+    expect(
+      resolveOptions({ env: {}, passHost: true, webPublicUrl: 'https://app.example.com', loginReturn: '/hermie' })
+        .loginReturn
+    ).toBe('/hermie')
+  })
+})
+
 /**
  * The decision half of `--no-oidc`'s path handling. The gateway's ASGI server
  * decodes a path exactly once before it routes; `canonicalGatewayPath` makes
@@ -239,6 +285,8 @@ describe('canonicalGatewayPath', () => {
     expect(canonicalGatewayPath('/api/profiles/caf%C3%A9')).toBe('/api/profiles/caf%C3%A9')
     expect(canonicalGatewayPath('/api/files/a%3Fb%23c%25d.txt')).toBe('/api/files/a%3Fb%23c%25d.txt')
     expect(canonicalGatewayPath('/api/files/100%25.txt')).toBe('/api/files/100%25.txt')
+    expect(canonicalGatewayPath('/api/files/r%C3%A9sum%C3%A9%20v2.txt')).toBe('/api/files/r%C3%A9sum%C3%A9%20v2.txt')
+    expect(canonicalGatewayPath('/api/files/a.b..c')).toBe('/api/files/a.b..c')
     expect(canonicalGatewayPath('/%61pi/files/a%3Fb')).toBe('/api/files/a%3Fb')
     expect(canonicalGatewayPath('/api')).toBe('/api')
     expect(canonicalGatewayPath('/api/')).toBe('/api/')
@@ -257,7 +305,14 @@ describe('canonicalGatewayPath', () => {
       '/api/files/a%2Fb',
       '/api/files/a%252Fb',
       '/api/files/a%0ab',
-      '/api/files/%zz'
+      '/api/files/%zz',
+      '/api/%EF%BC%8E%EF%BC%8E/auth/login',
+      '/api/%25EF%25BC%258E%25EF%25BC%258E/auth/login',
+      '/api/%E2%80%A4%E2%80%A4/auth/login',
+      '/api/%EF%BC%8F..%EF%BC%8Fauth',
+      '/api/..;/auth/login',
+      '/api/..%3B/auth/login',
+      '/api/files/a;b'
     ]) {
       expect(canonicalGatewayPath(path), path).toBeNull()
     }

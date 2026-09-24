@@ -121,6 +121,8 @@ async function fetchConfig(): Promise<HermieWebConfig | null> {
     // on its own is still a truthful label, just not a qualified one.
     gatewayOrigin: str(body.gatewayOrigin),
     loginReturn: str(body.loginReturn),
+    passHost: body.passHost === true,
+    origin: str(body.origin),
     version: str(body.version),
     setupRequired: body.setupRequired === true,
     authRequired: typeof body.authRequired === 'boolean' ? body.authRequired : null,

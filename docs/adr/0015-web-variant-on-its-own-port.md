@@ -118,3 +118,26 @@ one.
 **Two platform behaviours change shape rather than disappear.** File picking becomes an
 `<input type="file">` whose cancel is a focus heuristic rather than an event, and haptics become a
 no-op. Both are documented in the web section of [docs/platform-notes.md](../platform-notes.md).
+
+**Amendment: its own domain, with the fork's gateway.** "Own port" was forced by an upstream gateway
+that builds its OIDC callback out of one `dashboard.public_url`. The fullstackstudio-org fork lists
+several origins (`dashboard.public_urls`) and builds the callback on the one a sign-in started on, so
+there Hermie Web can live on a domain of its own and the "same host, another port" rule and the
+`--login-return` redirect both fall away. `--pass-host` is the switch on this side: `Host` becomes
+Hermie Web's own public host and the browser's `Origin` passes through, so the gateway's guards judge
+the real origin instead of a rewritten one. The consequences:
+
+- **Two public addresses to configure, not one.** `--public-url` stays the gateway's own address —
+  the fallback and everything that names the gateway — and `--web-public-url` is Hermie Web's. They
+  were kept apart on purpose: giving `--public-url` a second meaning under a switch would have
+  silently changed what every existing deployment sends.
+- **Hermie Web must be a trusted peer of the gateway** (loopback or `dashboard.trusted_proxies`), or
+  the gateway ignores its `X-Forwarded-Proto` and an https origin never matches. That is a
+  gateway-side setting this service cannot check from outside; it logs a reminder instead.
+- **A wrong list degrades rather than breaks.** A startup probe that the gateway's Host guard answers
+  with 400 switches back to rewriting, and the log names the entry to add. It cannot see a gateway
+  bound to `0.0.0.0`, which accepts every `Host`.
+- **The identity provider needs a callback per origin**, and the sessions are per origin too: signing
+  in on one does not sign you in on the other.
+- **An upstream gateway is unaffected.** The flag is off by default, and without it nothing here
+  changes.

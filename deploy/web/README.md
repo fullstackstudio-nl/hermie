@@ -48,12 +48,13 @@ Three things to know before you use it:
 
 ## What to configure on the gateway
 
-Two settings in the Hermes configuration, and only the second is conditional.
+Two settings in the Hermes configuration, a third for a Hermie Web on its own domain.
 
-| Setting                     | When                                        | Why                                                                                                                                                                           |
-| --------------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `dashboard.public_url`      | Always                                      | The host the gateway believes it is served on. Hermie Web writes it into `Host` and `Origin` on every proxied request, which is what gets past the gateway's rebinding guard. |
-| `dashboard.trusted_proxies` | When Hermie Web runs on a different machine | Lets the gateway read `X-Forwarded-For` instead of seeing Hermie Web's own address as every client.                                                                           |
+| Setting                     | When                                        | Why                                                                                                                                                                                              |
+| --------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `dashboard.public_url`      | Always                                      | The host the gateway believes it is served on. Hermie Web writes it into `Host`, and into the `Origin` of a browser on Hermie Web itself, which is what gets past the gateway's rebinding guard. |
+| `dashboard.trusted_proxies` | When Hermie Web runs on a different machine | Lets the gateway read `X-Forwarded-For` instead of seeing Hermie Web's own address as every client.                                                                                              |
+| `dashboard.public_urls`     | Hermie Web on its own domain (the fork)     | Lists Hermie Web's origin beside the primary, so the gateway accepts it and finishes OIDC sign-in there. See **OIDC** below and `--pass-host`.                                                   |
 
 If `dashboard.public_url` is not what Hermie Web derived from `--gateway`, say so explicitly:
 
@@ -66,22 +67,24 @@ A mismatch shows up as HTTP 403 on `/api/status`, or a WebSocket that refuses th
 
 ## Flags and environment
 
-| Flag                    | Environment                             | Default                  |                                                                                                                                                                |
-| ----------------------- | --------------------------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--gateway <url>`       | `HERMIE_GATEWAY_URL`                    | `http://127.0.0.1:9119`  | The gateway. Fixed at start; nothing at runtime can change it.                                                                                                 |
-| `--port <n>`            | `HERMIE_PORT`                           | `9120`                   |                                                                                                                                                                |
-| `--host <addr>`         | `HERMIE_HOST`                           | `127.0.0.1`              | Anything else puts an unauthenticated port on the network.                                                                                                     |
-| `--public-url <url>`    | `HERMIE_PUBLIC_URL`                     | derived from `--gateway` | Written into `Host` and `Origin` on proxied requests.                                                                                                          |
-| `--static <dir>`        | `HERMIE_STATIC_DIR`                     | the bundled `dist/web`   |                                                                                                                                                                |
-| `--login-return <p>`    | `HERMIE_LOGIN_RETURN`                   | `/`                      | Where a finished sign-in should land. See **OIDC** below.                                                                                                      |
-| `--install-root`        | `HERMIE_INSTALL_ROOT`                   | the package's parent     | Where self-update unpacks releases and keeps the `current` link.                                                                                               |
-| `--no-self-update`      | `HERMIE_SELF_UPDATE=0/false/no`         | on                       | Turns `/hermie/update` into a refusal.                                                                                                                         |
-| `--rollback`            |                                         |                          | Point `current` at the previous release and exit.                                                                                                              |
-| `--cache-max-mb <n>`    | `HERMIE_CACHE_MAX_MB`                   | `64`                     | Disk the message cache may take. `0` turns it off.                                                                                                             |
-| `--allow-insecure-oidc` | `HERMIE_ALLOW_INSECURE_OIDC=1/true/yes` | off                      | Let the built-in identity provider be enabled on a non-https origin. The gateway refuses such an issuer anyway — see below.                                    |
-| `--no-oidc`             | `HERMIE_OIDC=0/false/no`                | on                       | Refuse the **gateway's own** OIDC/SSO sign-in routes and hide them from the app. Not the built-in identity provider below — see **Turning SSO off**.           |
-| `--admins <ids>`        | `HERMIE_ADMINS`                         |                          | Comma-separated gateway user ids (OIDC `sub` or basic-auth username, never email) that are administrators of `/admin` on every start — see **Administration**. |
-|                         | `HERMIE_LOCAL_ADMIN_PASSWORD_HASH`      |                          | A local administrator secret, already hashed by `hermie-web hash-secret`. Never a flag — see **Administration**.                                               |
+| Flag                    | Environment                             | Default                   |                                                                                                                                                                |
+| ----------------------- | --------------------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--gateway <url>`       | `HERMIE_GATEWAY_URL`                    | `http://127.0.0.1:9119`   | The gateway. Fixed at start; nothing at runtime can change it.                                                                                                 |
+| `--port <n>`            | `HERMIE_PORT`                           | `9120`                    |                                                                                                                                                                |
+| `--host <addr>`         | `HERMIE_HOST`                           | `127.0.0.1`               | Anything else puts an unauthenticated port on the network.                                                                                                     |
+| `--public-url <url>`    | `HERMIE_PUBLIC_URL`                     | derived from `--gateway`  | The gateway's own `dashboard.public_url`. Written into `Host`, and into Hermie Web's own `Origin`, unless `--pass-host`.                                       |
+| `--web-public-url <u>`  | `HERMIE_WEB_PUBLIC_URL`                 |                           | Hermie Web's **own** public address, with its scheme (`https://app.example.com`). Needed by `--pass-host`.                                                     |
+| `--pass-host`           | `HERMIE_PASS_HOST=1/true/yes`           | off                       | Send `--web-public-url` as `Host` and let the browser's `Origin` through, for a gateway that lists it — see **OIDC** below.                                    |
+| `--static <dir>`        | `HERMIE_STATIC_DIR`                     | the bundled `dist/web`    |                                                                                                                                                                |
+| `--login-return <p>`    | `HERMIE_LOGIN_RETURN`                   | `/` (none: `--pass-host`) | Where a finished sign-in should land. See **OIDC** below.                                                                                                      |
+| `--install-root`        | `HERMIE_INSTALL_ROOT`                   | the package's parent      | Where self-update unpacks releases and keeps the `current` link.                                                                                               |
+| `--no-self-update`      | `HERMIE_SELF_UPDATE=0/false/no`         | on                        | Turns `/hermie/update` into a refusal.                                                                                                                         |
+| `--rollback`            |                                         |                           | Point `current` at the previous release and exit.                                                                                                              |
+| `--cache-max-mb <n>`    | `HERMIE_CACHE_MAX_MB`                   | `64`                      | Disk the message cache may take. `0` turns it off.                                                                                                             |
+| `--allow-insecure-oidc` | `HERMIE_ALLOW_INSECURE_OIDC=1/true/yes` | off                       | Let the built-in identity provider be enabled on a non-https origin. The gateway refuses such an issuer anyway — see below.                                    |
+| `--no-oidc`             | `HERMIE_OIDC=0/false/no`                | on                        | Refuse the **gateway's own** OIDC/SSO sign-in routes and hide them from the app. Not the built-in identity provider below — see **Turning SSO off**.           |
+| `--admins <ids>`        | `HERMIE_ADMINS`                         |                           | Comma-separated gateway user ids (OIDC `sub` or basic-auth username, never email) that are administrators of `/admin` on every start — see **Administration**. |
+|                         | `HERMIE_LOCAL_ADMIN_PASSWORD_HASH`      |                           | A local administrator secret, already hashed by `hermie-web hash-secret`. Never a flag — see **Administration**.                                               |
 
 A container — Docker or Kubernetes — is meant to be configured entirely through this column: the
 image's `ENTRYPOINT` is `["hermie-web"]` with no `args`, so `docker run -e HERMIE_GATEWAY_URL=... image`
@@ -564,21 +567,96 @@ spends, and it never runs in a browser. This flag is also unrelated to the **bui
 provider** further down — that is this service acting as an OpenID Provider _for_ the gateway; this
 one is about the gateway's _own_ upstream providers, reached through this proxy.
 
-## OIDC: Hermie Web must share the gateway's public hostname (another port)
+## OIDC: where the sign-in comes back to
 
-If your gateway signs people in with OIDC, this is the one rule that decides whether the sign-in can
-work at all. Get it wrong and the round trip ends on:
+If your gateway signs people in with OIDC, the identity provider has to send the browser back to the
+host that holds the PKCE cookie. Get it wrong and the round trip ends on:
 
 ```json
 { "detail": "Missing PKCE state cookie" }
 ```
 
-**The callback is fixed to `public_url`.** The gateway builds the `redirect_uri` it gives the
-identity provider out of `dashboard.public_url` and nothing else. The PKCE state that has to be
-there when the browser comes back is a cookie, and a cookie belongs to a **host name** — it ignores
-the port, but not the name. So Hermie Web has to answer on the **same hostname** as `public_url`,
-on **another port**. A second hostname (`hermie.example.com` next to `hermes.example.com`) cannot
-work, however carefully the rest is configured: the cookie is on a host the callback never visits.
+Which setups that allows depends on the gateway: a gateway from the fullstackstudio-org fork can serve
+Hermie Web on **its own domain** (next section); an upstream gateway needs Hermie Web on the **same
+host name, another port** (the section after it). The background is in
+[docs/web.md](../../docs/web.md#oidc-where-the-sign-in-comes-back-to).
+
+### Its own domain, with the fork's `dashboard.public_urls`
+
+Gateway on `https://hermes.example.com`, Hermie Web on `https://app.example.com`. The fork builds the
+OIDC `redirect_uri` on the listed origin a sign-in started on, so a sign-in through Hermie Web comes
+back to `https://app.example.com/auth/callback` — through Hermie Web, to the gateway — and lands on
+the app.
+
+On the **gateway** (`config.yaml`, or `HERMES_DASHBOARD_PUBLIC_URL`, `HERMES_DASHBOARD_PUBLIC_URLS`
+and `HERMES_DASHBOARD_TRUSTED_PROXIES` in the container):
+
+```yaml
+dashboard:
+  public_url: 'https://hermes.example.com' # primary
+  public_urls:
+    - 'https://app.example.com' # Hermie Web
+  # The address Hermie Web connects FROM. Not needed when that is loopback (a
+  # sidecar, or the same machine): the gateway trusts loopback already.
+  trusted_proxies:
+    - '10.0.0.12'
+```
+
+On **Hermie Web**:
+
+```sh
+hermie-web --gateway http://10.0.0.11:9119 \
+  --public-url https://hermes.example.com \
+  --web-public-url https://app.example.com \
+  --pass-host
+```
+
+At the **identity provider**, register both callbacks: `https://hermes.example.com/auth/callback` and
+`https://app.example.com/auth/callback`. For the built-in identity provider below, that is two lines
+in its redirect URI list on `/admin/oidc`.
+
+What each part is for:
+
+- **`public_urls`** makes the gateway accept `app.example.com` at all and build its callback there.
+- **`trusted_proxies`** (or loopback) is what lets the gateway believe Hermie Web's
+  `X-Forwarded-Proto: https` and `X-Forwarded-Host`. Without it the gateway sees a plain-http request,
+  `https://app.example.com` never matches, and every sign-in falls back to the primary callback on
+  `hermes.example.com` — the gateway logs a warning saying so. Hermie Web cannot check this from
+  outside, and logs a reminder at startup whenever the gateway is not on loopback.
+- **`--pass-host`** sends `app.example.com` as `Host` and lets the browser's own `Origin` and `Referer`
+  through, so the gateway's Host guard and its `Origin` checks judge the origin the browser is really
+  on. `--public-url` stays the gateway's address — it is still what Hermie Web falls back to.
+- **No `--login-return`**: under `--pass-host` it defaults to none, the app sends no `next=`, and the
+  callback's own `/` is already the app.
+
+At startup Hermie Web asks `GET /api/status` with those headers. If the gateway answers 400 — its Host
+guard refusing an origin it does not list — Hermie Web falls back to rewriting `Host` and `Origin` to
+`--public-url`, as it does without the flag, and logs:
+
+```text
+hermie-web: the gateway refused https://app.example.com as a Host (HTTP 400), so Host and Origin are rewritten to https://hermes.example.com instead. Add https://app.example.com to dashboard.public_urls on the gateway.
+```
+
+A gateway bound to `0.0.0.0` accepts every `Host`, so there that check cannot tell; a missing entry
+then shows up as the gateway's own "matches no listed public origin" warning at the first sign-in.
+The check runs only when Hermie Web starts (and after `/setup`): after changing the gateway's
+`public_urls`, restart Hermie Web as well.
+
+Hermie Web's own TLS proxy must pass `X-Forwarded-Proto` and the original `Host` (see **Putting TLS in
+front**): that `Host` is what Hermie Web forwards as `X-Forwarded-Host`, and it has to be
+`app.example.com` for the gateway to pick the right callback. It is the client's own `Host`; a
+trusting gateway only uses it to choose among the origins it lists, so a client that sends another
+one can at most pick a different listed origin, never an address of its own.
+
+### Same host name, another port, with an upstream gateway
+
+**The callback is fixed to `public_url`** on a gateway without `public_urls`: it builds the
+`redirect_uri` it gives the identity provider out of `dashboard.public_url` and nothing else. The
+PKCE state that has to be there when the browser comes back is a cookie, and a cookie belongs to a
+**host name** — it ignores the port, but not the name. So Hermie Web has to answer on the **same
+hostname** as `public_url`, on **another port**. On such a gateway a second hostname
+(`hermie.example.com` next to `hermes.example.com`) cannot work, however carefully the rest is
+configured: the cookie is on a host the callback never visits.
 
 **Then point the landing back.** `next=` comes back from `/auth/callback` as a relative redirect, so
 the browser resolves it against the gateway's port — a successful sign-in would finish on the

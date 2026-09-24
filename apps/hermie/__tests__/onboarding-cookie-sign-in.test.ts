@@ -62,6 +62,13 @@ describe('the sign-in URL', () => {
     expect(url.searchParams.get('next')).toBe('/')
   })
 
+  it('sends no next= at all when the landing path is empty on purpose', () => {
+    const url = new URL(buildCookieSignInUrl('https://app.example.com', 'sso', ''))
+
+    expect(url.searchParams.has('next')).toBe(false)
+    expect(url.searchParams.get('provider')).toBe('sso')
+  })
+
   it('never puts a foreign host in next=, however it was asked to', () => {
     const url = new URL(buildCookieSignInUrl('https://hermes.example.com', 'self-hosted', '//evil.example'))
 
@@ -74,6 +81,12 @@ describe('what the server asked for', () => {
     loadConfig.mockResolvedValue(config('/hermie'))
 
     await expect(loginReturnPath()).resolves.toBe('/hermie')
+  })
+
+  it('asks for no next= when the server configured none (--pass-host)', async () => {
+    loadConfig.mockResolvedValue(config(''))
+
+    await expect(loginReturnPath()).resolves.toBe('')
   })
 
   it('prefers an explicit path, and does not ask the server for one', async () => {

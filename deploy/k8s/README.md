@@ -23,11 +23,11 @@ not need to.
 
 ## Images
 
-| Image                                             | What it is                                                                                                                                                                                                 |
-| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ghcr.io/fullstackstudio-org/hermie-web:<version>` | A tagged release. Pin this in anything you run more than once.                                                                                                                                             |
-| `ghcr.io/fullstackstudio-org/hermie-web:latest`    | The newest tagged release. Fine for trying this out, not for a pin.                                                                                                                                        |
-| `ghcr.io/fullstackstudio-org/hermes-agent:main`    | The Hermes gateway. See **The Hermes container's variables** below — the names below are set by a companion change to that image; build it after that change lands, or the gateway will not read them yet. |
+| Image                                              | What it is                                                                                         |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `ghcr.io/fullstackstudio-org/hermie-web:<version>` | A tagged release. Pin this in anything you run more than once.                                     |
+| `ghcr.io/fullstackstudio-org/hermie-web:latest`    | The newest tagged release. Fine for trying this out, not for a pin.                                |
+| `ghcr.io/fullstackstudio-org/hermes-agent:main`    | The Hermes gateway (the fullstackstudio-org fork). See **The Hermes container's variables** below. |
 
 ## The two shapes
 
@@ -35,6 +35,7 @@ not need to.
 | ------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | `sidecar.yaml`                                          | (a) Hermie Web as a **sidecar** in the same Pod as Hermes. Reaches it over `127.0.0.1:9119`. |
 | `hermes-standalone.yaml` + `hermie-web-standalone.yaml` | (b) Hermie Web as its **own Deployment and Service**, reaching Hermes through a Service.     |
+| `networkpolicy.yaml`                                    | With (b): only Hermie Web may reach the gateway — see **Two domains**.                       |
 
 Apply `configmap.yaml` and a filled-in copy of `secret.example.yaml` first in either case:
 
@@ -49,6 +50,7 @@ kubectl apply -f sidecar.yaml
 # shape (b):
 kubectl apply -f hermes-standalone.yaml
 kubectl apply -f hermie-web-standalone.yaml
+kubectl apply -f networkpolicy.yaml   # recommended; see **Two domains**
 ```
 
 **Pick (a)** when you want the simplest possible unit — one Pod, one thing to schedule, the gateway
@@ -65,22 +67,26 @@ has the same constraint — see `--state-dir` in [../web/README.md](../web/READM
 
 ## The Hermes container's variables
 
-`configmap.yaml` and `secret.example.yaml` use these names for the Hermes container:
+The Hermes image configures itself from its environment on every start; the full list, and what
+each variable does, is in the fork's
+[docker.md, "Configure from environment variables"](https://github.com/fullstackstudio-org/hermes-agent/blob/main/website/docs/user-guide/docker.md#configure-from-environment-variables).
+`configmap.yaml` and `secret.example.yaml` use these:
 
-| Variable                                                         | Where                                                                                                        |
-| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `HERMES_DASHBOARD_PUBLIC_URL`                                    | ConfigMap                                                                                                    |
-| `HERMES_DASHBOARD_USERNAME` / `_PASSWORD`                        | Secret                                                                                                       |
-| `HERMES_DASHBOARD_OIDC_ISSUER` / `_CLIENT_ID` / `_CLIENT_SECRET` | Secret (the issuer alone could go in the ConfigMap; it is grouped with the other two here for one `envFrom`) |
-| `HERMES_DASHBOARD_HOST` / `_PORT`                                | ConfigMap (default `0.0.0.0:9119`)                                                                           |
-| `HERMES_PROFILES_MAX`                                            | ConfigMap                                                                                                    |
-| `HERMIE_PLUGIN`                                                  | ConfigMap (`true`)                                                                                           |
-| A provider key, e.g. `OPENROUTER_API_KEY`                        | Secret                                                                                                       |
-
-**These are set by env-configuration work on the `hermes-agent` image itself, done alongside this
-change rather than by it.** If the names above do not match what your build of that image reads,
-the image predates that change — check that image's own docs, and align the names here if they
-changed before it shipped.
+| Variable                                                                                                                                    | Where                                                                                           |
+| ------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `HERMES_DASHBOARD`                                                                                                                          | ConfigMap (`1`: start the supervised dashboard)                                                 |
+| `HERMES_DASHBOARD_PUBLIC_URL`                                                                                                               | ConfigMap — the primary public URL                                                              |
+| `HERMES_DASHBOARD_PUBLIC_URLS`                                                                                                              | ConfigMap, comma-separated — further public URLs (see **Two domains**)                          |
+| `HERMES_DASHBOARD_TRUSTED_PROXIES`                                                                                                          | ConfigMap, comma-separated addresses or bounded networks                                        |
+| `HERMES_DASHBOARD_WRITE_ORIGIN_CHECK`                                                                                                       | ConfigMap (`auto`, `on` or `off`)                                                               |
+| `HERMES_DASHBOARD_BASIC_AUTH_USERNAME`                                                                                                      | Secret                                                                                          |
+| `HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH`                                                                                                 | Secret — preferred over `HERMES_DASHBOARD_BASIC_AUTH_PASSWORD`, which the image hashes itself   |
+| `HERMES_DASHBOARD_BASIC_AUTH_SECRET`                                                                                                        | Secret — the session-signing secret                                                             |
+| `HERMES_DASHBOARD_OIDC_ISSUER` / `HERMES_DASHBOARD_OIDC_CLIENT_ID` / `HERMES_DASHBOARD_OIDC_CLIENT_SECRET` / `HERMES_DASHBOARD_OIDC_SCOPES` | Secret (the issuer and client id could go in the ConfigMap; they are grouped for one `envFrom`) |
+| `HERMES_DASHBOARD_HOST` / `HERMES_DASHBOARD_PORT`                                                                                           | ConfigMap (default `0.0.0.0:9119`)                                                              |
+| `HERMES_PROFILES_MAX`                                                                                                                       | ConfigMap                                                                                       |
+| `HERMIE_PLUGIN`                                                                                                                             | ConfigMap (`true`)                                                                              |
+| A provider key, e.g. `OPENROUTER_API_KEY`                                                                                                   | Secret                                                                                          |
 
 ## Probes, resources and `securityContext`
 
@@ -91,19 +97,26 @@ one from `HERMIE_IN_DOCKER=1`, which the image already sets — see
 [../web/README.md#docker](../web/README.md#docker)), so every example runs it with
 `readOnlyRootFilesystem: true` and a single volume mounted at `HERMIE_STATE_DIR=/data`.
 
-**Hermes**: this repository does not build that image, so its probe surface is not something these
-examples can promise. `GET /api/status` is unauthenticated and used elsewhere as a liveness check
-(`docs/test-gateway.md`), but a kubelet `httpGet` probe hits the Pod's own IP rather than
-`dashboard.public_url`, and that is exactly the mismatch the gateway's Host/Origin guard exists to
-reject (see [../web/README.md](../web/README.md#what-to-configure-on-the-gateway)) — so these
-examples use a plain `tcpSocket` check instead of asserting an HTTP probe will pass. Switch to
-`httpGet: /api/status` once you have confirmed it answers correctly from inside your cluster.
+**Hermes**: `GET /api/status` is unauthenticated, and with the image's default bind of `0.0.0.0` the
+gateway's Host guard accepts the Pod IP a kubelet probe uses — so the examples probe it with
+`httpGet`, as the fork's own Kubernetes example does.
 
-Both containers get `requests`/`limits` sized for a small deployment — raise them for real traffic —
-and `runAsNonRoot: true`. Hermes additionally needs `fsGroup` set on the Pod so the mounted
-`/opt/data` volume is writable by whatever user that image runs as; Hermie Web's image already runs
-as the fixed `node` user (uid `1000`), which is why its `securityContext` pins `runAsUser: 1000`
-explicitly.
+Both containers get `requests`/`limits` sized for a small deployment — raise them for real traffic.
+Hermie Web runs with `runAsNonRoot: true` as the image's fixed `node` user (uid `1000`), which is why
+its `securityContext` pins `runAsUser: 1000` explicitly, and the Pod's `fsGroup: 1000` is what makes
+its state volume writable. The **Hermes container must start as root**: its init steps remap the
+`hermes` user and fix the ownership of `/opt/data` before they drop privileges, so it gets no
+`runAsNonRoot` or `runAsUser` (the fork's docker.md says the same). It does get
+`allowPrivilegeEscalation: false` and every capability dropped except the six it needs: `CHOWN`,
+`DAC_OVERRIDE`, `FOWNER`, `SETUID` and `SETGID` for the init steps, and `KILL` because the root
+`s6-supervise` signals services that run as another uid. Without `KILL` nothing fails loudly —
+`s6-svc -r` just does nothing and a stop waits out the whole grace period — so it is listed
+explicitly rather than left for a log line to name. **Untested on a cluster so far**; verify them in
+your first deployment.
+
+The `httpGet` probes rely on the gateway's default bind of `0.0.0.0`. Set `HERMES_DASHBOARD_HOST` to
+anything narrower and its Host guard refuses the Pod IP the kubelet probes with (a 400), so switch
+the probes back to `tcpSocket: { port: 9119 }`.
 
 ## PersistentVolumeClaims
 
@@ -114,6 +127,40 @@ explicitly.
 
 Both are `ReadWriteOnce`, matching the single-replica constraint above. Size them for your own
 retention; 5Gi and 1Gi in the examples are starting points, not a sizing recommendation.
+
+## Two domains
+
+With the fullstackstudio-org gateway, Hermie Web can have a domain of its own
+(`https://app.example.com`) next to the gateway's (`https://hermes.example.com`), and an OIDC sign-in
+started in Hermie Web finishes there. `configmap.yaml` has the variables, commented out:
+
+| Container  | Variable                           | Value                                                          |
+| ---------- | ---------------------------------- | -------------------------------------------------------------- |
+| Hermes     | `HERMES_DASHBOARD_PUBLIC_URL`      | `https://hermes.example.com` — the primary                     |
+| Hermes     | `HERMES_DASHBOARD_PUBLIC_URLS`     | `https://app.example.com`                                      |
+| Hermes     | `HERMES_DASHBOARD_TRUSTED_PROXIES` | Shape (b) only: the Pod network Hermie Web connects from       |
+| Hermie Web | `HERMIE_PUBLIC_URL`                | `https://hermes.example.com` — still the gateway's own address |
+| Hermie Web | `HERMIE_WEB_PUBLIC_URL`            | `https://app.example.com`                                      |
+| Hermie Web | `HERMIE_PASS_HOST`                 | `true`                                                         |
+
+Then give each its own Ingress host (`ingress.yaml` covers Hermie Web's), and register both
+`https://hermes.example.com/auth/callback` and `https://app.example.com/auth/callback` at the
+identity provider.
+
+**Trust only what can reach the gateway.** A Pod's IP changes, so `HERMES_DASHBOARD_TRUSTED_PROXIES`
+has to name a network, and k3s's Pod network (`10.42.0.0/16`) is every Pod on the cluster. Apply
+`networkpolicy.yaml` with it: only Hermie Web (and your ingress controller, if the gateway has an
+Ingress of its own) can then reach port 9119, so the wide range trusts nobody else. It needs a CNI
+that enforces NetworkPolicy, which k3s's default does.
+
+**Trust is the part that fails quietly.** In the sidecar shape Hermie Web reaches the gateway over
+loopback, which the gateway trusts already. In shape (b) it connects from its own Pod IP, and unless
+that is in `HERMES_DASHBOARD_TRUSTED_PROXIES` the gateway ignores its `X-Forwarded-Proto`, sees
+plain http, never matches `https://app.example.com`, and sends every sign-in back to
+`hermes.example.com` — logging a warning that says so. Hermie Web's own startup check catches an
+origin missing from `HERMES_DASHBOARD_PUBLIC_URLS` only on a gateway bound to a specific host; the
+image binds `0.0.0.0`, where the gateway's first-sign-in warning is the signal instead. The details
+are in [../web/README.md](../web/README.md#its-own-domain-with-the-forks-dashboardpublic_urls).
 
 ## TLS and the reverse-proxy headers
 

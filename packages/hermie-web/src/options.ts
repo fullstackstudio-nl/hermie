@@ -46,6 +46,33 @@ export interface HermieWebOptions {
    */
   publicUrl: string
   /**
+   * Hermie Web's OWN public origin — the address a browser types to reach this
+   * service, e.g. `https://app.example.com` (`--web-public-url` /
+   * `HERMIE_WEB_PUBLIC_URL`). `''` when unset.
+   *
+   * Deliberately a second option rather than a new meaning for `publicUrl`:
+   * that one is, and stays, the GATEWAY's own `dashboard.public_url`, which
+   * `--pass-host` still needs — for the fallback when the gateway turns the
+   * pass-through down, for the probe, and for everything that names the
+   * gateway (`gatewayHost` in `/hermie/config.json`, the built-in issuer's
+   * redirect URI). Giving `--public-url` a second meaning under a switch
+   * would silently change what every existing deployment sends.
+   */
+  webPublicUrl: string
+  /**
+   * Send the gateway Hermie Web's own origin instead of rewriting to the
+   * gateway's (`--pass-host` / `HERMIE_PASS_HOST`, off by default).
+   *
+   * For a gateway that lists this origin in `dashboard.public_urls` (the
+   * fullstackstudio-org fork): `Host` becomes `webPublicUrl`'s host, and the
+   * browser's own `Origin` and `Referer` pass through untouched, so the
+   * gateway sees the origin the browser is really on — and builds the OIDC
+   * `redirect_uri` on it, so sign-in finishes HERE rather than on the
+   * gateway's own host. Needs `webPublicUrl`. See `server.ts`'s startup
+   * check for the fallback when the gateway does not list the origin.
+   */
+  passHost: boolean
+  /**
    * The path the gateway sends the browser to once a sign-in finishes.
    *
    * The app puts it in `next=` on `/auth/login`, and the gateway hands it back
@@ -55,6 +82,10 @@ export interface HermieWebOptions {
    * rather than on the app, and this is the path an operator points back at
    * Hermie Web (a redirect in the reverse proxy; `deploy/web/README.md` has the
    * worked example). `/` is right whenever the two share an origin.
+   *
+   * `''` means "send no `next=` at all", which is the default under
+   * `passHost`: the callback then lands on Hermie Web's own origin, and the
+   * gateway's own default (`/`) is already the right place.
    */
   loginReturn: string
 
@@ -381,8 +412,15 @@ export function canonicalGatewayPath(rawPath: string): string | null {
   return `/${decoded.join('/')}`
 }
 
+/*
+  What could move a path at SOME hop, in any decoded stage: `/` and `\`,
+  control characters, U+FF0E (a fullwidth full stop, which an NFKC-normalising
+  hop turns into `.`; `apiSegmentMayMove` also checks the NFKC form itself),
+  and `;` (a path parameter a Tomcat-style hop strips, which would turn `..;`
+  into `..`).
+*/
 // eslint-disable-next-line no-control-regex
-const MOVES_A_PATH = /[/\\\u0000-\u001f\u007f-\u009f]/
+const MOVES_A_PATH = /[/\\;\u0000-\u001f\u007f-\u009f\uff0e]/
 
 /**
  * Whether one raw `/api` path segment is, or could become at a hop that
@@ -396,7 +434,11 @@ function apiSegmentMayMove(raw: string): boolean {
   let stage = raw
 
   for (let pass = 0; pass < 8; pass++) {
-    if (stage === '.' || stage === '..' || MOVES_A_PATH.test(stage)) {
+    // Checked as sent and as an NFKC-normalising hop would see it, which
+    // catches U+FF0E's cousins (U+2024, U+FE52, a fullwidth solidus) as well.
+    const folded = stage.normalize('NFKC')
+
+    if ([stage, folded].some(form => form === '.' || form === '..' || MOVES_A_PATH.test(form))) {
       return true
     }
 
@@ -497,6 +539,36 @@ export function normalizePublicUrl(raw: string, gatewayUrl: string): string {
 }
 
 /**
+ * `--web-public-url`, checked: an `http(s)://` URL, answered as its origin.
+ * A scheme is required rather than guessed — whether this service is reached
+ * over https is exactly what the gateway will compare, and a guess here would
+ * be a silent mismatch there.
+ */
+export function normalizeWebPublicUrl(raw: string): string {
+  const trimmed = raw.trim()
+
+  if (!trimmed) {
+    return ''
+  }
+
+  let url: URL
+
+  try {
+    url = new URL(trimmed)
+  } catch {
+    url = new URL('invalid:')
+  }
+
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error(
+      `--web-public-url (or HERMIE_WEB_PUBLIC_URL) must be an http:// or https:// URL with its scheme (got ${raw}).`
+    )
+  }
+
+  return url.origin
+}
+
+/**
  * Is this a path on our own origin, and nothing else?
  *
  * Everything that is not one is a way to send a signed-in browser somewhere
@@ -520,11 +592,11 @@ export function isSameOriginPath(raw: string): boolean {
 }
 
 /** `--login-return`, checked. Empty means the default; anything unsafe throws. */
-export function normalizeLoginReturn(raw: string): string {
+export function normalizeLoginReturn(raw: string, fallback: string = DEFAULT_LOGIN_RETURN): string {
   const trimmed = raw.trim()
 
   if (!trimmed) {
-    return DEFAULT_LOGIN_RETURN
+    return fallback
   }
 
   if (!isSameOriginPath(trimmed)) {
@@ -543,6 +615,8 @@ export interface ResolveOptionsInput {
   port?: string | number | undefined
   host?: string | undefined
   publicUrl?: string | undefined
+  webPublicUrl?: string | undefined
+  passHost?: boolean | undefined
   staticDir?: string | undefined
   loginReturn?: string | undefined
   version?: string | undefined
@@ -587,6 +661,15 @@ export function resolveOptions(input: ResolveOptionsInput = {}): HermieWebOption
   })
 
   const selfUpdate = input.selfUpdate ?? readBooleanEnv(env.HERMIE_SELF_UPDATE, 'HERMIE_SELF_UPDATE') ?? true
+  const passHost = input.passHost ?? readBooleanEnv(env.HERMIE_PASS_HOST, 'HERMIE_PASS_HOST') ?? false
+  const webPublicUrl = normalizeWebPublicUrl(input.webPublicUrl ?? env.HERMIE_WEB_PUBLIC_URL ?? '')
+
+  if (passHost && !webPublicUrl) {
+    throw new Error(
+      '--pass-host (or HERMIE_PASS_HOST) needs --web-public-url (or HERMIE_WEB_PUBLIC_URL): ' +
+        'Hermie Web’s own public address, e.g. https://app.example.com, which is what the gateway is sent.'
+    )
+  }
 
   return {
     gatewayUrl,
@@ -596,8 +679,15 @@ export function resolveOptions(input: ResolveOptionsInput = {}): HermieWebOption
     port,
     host: input.host ?? env.HERMIE_HOST ?? DEFAULT_HOST,
     publicUrl: normalizePublicUrl(input.publicUrl ?? env.HERMIE_PUBLIC_URL ?? '', gatewayUrl),
+    webPublicUrl,
+    passHost,
     staticDir: path.resolve(input.staticDir ?? env.HERMIE_STATIC_DIR ?? path.join(packageRoot, 'dist', 'web')),
-    loginReturn: normalizeLoginReturn(input.loginReturn ?? env.HERMIE_LOGIN_RETURN ?? DEFAULT_LOGIN_RETURN),
+    // Under `--pass-host` the callback lands on this origin, so no `next=` is
+    // needed unless an operator still asks for one.
+    loginReturn: normalizeLoginReturn(
+      input.loginReturn ?? env.HERMIE_LOGIN_RETURN ?? '',
+      passHost ? '' : DEFAULT_LOGIN_RETURN
+    ),
     version: input.version ?? env.HERMIE_VERSION ?? readOwnVersion(packageRoot),
     selfUpdate,
     installRoot: path.resolve(input.installRoot ?? env.HERMIE_INSTALL_ROOT ?? path.join(packageRoot, '..')),

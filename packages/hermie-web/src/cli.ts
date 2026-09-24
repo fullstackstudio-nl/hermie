@@ -31,6 +31,8 @@ async function main(): Promise<void> {
       port: { type: 'string' },
       host: { type: 'string' },
       'public-url': { type: 'string' },
+      'web-public-url': { type: 'string' },
+      'pass-host': { type: 'boolean', default: false },
       static: { type: 'string' },
       'login-return': { type: 'string' },
       'install-root': { type: 'string' },
@@ -92,6 +94,8 @@ async function main(): Promise<void> {
     port: values.port,
     host: values.host,
     publicUrl: values['public-url'],
+    webPublicUrl: values['web-public-url'],
+    ...(values['pass-host'] ? { passHost: true } : {}),
     staticDir: values.static,
     loginReturn: values['login-return'],
     installRoot: values['install-root'],
@@ -138,6 +142,8 @@ async function main(): Promise<void> {
     port: options.port,
     host: options.host,
     publicUrl: options.publicUrl,
+    webPublicUrl: options.webPublicUrl,
+    passHost: options.passHost,
     staticDir: options.staticDir,
     loginReturn: options.loginReturn,
     installRoot: options.installRoot,
@@ -167,9 +173,17 @@ async function main(): Promise<void> {
   }
 
   console.warn(`  gateway    ${server.options.gatewayUrl}${server.options.gatewayConfigured ? '' : ' (default)'}`)
-  console.warn(`  public url ${options.publicUrl} (sent as Host and Origin)`)
+  console.warn(
+    options.passHost
+      ? `  public url ${options.webPublicUrl} (sent as Host; the browser’s Origin passes through — --pass-host)`
+      : `  public url ${options.publicUrl} (sent as Host, and as this service’s own Origin)`
+  )
   console.warn(`  static     ${options.staticDir}`)
-  console.warn(`  login ret  ${options.loginReturn} (the app’s next= on /auth/login)`)
+  console.warn(
+    options.loginReturn
+      ? `  login ret  ${options.loginReturn} (the app’s next= on /auth/login)`
+      : '  login ret  none (the app sends no next=; the gateway lands on /)'
+  )
   console.warn(
     options.cacheMaxMb > 0
       ? `  cache      ${String(options.cacheMaxMb)} MB in ${options.stateDir}`

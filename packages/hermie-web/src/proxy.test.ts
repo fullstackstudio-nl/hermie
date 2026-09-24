@@ -41,7 +41,10 @@ describe('the scheme the browser actually used', () => {
   })
 
   it('still rewrites Host and Origin to the gateway’s public URL', () => {
-    const headers = upstreamHeaders(request({ origin: 'https://hermes.example.com:9443' }), TARGET)
+    const headers = upstreamHeaders(
+      request({ origin: 'https://hermes.example.com:9443', 'x-forwarded-proto': 'https' }),
+      TARGET
+    )
 
     expect(headers.host).toBe('hermes.example.com')
     expect(headers.origin).toBe('https://hermes.example.com')
@@ -125,5 +128,118 @@ describe('hostPinnedFetch', () => {
     } finally {
       await server.close()
     }
+  })
+})
+
+describe('upstreamHeaders under --pass-host', () => {
+  const PASSING = { ...TARGET, passHostOrigin: 'https://app.example.com' }
+
+  it('sends Hermie Web’s own host and leaves the browser’s Origin and Referer alone', () => {
+    const headers = upstreamHeaders(
+      request({ origin: 'https://app.example.com', referer: 'https://app.example.com/chats' }, true),
+      PASSING
+    )
+
+    expect(headers.host).toBe('app.example.com')
+    expect(headers.origin).toBe('https://app.example.com')
+    expect(headers.referer).toBe('https://app.example.com/chats')
+    expect(headers['x-forwarded-proto']).toBe('https')
+    expect(headers['x-forwarded-host']).toBe('hermes.example.com:9443')
+  })
+
+  it('invents no Origin the browser did not send', () => {
+    expect(upstreamHeaders(request({}), PASSING).origin).toBeUndefined()
+  })
+
+  it('rewrites again once the pass-through is switched off', () => {
+    const headers = upstreamHeaders(request({ origin: 'https://app.example.com' }, true), {
+      ...TARGET,
+      passHostOrigin: null,
+      webOrigin: 'https://app.example.com'
+    })
+
+    expect(headers.host).toBe('hermes.example.com')
+    expect(headers.origin).toBe('https://hermes.example.com')
+  })
+})
+
+/*
+  The default (rewrite) mode rewrites a browser's Origin to the gateway's only
+  when the browser is on Hermie Web itself. Any other Origin reaches the
+  gateway as it was sent, so the gateway's own Origin checks still work.
+*/
+describe('the Origin rule in rewrite mode', () => {
+  const own = (headers: Record<string, string>) =>
+    upstreamHeaders(request({ host: 'a.example.net', 'x-forwarded-proto': 'https', ...headers }), TARGET)
+
+  it('rewrites an Origin and Referer on this service’s own Host', () => {
+    const headers = own({ origin: 'https://a.example.net', referer: 'https://a.example.net/chats?x=1' })
+
+    expect(headers.origin).toBe('https://hermes.example.com')
+    expect(headers.referer).toBe('https://hermes.example.com/chats?x=1')
+  })
+
+  it('counts the X-Forwarded-Host of this service’s own proxy as its own too', () => {
+    expect(own({ 'x-forwarded-host': 'hermie.example.net', origin: 'https://hermie.example.net' }).origin).toBe(
+      'https://hermes.example.com'
+    )
+  })
+
+  it('counts --web-public-url as its own', () => {
+    const headers = upstreamHeaders(request({ host: '10.0.0.3:9120', origin: 'https://app.example.com' }), {
+      ...TARGET,
+      webOrigin: 'https://app.example.com'
+    })
+
+    expect(headers.origin).toBe('https://hermes.example.com')
+  })
+
+  it('passes a sibling subdomain’s Origin and Referer through untouched', () => {
+    const headers = own({ origin: 'https://b.example.net', referer: 'https://b.example.net/evil' })
+
+    expect(headers.origin).toBe('https://b.example.net')
+    expect(headers.referer).toBe('https://b.example.net/evil')
+  })
+
+  it('matches this service’s own host on either scheme — a TLS proxy may not say https', () => {
+    const behindSilentProxy = upstreamHeaders(
+      request({ host: 'a.example.net', origin: 'https://a.example.net' }),
+      TARGET
+    )
+
+    expect(behindSilentProxy.origin).toBe('https://hermes.example.com')
+    expect(own({ origin: 'http://a.example.net' }).origin).toBe('https://hermes.example.com')
+  })
+
+  it('still wants the same host AND port', () => {
+    expect(own({ origin: 'https://a.example.net:8443' }).origin).toBe('https://a.example.net:8443')
+  })
+
+  it('matches --web-public-url exactly, scheme included', () => {
+    const headers = upstreamHeaders(request({ host: '10.0.0.3:9120', origin: 'http://app.example.com' }), {
+      ...TARGET,
+      webOrigin: 'https://app.example.com'
+    })
+
+    expect(headers.origin).toBe('http://app.example.com')
+  })
+
+  it.each([
+    ['an uppercase host', 'https://A.EXAMPLE.NET/chats?x=1'],
+    ['an explicit default port', 'https://a.example.net:443/chats?x=1'],
+    ['userinfo', 'https://user:pw@a.example.net/chats?x=1']
+  ])('rebuilds a Referer with %s from its parsed path', (_label, referer) => {
+    expect(own({ referer }).referer).toBe('https://hermes.example.com/chats?x=1')
+  })
+
+  it.each(['null', 'tauri://localhost', 'app://hermie', 'capacitor://localhost', 'file://'])(
+    'passes the non-web Origin %s through for the gateway to classify',
+    origin => {
+      expect(own({ origin }).origin).toBe(origin)
+    }
+  )
+
+  it('invents no Origin', () => {
+    expect(own({}).origin).toBeUndefined()
   })
 })

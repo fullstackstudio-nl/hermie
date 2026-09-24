@@ -85,7 +85,13 @@ export function sameOriginPath(raw: string | null | undefined): string {
   return trimmed
 }
 
-/** The gateway's OAuth door, with the provider and the landing path on it. */
+/**
+ * The gateway's OAuth door, with the provider and the landing path on it.
+ *
+ * `next === ''` sends no `next=` at all: what a Hermie Web under `--pass-host`
+ * asks for, since the callback lands on this origin and the gateway's own
+ * default is already the root.
+ */
 export function buildCookieSignInUrl(baseUrl: string, provider: string | undefined, next: string): string {
   const url = new URL('/auth/login', baseUrl)
 
@@ -93,14 +99,17 @@ export function buildCookieSignInUrl(baseUrl: string, provider: string | undefin
     url.searchParams.set('provider', provider)
   }
 
-  url.searchParams.set('next', sameOriginPath(next))
+  if (next !== '') {
+    url.searchParams.set('next', sameOriginPath(next))
+  }
 
   return url.toString()
 }
 
 /**
  * The `next` to sign in with: what the caller asked for, else what the server
- * configured, else the root.
+ * configured, else the root. `''` when the server configured none on purpose
+ * (`loginReturn: ''`), which `buildCookieSignInUrl` reads as "no `next=`".
  */
 export async function loginReturnPath(explicit?: string): Promise<string> {
   if (explicit !== undefined) {
@@ -117,7 +126,9 @@ export async function loginReturnPath(explicit?: string): Promise<string> {
       })
     ])
 
-    return sameOriginPath(config?.loginReturn)
+    // An empty answer from a server that sent one is a decision (`--pass-host`
+    // needs no next=); no answer at all still falls back to the root.
+    return config && config.loginReturn === '' ? '' : sameOriginPath(config?.loginReturn)
   } finally {
     // The race is over either way, and a timer nobody is waiting for still
     // holds the event loop open — which a test runner notices before a user does.

@@ -28,13 +28,34 @@ data:
   # out, OIDC stays on, which is the ordinary behaviour; uncomment only for a
   # deployment that wants password sign-in only, whatever the gateway offers.
   # HERMIE_OIDC: 'false'
+  #
+  # Hermie Web on its OWN domain next to the gateway's, with OIDC sign-in
+  # finishing on Hermie Web's — needs the fullstackstudio-org gateway and its
+  # dashboard.public_urls; see ../web/README.md#its-own-domain-with-the-forks-dashboardpublic_urls
+  # and README.md#two-domains. Uncomment these four, point HERMIE_PUBLIC_URL and
+  # HERMES_DASHBOARD_PUBLIC_URL above at the GATEWAY's own address
+  # (https://hermes.example.com), and register both /auth/callback URLs at the
+  # identity provider.
+  # HERMIE_WEB_PUBLIC_URL: 'https://app.example.com'
+  # HERMIE_PASS_HOST: 'true'
+  # HERMES_DASHBOARD_PUBLIC_URLS: 'https://app.example.com'
+  # Shape (b) only — the sidecar reaches the gateway over loopback, which it
+  # trusts already. The Pod network Hermie Web connects from; never 0.0.0.0/0.
+  # 10.42.0.0/16 is k3s's whole Pod network, i.e. every Pod on the cluster:
+  # apply networkpolicy.yaml with it, so Hermie Web is the only Pod that can
+  # reach port 9119 at all, and narrow the range where your cluster allows it.
+  # HERMES_DASHBOARD_TRUSTED_PROXIES: '10.42.0.0/16'
 
-  # --- Hermes gateway (the hermes-agent image) ---
-  # These names are set by the Hermes image's own env-configuration work; this
-  # ConfigMap uses them ahead of that landing, so check the Hermes image docs
-  # once it has, and align the names here if they changed.
+  # --- Hermes gateway (ghcr.io/fullstackstudio-org/hermes-agent:main) ---
+  # The full list, and what each does:
+  # https://github.com/fullstackstudio-org/hermes-agent/blob/main/website/docs/user-guide/docker.md#configure-from-environment-variables
+  # Starts the supervised dashboard — the part Hermie Web talks to.
+  HERMES_DASHBOARD: '1'
   HERMES_DASHBOARD_PUBLIC_URL: 'https://hermie.example.com'
   HERMES_DASHBOARD_HOST: '0.0.0.0'
   HERMES_DASHBOARD_PORT: '9119'
+  # auto | on | off: refuse cookie-authenticated writes from a browser Origin
+  # the gateway does not list. auto is on with two or more public URLs.
+  # HERMES_DASHBOARD_WRITE_ORIGIN_CHECK: 'auto'
   HERMES_PROFILES_MAX: '10'
   HERMIE_PLUGIN: 'true'

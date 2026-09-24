@@ -71,9 +71,17 @@ export interface HermieWebConfig {
    * on an install where Hermie Web answers on another PORT of that host, the
    * redirect at the end of the chain lands on the gateway and not here; the
    * operator points a path there back at Hermie Web and names that path with
-   * `--login-return`. `/` on every deployment that shares one origin.
+   * `--login-return`. `/` on every deployment that shares one origin. `''`
+   * under `--pass-host`, where the app sends no `next=` at all.
    */
   loginReturn: string
+  /**
+   * Whether the server sends the gateway its OWN origin (`--pass-host`) and the
+   * gateway accepted it. `false` on every server too old to send the field.
+   */
+  passHost: boolean
+  /** Hermie Web's own origin, as the server knows it; `''` from an older server. */
+  origin: string
   /** The Hermie Web version serving this bundle. */
   version: string
   /**

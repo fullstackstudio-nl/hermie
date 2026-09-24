@@ -18,6 +18,8 @@ describe('--help', () => {
     ['--port', 'HERMIE_PORT'],
     ['--host', 'HERMIE_HOST'],
     ['--public-url', 'HERMIE_PUBLIC_URL'],
+    ['--web-public-url', 'HERMIE_WEB_PUBLIC_URL'],
+    ['--pass-host', 'HERMIE_PASS_HOST'],
     ['--static', 'HERMIE_STATIC_DIR'],
     ['--login-return', 'HERMIE_LOGIN_RETURN'],
     ['--install-root', 'HERMIE_INSTALL_ROOT'],

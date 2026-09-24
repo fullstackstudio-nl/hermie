@@ -36,19 +36,21 @@ spec:
       containers:
         - name: hermes
           image: ghcr.io/fullstackstudio-org/hermes-agent:main
+          # The gateway, with the supervised dashboard alongside it
+          # (HERMES_DASHBOARD=1 in configmap.yaml).
+          args: ['gateway', 'run']
           ports:
             - containerPort: 9119
           envFrom:
             - configMapRef: { name: hermie-config }
             - secretRef: { name: hermie-secrets }
-          # See sidecar.yaml's comment on why this is a TCP check rather than
-          # an httpGet on /api/status.
+          # Unauthenticated, and the 0.0.0.0 bind accepts the Pod IP as Host.
           readinessProbe:
-            tcpSocket: { port: 9119 }
+            httpGet: { path: /api/status, port: 9119 }
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
-            tcpSocket: { port: 9119 }
+            httpGet: { path: /api/status, port: 9119 }
             initialDelaySeconds: 15
             periodSeconds: 20
           resources:
@@ -56,8 +58,19 @@ spec:
             limits: { memory: '1Gi' }
           volumeMounts:
             - { name: hermes-data, mountPath: /opt/data }
+          # No runAsNonRoot here: the image starts as root, remaps its `hermes`
+          # user and fixes /opt/data's ownership, then drops privileges — so it
+          # keeps exactly the capabilities those steps need, and no more.
+          # KILL is the one that is easy to miss: root s6-supervise signals the
+          # services, which run as another uid, and without it a restart does
+          # nothing and a stop waits out the whole grace period — silently,
+          # nothing logs it. UNTESTED on a cluster so far: verify these in the
+          # first k3s deployment.
           securityContext:
-            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ['ALL']
+              add: ['CHOWN', 'DAC_OVERRIDE', 'FOWNER', 'SETUID', 'SETGID', 'KILL']
       volumes:
         - { name: hermes-data, persistentVolumeClaim: { claimName: hermes-data } }
 ---

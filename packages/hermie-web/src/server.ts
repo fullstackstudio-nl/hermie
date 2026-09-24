@@ -175,6 +175,10 @@ async function readJsonBody(request: IncomingMessage): Promise<Record<string, un
 const PROBE_TTL_MS = 60_000
 /** How long one "fresh" probe answers every caller that asks for one. */
 const FRESH_PROBE_TTL_MS = 3_000
+/** How long the `--pass-host` startup check waits for the gateway before it answers "unknown". */
+const PASS_HOST_CHECK_TIMEOUT_MS = 5_000
+/** How soon an unanswered `--pass-host` check is asked again. */
+const PASS_HOST_RETRY_MS = 30_000
 /** The same for a probe that failed: short, so a gateway that is back is seen again quickly. */
 const FAILED_PROBE_TTL_MS = 1_000
 
@@ -213,7 +217,15 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
   // Mutable, and mutated in exactly one place: the single unconfigured →
   // configured transition in `handleSetup`. Nothing else in this process can
   // move it, and once moved there is no route back.
-  const target = { gatewayUrl: options.gatewayUrl, publicUrl: options.publicUrl }
+  const target: { gatewayUrl: string; publicUrl: string; passHostOrigin: string | null; webOrigin: string | null } = {
+    gatewayUrl: options.gatewayUrl,
+    publicUrl: options.publicUrl,
+    // Optimistic until `checkPassHost` has asked the gateway; see there.
+    passHostOrigin: options.passHost ? options.webPublicUrl : null,
+    webOrigin: options.webPublicUrl || null
+  }
+  let passHostRetry: NodeJS.Timeout | null = null
+  let closed = false
   /*
     Did a FLAG name the gateway, or did `/setup` save one?
 
@@ -875,7 +887,15 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
     json(response, 200, {
       gatewayHost: new URL(target.publicUrl).host,
       gatewayOrigin: new URL(target.publicUrl).origin,
+      // `''` means "send no next= at all" — the default under `--pass-host`,
+      // where the sign-in finishes on this origin anyway.
       loginReturn: options.loginReturn,
+      // Whether the gateway is being sent THIS origin (`--pass-host`, and the
+      // gateway accepted it), and what that origin is: the configured
+      // `--web-public-url`, or `null`. Never the request's own Host — a value
+      // a caller chose is not this service's to publish as its origin.
+      passHost: target.passHostOrigin !== null,
+      origin: options.webPublicUrl || null,
       version: options.version,
       setupRequired: !configured,
       // Whether the GATEWAY's own OIDC/SSO providers are reachable through
@@ -1285,6 +1305,7 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
       freshProbe = null
 
       console.warn(`hermie-web: gateway set to ${target.gatewayUrl} through /setup; /setup is now closed.`)
+      void checkPassHost()
       // Push and the cache hold a connection that was not started, because at
       // startup there was nothing to connect to. Said plainly rather than left
       // for the operator to notice from an absence.
@@ -1520,6 +1541,85 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
     proxyUpgrade(request, socket, head, target, verbatimPathAndQuery)
   })
 
+  /*
+    `--pass-host`: does the gateway accept this origin at all?
+
+    Asked once before anything is served, with exactly the headers a proxied
+    request will carry. The gateway's Host guard answers 400 for a host that
+    is not one of its listed origins (and not its bound host), which is the
+    one clear "no" there is: the pass-through is then switched off and every
+    request is rewritten to `--public-url` as before, rather than the whole
+    app failing on a 400 per request — and the log says what to add where.
+
+    What this cannot see, and says so instead: a gateway bound to 0.0.0.0
+    accepts every Host, so a missing entry there only shows up as the
+    gateway's own "matches no listed public origin" warning at the first
+    sign-in; and whether the gateway TRUSTS this service as a proxy
+    (loopback, or `dashboard.trusted_proxies`), without which it ignores
+    `X-Forwarded-Proto` and an https origin never matches. A gateway that
+    does not answer at all is asked again every 30 seconds, pass-through
+    kept meanwhile.
+  */
+  async function checkPassHost(): Promise<void> {
+    if (!options.passHost || !configured || closed) {
+      return
+    }
+
+    const origin = new URL(options.webPublicUrl)
+    const base = target.gatewayUrl.replace(/\/+$/, '')
+    let status: number
+
+    try {
+      const answer = await probeFetch(origin.host)(`${base}/api/status`, {
+        headers: {
+          accept: 'application/json',
+          'x-forwarded-host': origin.host,
+          'x-forwarded-proto': origin.protocol.replace(':', '')
+        },
+        signal: AbortSignal.timeout(PASS_HOST_CHECK_TIMEOUT_MS)
+      })
+
+      status = answer.status
+      await answer.body?.cancel().catch(() => undefined)
+    } catch (error) {
+      console.warn(
+        `hermie-web: --pass-host could not be checked (${String(error)}); sending ${origin.origin} ` +
+          'as Host meanwhile and asking again in 30 seconds.'
+      )
+
+      if (!closed) {
+        passHostRetry = setTimeout(() => void checkPassHost(), PASS_HOST_RETRY_MS)
+        passHostRetry.unref()
+      }
+
+      return
+    }
+
+    if (status === 400) {
+      target.passHostOrigin = null
+      console.warn(
+        `hermie-web: the gateway refused ${origin.origin} as a Host (HTTP 400), so Host and Origin are ` +
+          `rewritten to ${target.publicUrl} instead. Add ${origin.origin} to dashboard.public_urls on the gateway.`
+      )
+
+      return
+    }
+
+    target.passHostOrigin = origin.origin
+
+    const gatewayHost = new URL(target.gatewayUrl).hostname.replace(/^\[|\]$/g, '')
+
+    if (!['127.0.0.1', '::1', 'localhost'].includes(gatewayHost)) {
+      console.warn(
+        `hermie-web: --pass-host sends ${origin.origin} to ${target.gatewayUrl}. The gateway must trust this ` +
+          'service as a proxy (dashboard.trusted_proxies), or it ignores X-Forwarded-Proto and sign-in falls back ' +
+          'to its primary origin.'
+      )
+    }
+  }
+
+  await checkPassHost()
+
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
     server.listen(options.port, options.host, () => {
@@ -1587,6 +1687,12 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
     cache,
     oidc: oidcProvider,
     close: async () => {
+      closed = true
+
+      if (passHostRetry) {
+        clearTimeout(passHostRetry)
+      }
+
       await push?.stop().catch(() => undefined)
       await closeServer(server)
     }

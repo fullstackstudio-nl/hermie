@@ -62,7 +62,26 @@ The browser sends Hermie Web's own address in `Host` and `Origin`, and the gatew
 it. Both are rewritten to the gateway's `dashboard.public_url`, which is what `--public-url`
 configures and why a mismatch there shows up as a 403 rather than as a subtle bug. The real client
 travels in `X-Forwarded-For`, `-Proto` and `-Host`, which the gateway reads when
-`dashboard.trusted_proxies` names the machine Hermie Web runs on.
+`dashboard.trusted_proxies` names the machine Hermie Web runs on. `X-Forwarded-Host` is the client's
+own `Host`, as it arrived; a gateway that trusts Hermie Web uses it only to choose among the origins
+it lists, never to build an address of its own.
+
+**Only Hermie Web's own `Origin` is rewritten.** An `Origin` (or `Referer`) counts as this service's
+own when it is exactly `--web-public-url`, or names the request's `Host` or the `X-Forwarded-Host`
+Hermie Web's own proxy set, on either scheme (a TLS proxy that sends no `X-Forwarded-Proto` must not
+make the browser's `https` origin a stranger) — none of which a page on another origin can forge.
+Every other `Origin` reaches the gateway as it was sent, so the gateway's own checks (the WebSocket
+`Origin` check, and the fork's write-request check) can refuse it. Rewriting all of them would turn a
+cross-site request — a form POST from a sibling subdomain, which is the same _site_ and so carries a
+`SameSite=Lax` session cookie — into one from the gateway's own origin, which every such check
+accepts. A non-web `Origin` (`null`, `tauri://`, `app://`, `capacitor://`, `file://`) passes through
+for the gateway to classify, and no `Origin` is ever invented where the client sent none, on a plain
+request or on a WebSocket upgrade.
+
+`--pass-host` turns that rewrite off, for a gateway that knows Hermie Web's own origin (see
+[the OIDC section](#oidc-where-the-sign-in-comes-back-to) below): `Host` becomes
+`--web-public-url`'s host and the browser's `Origin` and `Referer` pass through untouched. The
+`X-Forwarded-*` headers are set the same way either way.
 
 Whether the browser arrived over https is read from the reverse proxy's `X-Forwarded-Proto` before
 it is read from Hermie Web's own socket, which is plain HTTP by design. Reading the socket alone
@@ -128,37 +147,74 @@ that is this service acting as an OpenID Provider _for_ the gateway; this flag i
 gateway's _own_ upstream providers, reached through this proxy. `deploy/web/README.md`'s
 [flags table](../deploy/web/README.md#flags-and-environment) has the exact variable.
 
-### OIDC: Hermie Web must share the gateway's public hostname
+### OIDC: where the sign-in comes back to
 
-There is one deployment rule that OAuth makes non-negotiable, and it is worth stating on its own
-because getting it wrong produces a sign-in that fails at the very last hop with
-`{"detail":"Missing PKCE state cookie"}`.
+There is one deployment rule that OAuth makes non-negotiable: **the identity provider must send the
+browser back to the host that holds the PKCE cookie.** That cookie is set when the chain starts, and
+a cookie belongs to a **host** — it ignores the port but not the name. Get it wrong and the round
+trip ends at the very last hop with `{"detail":"Missing PKCE state cookie"}`. Which hosts that allows
+depends on the gateway.
 
-**The callback is fixed to `dashboard.public_url`.** The gateway builds the `redirect_uri` it hands
-the identity provider out of that setting and nothing else — not out of the request, not out of
-`X-Forwarded-Host`. So the IdP always returns the browser to
-`https://<public_url>/auth/callback`, wherever the sign-in was started from.
-
-The PKCE state is a cookie set when the chain starts. A cookie belongs to a **host**, and a host is
-not an origin: **cookies ignore the port** but they do not ignore the name. So:
+**An upstream gateway (one `dashboard.public_url`): same host, another port.** The gateway builds the
+`redirect_uri` out of `public_url` and nothing else, so the IdP always returns the browser to
+`https://<public_url>/auth/callback`:
 
 | Where Hermie Web answers                   | What happens at the callback                              |
 | ------------------------------------------ | --------------------------------------------------------- |
 | Same host and port as `public_url`         | Works. One origin, one cookie jar.                        |
 | Same host, **another port** — e.g. `:9443` | Works. The cookie was set for the host, port and all.     |
-| **Another host** — `hermie.example.com`    | Fails. The cookie is on a host the callback never visits. |
+| **Another host** — `app.example.com`       | Fails. The cookie is on a host the callback never visits. |
 
-This is exactly what [ADR-0015](adr/0015-web-variant-on-its-own-port.md) chose "own port" for. A
-separate hostname for the browser build looks tidier and cannot carry a session through an OAuth
-round trip.
+This is what [ADR-0015](adr/0015-web-variant-on-its-own-port.md) chose "own port" for. It leaves the
+landing: `next=` comes back from `/auth/callback` as a **relative** redirect, resolved against the
+gateway's port, so a sign-in would end on the dashboard. The fix is a redirect the operator owns — a
+path on the gateway's port that points back at Hermie Web — named with `--login-return`. It goes into
+`/hermie/config.json` as `loginReturn`, the app sends it as `next=`, and both ends validate it as a
+same-origin path. `deploy/web/README.md` has the worked nginx configuration.
 
-**Which leaves the landing.** `next=` is validated by the gateway and handed back as a **relative**
-redirect from `/auth/callback`, so the browser resolves it against the callback's host _and port_ —
-the gateway's, not Hermie Web's. A successful sign-in therefore ends on the dashboard rather than in
-the app. The fix is a redirect the operator owns: put a path on the gateway's own port that points
-back at Hermie Web, and tell Hermie Web to ask for that path with `--login-return`. It goes into
-`/hermie/config.json` as `loginReturn`, the app uses it as `next=`, and both ends validate it as a
-same-origin path before it is used. `deploy/web/README.md` has the worked nginx configuration.
+**The fullstackstudio-org fork (`dashboard.public_urls`): Hermie Web on its own domain.** The fork
+lists several origins and builds the `redirect_uri` on the listed origin the sign-in **started on**,
+so a sign-in started on `https://app.example.com` comes back to `https://app.example.com/auth/callback`
+— Hermie Web — with the PKCE cookie still there, and `next=` is not needed at all. Three things have
+to be true, and all three are the operator's:
+
+1. **The origin is listed** in `dashboard.public_urls` (`HERMES_DASHBOARD_PUBLIC_URLS`), with its exact
+   scheme and port.
+2. **Hermie Web is a trusted peer of the gateway**: loopback (a sidecar, or the same machine), or in
+   `dashboard.trusted_proxies`. The gateway reads which origin a request is on from
+   `X-Forwarded-Host` and `X-Forwarded-Proto` only from such a peer; from anybody else it sees the
+   plain-http socket, an `https` origin never matches, and the sign-in falls back to the primary
+   callback — the gateway logs a warning saying so.
+3. **The IdP has every callback registered**: `<each listed URL>/auth/callback`.
+
+Then start Hermie Web with `--pass-host --web-public-url https://app.example.com` (`HERMIE_PASS_HOST=1`,
+`HERMIE_WEB_PUBLIC_URL`). `--public-url` stays the gateway's own address; `--web-public-url` is Hermie
+Web's. With `--pass-host`:
+
+- `Host` is Hermie Web's own public host and the browser's `Origin` and `Referer` pass through, so the
+  gateway's Host guard, its WebSocket `Origin` check and its write-request `Origin` check
+  (`dashboard.write_origin_check`) all judge the origin the browser is really on. Rewriting would
+  launder ANY `Origin` — a cross-site one included — into the gateway's own, which every one of those
+  checks accepts.
+- `--login-return` defaults to none: `/hermie/config.json` answers `loginReturn: ""`, and the app then
+  sends no `next=`, so the callback's own default (`/`) lands on Hermie Web. Set it only if you want
+  somewhere else.
+- `/hermie/config.json` also answers `passHost` (whether the gateway is being sent this origin) and
+  `origin` (`--web-public-url`, or `null` — never a value taken from the request).
+- **At startup** Hermie Web asks the gateway `GET /api/status` with exactly those headers. A 400 is
+  the gateway's Host guard refusing the origin: Hermie Web then falls back to rewriting, as without
+  the flag, and logs `add <origin> to dashboard.public_urls on the gateway`. It cannot see two things
+  and says so instead: a gateway bound to `0.0.0.0` accepts every `Host`, so a missing entry there
+  shows up only as the gateway's own warning at the first sign-in; and whether the gateway trusts it
+  as a proxy — it logs a reminder whenever the gateway is not on loopback. The check runs when Hermie
+  Web starts (and after `/setup`), not again: after changing the gateway's `public_urls`, restart
+  Hermie Web too.
+
+Strictly, the `redirect_uri` follows `X-Forwarded-Host` from a trusted peer even without
+`--pass-host`, since Hermie Web always forwards the browser's `Host` there. What the flag adds is
+honest `Host` and `Origin` headers, a startup check, and no `next=` workaround; run the fork's
+two-domain setup with it. `--no-oidc` is unaffected by any of this — its checks run on the path,
+before any header is written.
 
 ### What the wizard does differently
 
