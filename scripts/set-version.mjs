@@ -5,18 +5,29 @@
  *   node scripts/set-version.mjs 0.2.0
  *   node scripts/set-version.mjs 0.2.0 --check    # report, change nothing
  *
- * Six places now, and they drift because most of them are easy to forget: the
- * root package.json, the app's package.json, `version` in app.config.ts — the
- * marketing version every platform ships: iOS, Android, and the Mac, which is
- * the iOS build (ADR-0011) — and, since the desktop shell (ADR-0027), its own
- * package.json, `tauri.conf.json`'s `version`, and `Cargo.toml`'s
- * `[package].version`, which is what CI's `cargo check`/`tauri build` embed in
- * the shell binary and the platform installers read. There used to be a
- * seventh, and a `--build` flag to go with it: the hand-maintained macOS
- * project's Info.plist carried both numbers because nothing generated them.
- * Nothing carries them by hand any more — the build number is EAS's, raised
- * per build by `autoIncrement` on the `production` profile — so there is no
- * longer anywhere for this script to put one.
+ * Seven places now, and they drift because most of them are easy to forget:
+ * the root package.json, the app's package.json, `version` in app.config.ts —
+ * the marketing version every platform ships: iOS, Android, and the Mac,
+ * which is the iOS build (ADR-0011) — and, since the desktop shell
+ * (ADR-0027), its own package.json, `tauri.conf.json`'s `version`, and
+ * `Cargo.toml`'s `[package].version`, which is what CI's `cargo
+ * check`/`tauri build` embed in the shell binary and the platform installers
+ * read. The seventh, added because it drifted silently for two releases
+ * (0.1.6 while the rest read 0.1.8), is `packages/hermie-web/package.json`:
+ * Hermie Web reads its own version from that file to answer `/hermie/update`
+ * and to label the release zip and the GHCR image, so it has to track the
+ * app the same way the desktop shell does. The other workspace packages
+ * (`fake-gateway`, `gateway-client`, `transcript`) are `private` and pinned
+ * at `0.0.0` on purpose — they never ship on their own — and
+ * `hermes-shared` is vendored from upstream and is never touched by this
+ * script.
+ *
+ * `package-lock.json` mirrors every one of those workspace versions in its
+ * own `packages["<path>"].version` entries (plus the root document's own
+ * `name`/`version`), and npm rewrites them the moment anyone runs an
+ * install against a bumped package.json — which is exactly the uncontrolled
+ * lock churn this script exists to avoid, so it writes them itself, in the
+ * same commit, instead.
  *
  * Run it from a clean tree, read the diff, then tag. docs/release.md is the
  * surrounding process.
@@ -70,6 +81,58 @@ edit('apps/hermie/app.config.ts', 'the Expo version', /version:\s*'[^']+'/, `ver
 edit('apps/desktop/package.json', 'the version field', /"version":\s*"[^"]+"/, `"version": "${version}"`)
 edit('apps/desktop/src-tauri/tauri.conf.json', 'the version field', /"version":\s*"[^"]+"/, `"version": "${version}"`)
 edit('apps/desktop/src-tauri/Cargo.toml', 'the package version', /^version = "[^"]+"/m, `version = "${version}"`)
+edit('packages/hermie-web/package.json', 'the version field', /"version":\s*"[^"]+"/, `"version": "${version}"`)
+
+/**
+ * Mirrors the version into `package-lock.json`'s own record of it: the root
+ * document's `name`/`version`, and the `version` field of every workspace
+ * entry this script also edits directly. It is parsed and rewritten as JSON
+ * rather than patched with a regex — the lockfile repeats the string
+ * `"version"` dozens of times for third-party dependencies the exact same
+ * indentation as these entries, so a text pattern that is unique enough to
+ * be safe is more fragile than just editing the object. `JSON.stringify(...,
+ * null, 2) + '\n'` reproduces npm's own formatting byte-for-byte when
+ * nothing else in the file changes, which is what keeps the diff to version
+ * fields only.
+ *
+ * The workspaces intentionally left out here — `fake-gateway`,
+ * `gateway-client`, `transcript`, `hermes-shared` — stay at `0.0.0` in both
+ * their package.json and the lock; nothing should ever write to them.
+ */
+function editLockVersions(path, entries) {
+  const full = resolve(repoRoot, path)
+  const before = readFileSync(full, 'utf8')
+  const lock = JSON.parse(before)
+
+  for (const { label, get } of entries) {
+    const node = get(lock)
+    if (!node || typeof node.version !== 'string') {
+      console.error(`${path}: could not find a "version" field for ${label}.`)
+      console.error('The lockfile has moved on without this script. Read it and fix the accessor.')
+      process.exit(1)
+    }
+    const from = node.version
+    if (from === version) {
+      changes.push(`unchanged  ${path}  ${label}`)
+      continue
+    }
+    node.version = version
+    const verb = checkOnly ? 'would set' : 'set      '
+    changes.push(`${verb}  ${path}  ${label}: "${from}" -> "${version}"`)
+  }
+
+  if (!checkOnly) {
+    writeFileSync(full, JSON.stringify(lock, null, 2) + '\n')
+  }
+}
+
+editLockVersions('package-lock.json', [
+  { label: 'the root document version', get: lock => lock },
+  { label: 'packages[""] (the root workspace)', get: lock => lock.packages?.[''] },
+  { label: 'packages["apps/hermie"]', get: lock => lock.packages?.['apps/hermie'] },
+  { label: 'packages["apps/desktop"]', get: lock => lock.packages?.['apps/desktop'] },
+  { label: 'packages["packages/hermie-web"]', get: lock => lock.packages?.['packages/hermie-web'] }
+])
 
 for (const change of changes) {
   console.log(change)

@@ -16,9 +16,17 @@ exists for developing, not for releasing.
 
 ## Version numbers
 
-One number, written down in three places: the root `package.json`, the app's
-`package.json`, and `version` in `apps/hermie/app.config.ts`. Setting them by hand
-is how two of them end up stale, so:
+One number, written down in seven places, plus the matching entries in
+`package-lock.json`:
+
+- the root `package.json`;
+- the app's `package.json`;
+- `version` in `apps/hermie/app.config.ts`;
+- Hermie Web's `package.json`, which `/hermie/update` and the container image report;
+- the desktop shell's `package.json`, `tauri.conf.json` and `Cargo.toml`.
+
+Setting them by hand is how some of them end up stale; a test in `packages/hermie-web`
+fails when they disagree. So:
 
 ```sh
 npm run set-version -- 0.2.0            # the marketing version
