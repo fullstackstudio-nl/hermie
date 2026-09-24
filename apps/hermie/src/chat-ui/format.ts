@@ -201,43 +201,111 @@ export function tintIndex(name: string, buckets: number): number {
 const SENDER_NAME_LIMIT = 80
 
 /**
- * One line, whitespace collapsed and cut — the same rule `contextTextOf`
- * (`@hermie/gateway-client/context`) applies to a name before it reaches a
- * system prompt. Duplicated rather than imported: the kit takes items and
- * callbacks and carries no runtime dependency on the gateway layer, the same
- * reason `attachmentName` here re-derives a shape `@hermie/transcript` already
- * knows rather than importing its runtime. Two lines of arithmetic is a smaller
- * risk than a kit component reaching across that line.
+ * Invisible characters that change how the text AROUND them is laid out, and
+ * so have no place in a one-line name: the bidi embeddings and overrides
+ * (U+202A..U+202E), the bidi isolates (U+2066..U+2069), the directional marks
+ * (U+200E, U+200F, U+061C), the zero-width space (U+200B) and the BOM
+ * (U+FEFF). A colleague called "\u202Eetaged" otherwise reverses every line
+ * their name leads — the chat-list preview, an export line.
+ *
+ * ZERO WIDTH JOINER (U+200D) is deliberately NOT here: an emoji sequence — a
+ * family, a profession, a skin tone on a couple — is several code points held
+ * together by it, and stripping it breaks the emoji apart. Nor is ZERO WIDTH
+ * NON-JOINER (U+200C), which Persian and other scripts need to spell a word.
  */
-function flattenSenderText(value: string, limit: number): string {
-  return value.split(/\s+/u).filter(Boolean).join(' ').slice(0, limit)
+function isStrippedFormatChar(codePoint: number): boolean {
+  return (
+    (codePoint >= 0x202a && codePoint <= 0x202e) ||
+    (codePoint >= 0x2066 && codePoint <= 0x2069) ||
+    codePoint === 0x200b ||
+    codePoint === 0x200e ||
+    codePoint === 0x200f ||
+    codePoint === 0x061c ||
+    codePoint === 0xfeff
+  )
+}
+
+/** C0 and C1 controls, DEL included: never text, but they may separate two words. */
+function isControl(codePoint: number): boolean {
+  return codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f)
+}
+
+/** A surrogate standing on its own: `Array.from` yields a PAIR as one code point above U+FFFF. */
+function isLoneSurrogate(codePoint: number): boolean {
+  return codePoint >= 0xd800 && codePoint <= 0xdfff
+}
+
+/**
+ * One line of a name, safe to lead a line with: controls become a space, the
+ * layout-changing invisibles above and any lone surrogate are dropped,
+ * whitespace is collapsed, and the result is cut at `limit` CODE POINTS — never
+ * UTF-16 units, which could leave half of an astral character behind.
+ *
+ * The same idea as `contextTextOf` (`@hermie/gateway-client/context`), restated
+ * rather than imported: the kit takes items and callbacks and carries no
+ * runtime dependency on the gateway layer.
+ */
+function cleanSenderText(value: string, limit = Number.POSITIVE_INFINITY): string {
+  let spaced = ''
+
+  for (const character of Array.from(value)) {
+    const codePoint = character.codePointAt(0) ?? 0
+
+    if (isControl(codePoint)) {
+      spaced += ' '
+    } else if (!isStrippedFormatChar(codePoint) && !isLoneSurrogate(codePoint)) {
+      spaced += character
+    }
+  }
+
+  const flat = spaced.split(/\s+/u).filter(Boolean).join(' ')
+  const points = Array.from(flat)
+
+  return points.length > limit ? points.slice(0, limit).join('').trimEnd() : flat
 }
 
 /** `authentik:7f3a…` → `7f3a…`, and an issuer URL used as a subject left alone. */
 const PROVIDER_PREFIX = /^[A-Za-z][A-Za-z0-9._-]*:(?!\/\/)(.+)$/u
 
 /**
- * The name a sender's label shows with nothing but the row itself to go on.
+ * The name a sender's label shows, for EVERY surface that shows one — the
+ * bubble's label, its screen-reader announcement, the chat-list preview and the
+ * export all get it from here, so they all get the same cleaned name.
  *
- * D4's rungs 2 and 3: the gateway's own stamped name, sanitised, or failing
- * that the identity with its provider prefix stripped — never prettified,
- * because guessing a person's name out of an opaque id would put a wrong name
- * on screen. Rung 1, the `context.users` directory a teammate's own client
- * writes when they share their display name, sits above this and is a later
- * change (HERM-83 Task 4); this is what a bubble can always draw with nothing
- * else, and it is what Task 4's resolver falls back to when the directory has
- * no row for this identity either.
+ * D4's rungs, each cleaned on read by `cleanSenderText` before it is trusted,
+ * and the first that is not empty after cleaning wins:
+ *
+ *  1. `directory` — the host's own name for this identity, when it has one
+ *     (the `context.users` directory D4 describes; nothing supplies one today);
+ *  2. the gateway's own stamped `author.name`;
+ *  3. the identity with its provider prefix stripped — never prettified,
+ *     because guessing a person's name out of an opaque id would put a wrong
+ *     name on screen.
+ *
+ * Every rung is text somebody else authored, a stamped name included (the
+ * gateway takes it from the identity provider), so none is exempt.
  */
-export function fallbackSenderName(author: MessageAuthor): string {
-  const stamped = flattenSenderText(author.name ?? '', SENDER_NAME_LIMIT)
+export function senderLabel(author: MessageAuthor, directory?: (author: MessageAuthor) => string): string {
+  const fromDirectory = cleanSenderText(directory?.(author) ?? '', SENDER_NAME_LIMIT)
+
+  if (fromDirectory) {
+    return fromDirectory
+  }
+
+  const stamped = cleanSenderText(author.name ?? '', SENDER_NAME_LIMIT)
 
   if (stamped) {
     return stamped
   }
 
-  const id = flattenSenderText(author.id, SENDER_NAME_LIMIT)
+  const id = cleanSenderText(author.id)
 
-  return flattenSenderText(PROVIDER_PREFIX.exec(id)?.[1] ?? id, SENDER_NAME_LIMIT)
+  return cleanSenderText(PROVIDER_PREFIX.exec(id)?.[1] ?? id, SENDER_NAME_LIMIT)
+}
+
+/** `senderLabel` with nothing but the row itself to go on: D4's rungs 2 and 3. */
+export function fallbackSenderName(author: MessageAuthor): string {
+  return senderLabel(author)
 }
 
 /**

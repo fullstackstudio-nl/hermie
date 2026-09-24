@@ -11,6 +11,8 @@ import { act, render, waitFor } from '@testing-library/react-native'
 import { AppState, type AppStateStatus, Text } from 'react-native'
 
 import { ChatRuntimeProvider } from '../src/features/chats/ChatRuntime'
+import { useOwnAuthorStore } from '../src/features/chats/own-author'
+import { AUTH_ME_BODY, AUTH_ME_STAMP, httpAnsweringAuthMe } from './support/auth-me'
 
 const mockRefresh = jest.fn(async () => [])
 const mockPlaceCurrentChats = jest.fn(async () => undefined)
@@ -29,9 +31,13 @@ const desktopShell = jest.requireMock('../src/platform/desktop-shell') as {
 
 let mockStatus = 'connecting'
 let mockConnection: object | null = { id: 'connection-1' }
+// Whatever else a test wants `useGateway` to answer with: an id, a config, a REST half.
+let mockGatewayExtras: Record<string, unknown> = {}
+// What the runtime built its `ChatController` with, so the wiring can be read.
+let mockControllerOptions: { ownAuthor?: () => unknown } | null = null
 
 jest.mock('../src/gateway', () => ({
-  useGateway: () => ({ connection: mockConnection, status: mockStatus })
+  useGateway: () => ({ connection: mockConnection, status: mockStatus, ...mockGatewayExtras })
 }))
 
 // `on` is not decoration here: the runtime subscribes to `sessions.changed` to
@@ -60,6 +66,10 @@ jest.mock('../src/features/bots/bots-controller', () => ({
 
 jest.mock('../src/features/chats/chat-controller', () => ({
   ChatController: class {
+    constructor(options: { ownAuthor?: () => unknown }) {
+      mockControllerOptions = options
+    }
+
     start = jest.fn()
     stop = jest.fn()
     onForeground = mockOnForeground
@@ -72,6 +82,9 @@ beforeEach(() => {
   jest.clearAllMocks()
   mockStatus = 'connecting'
   mockConnection = { id: 'connection-1' }
+  mockGatewayExtras = {}
+  mockControllerOptions = null
+  useOwnAuthorStore.getState().reset()
   runsOnMac.RUNS_ON_MAC = false
   desktopShell.RUNS_IN_DESKTOP_SHELL = false
 })
@@ -204,5 +217,63 @@ describe('ChatRuntimeProvider and AppState', () => {
     await act(async () => send('active'))
 
     expect(mockOnForeground).toHaveBeenCalledTimes(1)
+  })
+})
+
+/**
+ * HERM-83: the reader's own author id, fed from the `/api/auth/me` read the
+ * runtime already does on every ready edge, spelled the way the gateway stamps
+ * a row — and handed to the controller for the optimistic bubble.
+ */
+describe('ChatRuntimeProvider and the reader’s own author', () => {
+  function readyOn(gatewayId: string, http = httpAnsweringAuthMe()) {
+    mockStatus = 'ready'
+    mockGatewayExtras = {
+      gatewayId,
+      http,
+      config: { baseUrl: 'https://gateway.example.test', authMode: 'native_pkce' }
+    }
+
+    return renderRuntime()
+  }
+
+  it('files `<provider>:<user_id>` from the real answer under the gateway that gave it', async () => {
+    readyOn('gateway-one')
+
+    await waitFor(() =>
+      expect(useOwnAuthorStore.getState().byGateway['gateway-one']).toEqual({
+        id: AUTH_ME_STAMP,
+        name: AUTH_ME_BODY.display_name
+      })
+    )
+    expect(useOwnAuthorStore.getState().gatewayId).toBe('gateway-one')
+  })
+
+  it('hands the controller the same author for an optimistic bubble', async () => {
+    readyOn('gateway-one')
+
+    await waitFor(() => expect(useOwnAuthorStore.getState().byGateway['gateway-one']).toBeDefined())
+    expect(mockControllerOptions?.ownAuthor?.()).toEqual({ id: AUTH_ME_STAMP, name: AUTH_ME_BODY.display_name })
+  })
+
+  it('files no id at all when the gateway names no provider — never the bare id, never the email', async () => {
+    const { provider: _provider, ...noProvider } = AUTH_ME_BODY
+
+    readyOn('gateway-one', httpAnsweringAuthMe(noProvider))
+
+    await waitFor(() => expect(mockRefresh).toHaveBeenCalled())
+    await act(async () => undefined)
+    expect(useOwnAuthorStore.getState().byGateway['gateway-one']).toBeUndefined()
+    expect(mockControllerOptions?.ownAuthor?.()).toBeUndefined()
+  })
+
+  it('forgets a previous sign-in’s id when a new connection is built, until it is asked again', async () => {
+    useOwnAuthorStore.getState().set('gateway-one', { id: 'authentik:somebody-before' })
+    mockGatewayExtras = { gatewayId: 'gateway-one' }
+
+    renderRuntime()
+
+    await waitFor(() => expect(mockPaintFromCache).toHaveBeenCalled())
+    expect(useOwnAuthorStore.getState().byGateway['gateway-one']).toBeUndefined()
   })
 })

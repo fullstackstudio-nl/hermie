@@ -44,6 +44,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode
 } from 'react'
 import {
@@ -91,7 +92,7 @@ import { BubbleColumn } from './primitives/BubbleColumn'
 import { Chip } from './primitives/Chip'
 import { ExpandedProvider, useExpanded } from './expanded'
 import { isDmRow, rollupDmRuns, type DmRowRole } from './dm-rollup'
-import { clipInline, fallbackSenderName } from './format'
+import { clipInline, senderLabel } from './format'
 import { messageMenuItems, parseMessageMenuAction } from './message-menu'
 import { layoutRows, type RowLayout } from './grouping'
 import { chatStrings } from './strings'
@@ -290,14 +291,24 @@ export interface TranscriptContext {
    */
   resolveSenderName?: (author: MessageAuthor) => string
   /**
-   * A colleague's picture, fetched by `author.id` (HERM-120).
+   * A colleague's picture, fetched by `author.id` (HERM-120) — READ only.
    *
-   * `undefined` — no host, not asked, still loading, a 404, any error, or a
-   * gateway that never sent the endpoint — draws the tinted initial exactly as
-   * `UserBubble` always has; nothing here distinguishes those cases from one
-   * another, because `Avatar` draws the same fallback for all of them.
+   * Called while a row renders, so it must start nothing: asking for the
+   * picture is `requestSenderPicture`'s job. `undefined` — no host, not asked,
+   * still loading, a 404, any error, or a gateway that never sent the endpoint
+   * — draws the tinted initial exactly as `UserBubble` always has; nothing
+   * here distinguishes those cases from one another, because `Avatar` draws the
+   * same fallback for all of them.
    */
   resolveSenderPictureUri?: (author: MessageAuthor) => string | undefined
+  /** Ask for a colleague's picture. Called from an effect, never during render. */
+  requestSenderPicture?: (author: MessageAuthor) => void
+  /**
+   * Hear when any picture changes, so a row showing one can re-read its own
+   * and repaint — rows are memoised on this context's identity, which a
+   * picture arriving does not change.
+   */
+  subscribeSenderPictures?: (listener: () => void) => () => void
 }
 
 // `onSelectText` is omitted rather than inherited: it is the list's own wiring to
@@ -592,18 +603,47 @@ function isOwnUserItem(item: UserItem, context: TranscriptContext): boolean {
   return item.author.id === context.ownAuthorId
 }
 
+const NO_PICTURES = (): (() => void) => () => undefined
+
+/**
+ * This row's colleague's picture, and a repaint when it arrives (HERM-120).
+ *
+ * Subscribed per row, so one picture landing repaints the rows that show THAT
+ * person and no others, and asked for from an effect rather than during render.
+ * `author` is `undefined` for everything that is not a colleague's `user` row,
+ * which reads nothing and asks for nothing.
+ */
+function useSenderPicture(author: MessageAuthor | undefined, context: TranscriptContext): string | undefined {
+  const { requestSenderPicture, resolveSenderPictureUri, subscribeSenderPictures } = context
+  // Only a colleague's row listens at all: a reply or a tool card has no
+  // picture to wait for, and a transcript mounts dozens of them.
+  const uri = useSyncExternalStore((author && subscribeSenderPictures) || NO_PICTURES, () =>
+    author && resolveSenderPictureUri ? resolveSenderPictureUri(author) : undefined
+  )
+  const authorId = author?.id
+
+  useEffect(() => {
+    if (authorId && requestSenderPicture) {
+      requestSenderPicture({ id: authorId })
+    }
+  }, [authorId, requestSenderPicture])
+
+  return uri
+}
+
 function RowView({ entry, context, receipt, layout, dmRole }: RowProps) {
   const { item, presentation } = entry
+  const own = item.kind === 'user' && isOwnUserItem(item, context)
+  const colleague = item.kind === 'user' && !own ? item.author : undefined
+  const senderPictureUri = useSenderPicture(colleague, context)
 
   switch (item.kind) {
     case 'user': {
-      const own = isOwnUserItem(item, context)
-      const senderPictureUri = !own && item.author ? context.resolveSenderPictureUri?.(item.author) : undefined
       const sender =
         !own && item.author
           ? {
               authorId: item.author.id,
-              name: context.resolveSenderName?.(item.author) || fallbackSenderName(item.author),
+              name: senderLabel(item.author, context.resolveSenderName),
               ...(senderPictureUri ? { pictureUri: senderPictureUri } : {})
             }
           : undefined
@@ -1401,7 +1441,9 @@ function TranscriptListBody({
       groupChat: handlers.groupChat,
       ownAuthorId: handlers.ownAuthorId,
       resolveSenderName: handlers.resolveSenderName,
-      resolveSenderPictureUri: handlers.resolveSenderPictureUri
+      resolveSenderPictureUri: handlers.resolveSenderPictureUri,
+      requestSenderPicture: handlers.requestSenderPicture,
+      subscribeSenderPictures: handlers.subscribeSenderPictures
     }),
     [
       handlers.accent,
@@ -1430,7 +1472,9 @@ function TranscriptListBody({
       handlers.groupChat,
       handlers.ownAuthorId,
       handlers.resolveSenderName,
-      handlers.resolveSenderPictureUri
+      handlers.resolveSenderPictureUri,
+      handlers.requestSenderPicture,
+      handlers.subscribeSenderPictures
     ]
   )
 

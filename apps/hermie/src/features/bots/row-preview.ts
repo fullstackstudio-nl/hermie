@@ -18,9 +18,10 @@
 import { chatRowPreview, type ChatPreviewOptions } from '@hermie/transcript'
 import { useMemo } from 'react'
 
-import { fallbackSenderName, formatChatPreview } from '../../chat-ui'
+import { formatChatPreview, senderLabel } from '../../chat-ui'
 import { useChatsStore } from '../../store/chats'
-import { useDeviceContextStore } from '../../store/device-context'
+import { useGroupChat } from '../chats/bound-conversation'
+import { useOwnAuthorId } from '../chats/own-author'
 
 export interface RowPreview {
   text: string
@@ -28,27 +29,25 @@ export interface RowPreview {
   system: boolean
 }
 
-/**
- * This hook is only ever asked for the row a BOT owns — `state.chats[botName]`,
- * keyed by the bare bot name, which is the canonical GROUP chat's state; a
- * personal sub-chat lives under `bot#<storedId>` and its list row reads the
- * gateway's own `preview` string directly (`ConversationListView.tsx`), never
- * this hook. So `groupChat: true` is simply what is true of every call here —
- * not a guess — and it is still spelled out as an explicit option rather than
- * assumed, exactly like `TranscriptContext.groupChat` (HERM-83, D6, gate 1).
- */
-const GROUP_CHAT_OPTIONS = { groupChat: true } as const
-
 export function useRowPreview(botName: string, gatewayPreview: string): RowPreview {
-  // The reader's own identity — D3's own/foreign gate — the same source
-  // `ChatScreen` reads for the transcript itself.
-  const ownAuthorId = useDeviceContextStore(state => state.userId) || undefined
+  /*
+    HERM-83, D6, gate 1: whether the chat under this bot's key is the GROUP
+    chat. `state.chats[botName]` is keyed by the bare bot name, but that key
+    holds whichever conversation the bot is ON — the group chat, or one of the
+    reader's own when they have switched to it (a legacy title-only `myChats`
+    entry included). So it is read off what is actually bound, with the same
+    derivation the transcript uses (`useGroupChat`), never assumed.
+  */
+  const groupChat = useGroupChat(botName)
+  // The reader's own identity — D3's own/foreign gate — the same stamp-shaped
+  // id `ChatScreen` reads for the transcript itself.
+  const ownAuthorId = useOwnAuthorId()
   const options: ChatPreviewOptions = {
-    ...GROUP_CHAT_OPTIONS,
+    groupChat,
     ownAuthorId,
-    // D4's rungs 2 and 3 — the same resolver a bubble falls back to when the
-    // host has nothing beyond the row itself (HERM-83 Task 4 is not built).
-    resolveSenderName: fallbackSenderName
+    // The one resolver every surface names a sender through, which cleans the
+    // name on read (D4). Only rungs 2 and 3 exist today (Task 4 is not built).
+    resolveSenderName: senderLabel
   }
 
   const text = useChatsStore(state => formatChatPreview(chatRowPreview(state.chats[botName], gatewayPreview, options)))

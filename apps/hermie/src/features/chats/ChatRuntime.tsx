@@ -6,6 +6,8 @@
  * the app between foreground and background. Everything a screen needs is read
  * from the stores, so nothing re-renders because a controller did something.
  */
+import { ownAuthorOf } from '@hermie/gateway-client'
+import type { MessageAuthor } from '@hermie/transcript'
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AppState } from 'react-native'
 
@@ -53,6 +55,7 @@ import { UserChatDirectory, userChatSwitch, type UserChatSwitch } from '../user-
 import { WidgetSync } from '../widgets'
 import { resizeToBase64 } from './attachments'
 import { ChatController } from './chat-controller'
+import { ownAuthorOn, useOwnAuthorStore } from './own-author'
 
 export interface ChatRuntimeValue {
   controller: ChatController
@@ -94,11 +97,26 @@ export interface ChatRuntimeValue {
  * on the far side — an OIDC gateway answered with neither, only a subject — so
  * which of them ends up being shown is a question with one answer, and it lives
  * in `effectiveDisplayName` rather than being decided twice.
+ *
+ * `author` is the same answer read a second way: the reader's own id as the
+ * gateway stamps it on a message row (`"<provider>:<user_id>"`, HERM-83), for
+ * `useOwnAuthorStore`. It is NOT `userId` — that one keys `ui_meta` and falls
+ * back to the email, and a stamp is never an email — and it is absent on a
+ * session-token gateway, which stamps nobody.
  */
 async function readIdentity(
   config: { baseUrl: string; authMode: string } | null,
-  http: { authMe: () => Promise<{ userId: string; email: string; displayName: string }> } | null
-): Promise<{ baseUrl: string; gated: boolean; userId: string; displayName: string; email: string }> {
+  http: {
+    authMe: () => Promise<{ userId: string; email: string; displayName: string; provider: string }>
+  } | null
+): Promise<{
+  baseUrl: string
+  gated: boolean
+  userId: string
+  displayName: string
+  email: string
+  author?: MessageAuthor
+}> {
   const baseUrl = config?.baseUrl ?? ''
   const gated = config?.authMode !== 'session_token'
 
@@ -114,13 +132,15 @@ async function readIdentity(
   }
 
   const identity = await http.authMe()
+  const author = ownAuthorOf(identity)
 
   return {
     baseUrl,
     gated: true,
     userId: identity.userId || identity.email,
     displayName: identity.displayName,
-    email: identity.email
+    email: identity.email,
+    ...(author ? { author } : {})
   }
 }
 
@@ -292,6 +312,8 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       */
       usePushStore.getState().applyRemote({ others: {}, seen: {} })
       useDeviceContextStore.getState().applyRemote({ others: {}, remoteDefault: '', own: null })
+      // No gateway, so nobody is "the reader" by id: every row draws as their own.
+      useOwnAuthorStore.getState().bind(null)
       setValue(null)
       valueRef.current = null
 
@@ -299,6 +321,18 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     }
 
     const gateway = chatGatewayFor(connection)
+    /*
+      HERM-83: who the reader is on THIS connection is unknown until its own
+      `/api/auth/me` answers (the ready effect below). A new connection can be
+      a new sign-in on the same gateway, so what the last one said is forgotten
+      rather than trusted: until the answer lands every row draws as the
+      reader's own, which is the safe default.
+    */
+    if (gatewayId) {
+      useOwnAuthorStore.getState().set(gatewayId, undefined)
+    }
+
+    useOwnAuthorStore.getState().bind(gatewayId)
     // One cache per gateway. Two gateways can both have a `researcher`, and a
     // cache that could not tell them apart would paint one machine's
     // conversation under the other's name.
@@ -396,6 +430,9 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       http,
       cache: chatCache,
       userChats: userChatsSwitch,
+      // The reader's own author for an optimistic bubble, read at send time
+      // under the gateway this controller was built for (HERM-83, D2).
+      ownAuthor: () => ownAuthorOn(gatewayId),
       // Every gateway refusal the controller absorbs goes here, and the debug
       // screen reads it. The alternative is what shipped: `catch {}`.
       onRpcFailure: failure => useConnectionStore.getState().noteRpcFailure(failure)
@@ -588,6 +625,7 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     setValue(next)
 
     return () => {
+      useOwnAuthorStore.getState().bind(null)
       controller.stop()
       bots.dispose()
       stopWatching()
@@ -646,6 +684,17 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     void (async () => {
       const identity = await readIdentity(config, http).catch(() => null)
 
+      /*
+        HERM-83: the reader's own author id, from the same answer. Filed under
+        the gateway that gave it, so an answer that lands after a gateway switch
+        is never read as the next gateway's. A refusal, or a gateway that names
+        no provider, leaves it empty: nothing is "own" by id then, and every row
+        draws as the reader's own, as it did before `author` existed.
+      */
+      if (gatewayId) {
+        useOwnAuthorStore.getState().set(gatewayId, identity?.author)
+      }
+
       if (identity) {
         useDeviceContextStore.getState().setIdentity(identity)
       }
@@ -682,7 +731,7 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       */
       await value.bots.placeCurrentChats().catch(() => undefined)
     })()
-  }, [config, http, status, value])
+  }, [config, gatewayId, http, status, value])
 
   /**
    * Tell the widget sync whether the socket is usable.

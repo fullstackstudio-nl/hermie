@@ -127,6 +127,20 @@ function foreignSenderWho(author: MessageAuthor | undefined, options: Transcript
   return options.resolveSenderName(author) || undefined
 }
 
+/**
+ * A speaker's name, safe inside the `**…**` the Markdown file wraps it in.
+ *
+ * A name is somebody else's text — a colleague's, an identity provider's, a
+ * bot's — and unescaped a `*` closes the bold early, `[x](y)` becomes a link and
+ * `<b>` becomes markup wherever the file is rendered with HTML allowed. Each
+ * character that can open or close inline Markdown gets a backslash, which
+ * CommonMark defines for every ASCII punctuation character, and the name is
+ * held to one line. The `.txt` file is plain text and keeps the name as is.
+ */
+function markdownName(name: string): string {
+  return name.replace(/\s+/gu, ' ').replace(/[\\`*_[\]()<>#~|]/gu, '\\$&')
+}
+
 /** One line of a row: who spoke, and the body under it. `null` drops the row. */
 interface Entry {
   /** The speaker or the row's label. Empty for a row that is not speech. */
@@ -276,7 +290,12 @@ export function exportTranscript(items: readonly TranscriptItem[], options: Tran
       continue
     }
 
-    markdown.push('', `**${entry.who}** ${prefix ? `· ${prefix.replace(/ · $/u, '')}` : ''}`.trimEnd(), '', entry.body)
+    markdown.push(
+      '',
+      `**${markdownName(entry.who)}** ${prefix ? `· ${prefix.replace(/ · $/u, '')}` : ''}`.trimEnd(),
+      '',
+      entry.body
+    )
     text.push('', `${prefix}${entry.who}:`, entry.body)
   }
 

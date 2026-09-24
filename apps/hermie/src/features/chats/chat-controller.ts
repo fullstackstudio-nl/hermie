@@ -59,7 +59,6 @@ import type { ChatCache } from '../../platform/chat-cache'
 import type { Bot, BotCanonicalSession, BotsState } from '../../store/bots'
 import type { ChatsState, QueuedMessage } from '../../store/chats'
 import { liveChatNames } from '../../store/chats'
-import { useDeviceContextStore } from '../../store/device-context'
 import { usePluginStore } from '../../store/plugin'
 import {
   type BotsController,
@@ -88,6 +87,7 @@ import {
 } from '../sessions/session-model'
 import type { ChatChoice } from '../user-chats/user-chat'
 import type { UserChatSwitch } from '../user-chats/user-chat-switch'
+import { boundConversationOf } from './bound-conversation'
 import {
   fileReferenceFor,
   FileUploadError,
@@ -209,6 +209,17 @@ export interface ChatControllerOptions {
    * the app's stores, and so a test can read the failures it recorded.
    */
   onRpcFailure?: (failure: RpcFailure) => void
+  /**
+   * The reader's own author, in the shape a stamped row carries it
+   * (`"<provider>:<user_id>"`, HERM-83, D2), read at the moment a turn begins so
+   * the optimistic bubble carries the same author its persisted row will and
+   * never flips silhouette when that row lands.
+   *
+   * Injected, like `onRpcFailure`, so the controller knows nothing about which
+   * store holds it. Absent, or answering `undefined` before `/api/auth/me` has
+   * — the turn begins unattributed, which is "nobody knows", never a guess.
+   */
+  ownAuthor?: () => MessageAuthor | undefined
 }
 
 /**
@@ -309,6 +320,7 @@ export class ChatController {
   private readonly cache: ChatCache | null
   private readonly now: () => number
   private readonly onRpcFailure: ((failure: RpcFailure) => void) | undefined
+  private readonly ownAuthor: () => MessageAuthor | undefined
 
   private unsubscribes: (() => void)[] = []
   /** Approval request ids already acknowledged, so the ack is sent once. */
@@ -417,6 +429,7 @@ export class ChatController {
     this.now = options.now ?? (() => Date.now())
     this.userChats = options.userChats ?? null
     this.onRpcFailure = options.onRpcFailure
+    this.ownAuthor = options.ownAuthor ?? (() => undefined)
   }
 
   // ── lifecycle ──────────────────────────────────────────────────────────────
@@ -561,16 +574,9 @@ export class ChatController {
    * (`switchTo`), or while nothing is bound (`placeCurrentChats`).
    */
   private boundOwnId(botName: string): string | null | undefined {
-    const chat = this.chats.getState().chats[botName]
-
-    if (!chat) {
-      return undefined
-    }
-
-    const bots = this.bots.getState()
-    const current = bots.byName[botName]?.current ?? bots.currentSessions[botName]
-
-    return current && chat.storedSessionId === current.id ? current.id : null
+    // The same derivation the transcript and the chat-list preview gate their
+    // sender names on (`useGroupChat`), so the three can never disagree.
+    return boundConversationOf(this.chats.getState(), this.bots.getState(), botName)
   }
 
   /**
@@ -1668,7 +1674,9 @@ export class ChatController {
     // `display` exists for one caller: a `send`/`skill` directive, whose `text`
     // is the expanded skill body the model is meant to read and NOT what the
     // reader typed. The bubble shows `/docx`; the gateway is sent the expansion.
-    this.chats.getState().beginTurn(botName, options.display ?? body, attachmentReferences(attachments), ownAuthorFor())
+    this.chats
+      .getState()
+      .beginTurn(botName, options.display ?? body, attachmentReferences(attachments), this.ownAuthor())
 
     // Read back rather than recomputed: `beginLocalTurn` mints the id, and a
     // second spelling of that rule here would be a second place for it to drift.
@@ -4355,28 +4363,6 @@ function resumeSnapshotOf(result: SessionResumeResult): ResumeSnapshot {
  */
 function asRecord(value: object | null | undefined): Record<string, unknown> | null {
   return value ? ({ ...value } as Record<string, unknown>) : null
-}
-
-/**
- * The reader's own identity, in the shape a persisted row will eventually
- * carry (`MessageAuthor`) — read off `useDeviceContextStore`, the same
- * `/api/auth/me` answer `ChatRuntime` wrote into it (HERM-83, D2).
- *
- * `undefined` before an identity has been read at all, which is what keeps a
- * turn begun before that happens exactly as unattributed as one always was —
- * `beginLocalTurn` treats a missing author as "nobody knows", never a guess.
- * `name` is the gateway's own display name, omitted when it sent none; it is
- * carried for symmetry with the row this optimistic item stands in for and is
- * never itself shown (D3: an own bubble is never named).
- */
-function ownAuthorFor(): MessageAuthor | undefined {
-  const identity = useDeviceContextStore.getState()
-
-  if (!identity.userId) {
-    return undefined
-  }
-
-  return { id: identity.userId, ...(identity.displayName ? { name: identity.displayName } : {}) }
 }
 
 /**

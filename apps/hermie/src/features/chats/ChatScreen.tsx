@@ -37,13 +37,13 @@ import {
   ChatHeader,
   chatStrings,
   Composer,
-  fallbackSenderName,
   formatClock,
   type ComposerAttachment,
   type PickerOption,
   SidebarToggleButton,
   type SlashFailure,
   type SlashSuggestion,
+  senderLabel,
   shortToolName,
   QueuedStrip,
   type SubagentTranscript,
@@ -66,7 +66,6 @@ import { MemoryBotsScreen } from '../memory'
 import { useSenderPictureResolver } from '../people/use-sender-picture-resolver'
 import { botNames, useHideHandleWhenNamed } from '../../store/bot-names'
 import { useBotsStore } from '../../store/bots'
-import { useDeviceContextStore } from '../../store/device-context'
 import {
   useBotLabel,
   useChatAccent,
@@ -122,6 +121,8 @@ import { useReadAloud } from '../voice/useReadAloud'
 import { useVoiceSettingsStore } from '../voice/voice-settings'
 import { ChatConnectingState, ReconnectPill } from './ConnectionState'
 import { useChat, type UseChatResult } from './useChat'
+import { useGroupChat } from './bound-conversation'
+import { useOwnAuthorId } from './own-author'
 
 export interface OpenChatOptions {
   /**
@@ -433,19 +434,24 @@ function Conversation({
 
   /*
     HERM-83, D6: a name and an avatar are drawn only in the canonical GROUP
-    chat, never in one of the reader's own — and `currentOwnId` alone already
-    says which one this screen is showing, the same fact the label above reads.
-    A branch or a retired conversation never reaches `ChatScreen` at all (they
-    open in `ConversationViewScreen`, which passes neither prop), so nothing
-    further is needed to keep them unnamed.
+    chat, never in one of the reader's own. Read off what is actually BOUND
+    under this bot's key (`useGroupChat`, the controller's own derivation), not
+    off `currentOwnId`: that is the reader's remembered choice, which says
+    "group chat" for a legacy title-only `myChats` entry and moves before a
+    switch has happened — or has been refused. While a switch has the key
+    empty, the last settled answer is kept. A branch or a retired conversation
+    never reaches `ChatScreen` at all (they open in `ConversationViewScreen`,
+    which passes neither prop), so nothing further keeps them unnamed.
   */
-  const groupChat = currentOwnId === undefined
-  const ownAuthorId = useDeviceContextStore(state => state.userId) || undefined
+  const groupChat = useGroupChat(botName)
+  // The reader's own id as the gateway stamps it (`<provider>:<user_id>`), D3.
+  const ownAuthorId = useOwnAuthorId()
   // A colleague's picture at the head of their run, fetched by `author.id`
-  // and cached per gateway (HERM-120). `RowView` only ever calls this for a
-  // row already proven to be somebody else's, so it never fires for the
-  // reader's own messages or for an unattributed row.
-  const resolveSenderPictureUri = useSenderPictureResolver()
+  // and cached per gateway (HERM-120). `RowView` only ever uses these for a
+  // row already proven to be somebody else's, so they never fire for the
+  // reader's own messages or for an unattributed row. Three stable callbacks:
+  // read, ask (from an effect), and hear when one arrives.
+  const { requestSenderPicture, resolveSenderPictureUri, subscribeSenderPictures } = useSenderPictureResolver()
 
   /*
     The header's second line, while sub-chats are on: `Group chat` for the
@@ -1796,12 +1802,12 @@ function Conversation({
           // time, and the transcript package has no business knowing what that
           // is.
           formatTime: seconds => `${new Date(seconds * 1000).toLocaleDateString()} ${formatClock(seconds)}`.trim(),
-          // HERM-83, D6/D3: the same gate and the same rungs-2/3 resolver the
+          // HERM-83, D6/D3: the same gate and the same cleaning resolver the
           // transcript itself draws a name from — the export has no bubble to
           // ask, so it is handed the identical facts.
           groupChat,
           ownAuthorId,
-          resolveSenderName: fallbackSenderName,
+          resolveSenderName: senderLabel,
           selfName: chatStrings.export.self
         }
       )
@@ -2269,7 +2275,9 @@ function Conversation({
                 images={images}
                 {...(ownAuthorId ? { ownAuthorId } : {})}
                 onOpenAttachment={openAttachment}
+                requestSenderPicture={requestSenderPicture}
                 resolveSenderPictureUri={resolveSenderPictureUri}
+                subscribeSenderPictures={subscribeSenderPictures}
                 items={chat.items}
                 newMessageCount={newCount}
                 loadingOlder={loadingOlder}

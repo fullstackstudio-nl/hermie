@@ -84,6 +84,7 @@ export {
   type RequestOptions,
   type WsTicket
 } from './http'
+export { authorIdOf, ownAuthorOf } from './author-id'
 export { bytesToBase64 } from './base64'
 export {
   AuthChangedError,

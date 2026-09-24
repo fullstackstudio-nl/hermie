@@ -1,4 +1,4 @@
-import type { UserItem } from '@hermie/transcript'
+import type { MessageAuthor, UserItem } from '@hermie/transcript'
 
 import { BotsController } from '../src/features/bots/bots-controller'
 import { ChatController } from '../src/features/chats/chat-controller'
@@ -28,7 +28,13 @@ const HISTORY = [
 
 const started: ChatController[] = []
 
-function setup(options: { cache?: MemoryChatCache | null; onRpcFailure?: (failure: RpcFailure) => void } = {}) {
+function setup(
+  options: {
+    cache?: MemoryChatCache | null
+    onRpcFailure?: (failure: RpcFailure) => void
+    ownAuthor?: () => MessageAuthor | undefined
+  } = {}
+) {
   const gateway = new FakeChatGateway()
   const cache = options.cache === undefined ? new MemoryChatCache() : options.cache
   const botsController = new BotsController({ gateway, store: useBotsStore, cache })
@@ -38,7 +44,8 @@ function setup(options: { cache?: MemoryChatCache | null; onRpcFailure?: (failur
     bots: useBotsStore,
     botsController,
     cache,
-    ...(options.onRpcFailure ? { onRpcFailure: options.onRpcFailure } : {})
+    ...(options.onRpcFailure ? { onRpcFailure: options.onRpcFailure } : {}),
+    ...(options.ownAuthor ? { ownAuthor: options.ownAuthor } : {})
   })
 
   gateway
@@ -419,6 +426,37 @@ describe('sending', () => {
     // the row it persists. The name is all the client can put in the path
     // position, and the name is what the two sides are compared on.
     expect(user).toMatchObject({ text: 'have a look', pending: false, attachments: ['@image:shot.png'] })
+  })
+
+  it('gives the optimistic bubble the reader’s own author, read when the turn begins (HERM-83)', async () => {
+    const own: { current?: MessageAuthor } = {}
+    const { gateway, controller } = setup({ ownAuthor: () => own.current })
+
+    gateway.reply('prompt.submit', { status: 'streaming' })
+    await controller.openChat(RESEARCHER)
+    // Read at send time, not at construction: `/api/auth/me` answers later.
+    own.current = { id: 'authentik:7f3a9c21', name: 'Alex Moreno' }
+    await controller.send('researcher', 'ok')
+
+    const user = chatOf()
+      .order.map(id => chatOf().items[id])
+      .find(item => item?.kind === 'user' && item.text === 'ok')
+
+    expect(user).toMatchObject({ author: { id: 'authentik:7f3a9c21', name: 'Alex Moreno' } })
+  })
+
+  it('begins a turn unattributed while the reader’s own author is unknown', async () => {
+    const { gateway, controller } = setup({ ownAuthor: () => undefined })
+
+    gateway.reply('prompt.submit', { status: 'streaming' })
+    await controller.openChat(RESEARCHER)
+    await controller.send('researcher', 'ok')
+
+    const user = chatOf()
+      .order.map(id => chatOf().items[id])
+      .find(item => item?.kind === 'user' && item.text === 'ok')
+
+    expect(user && 'author' in user ? user.author : undefined).toBeUndefined()
   })
 
   it('keeps a queued prompt pending behind the running turn', async () => {

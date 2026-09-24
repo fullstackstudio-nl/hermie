@@ -96,6 +96,7 @@ export {
   needsReadingTreatment,
   previewLine,
   senderInk,
+  senderLabel,
   tintIndex
 } from './format'
 export { chatStrings } from './strings'

@@ -12,8 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A face on the people in Hermie, not just their name.** Signing in through a gateway that hands
   back an email and a picture now shows both: Settings → Account draws the signed-in person's picture
   where it drew an initial before, and their email underneath their name; a colleague's picture
-  appears beside their name at the head of their run in the shared Bot Chat, fetched by their
-  identity and cached per gateway so two gateways never mix up whose picture is whose. A gateway that
+  appears beside their name at the head of their run in the shared Bot Chat the moment it has been
+  fetched — not on the next message — fetched by their identity and cached per gateway so two
+  gateways never mix up whose picture is whose. A gateway that
   sends neither — an upstream Hermes, or a fork account with nothing held — keeps drawing the tinted
   initial exactly as before, and a picture that 404s or fails to load falls back to it too, without
   asking again for the rest of the session.
@@ -27,11 +28,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the panel, every elevation rung and the sunk tint, in every theme and both schemes — no new colour
   was added. A message the gateway did not attribute — sent before this shipped, or from
   the Hermes dashboard or the TUI — keeps drawing exactly as it always has: nobody is named on a guess.
-  Shown only in the shared Bot Chat; a personal conversation, a branch and a retired one are unchanged.
+  The reader's own messages are recognised by the identity the gateway stamps on them —
+  `<provider>:<user id>`, built from `/api/auth/me` exactly the way the gateway builds it — so they
+  stay on the right, unnamed, from the moment they are sent through every reload; and two people who
+  both send "ok" stay two messages rather than one taking the other's place. A name is somebody
+  else's text, so it is held to one line of at most 80 characters and stripped of control characters
+  and of the invisible marks that can reverse the text around them. Shown only in the shared Bot
+  Chat, decided by which conversation is actually open rather than by the reader's last choice: a
+  personal conversation (one an older build remembered by its title alone included), a branch and a
+  retired one are unchanged, and a switch that is refused never briefly names anybody.
 - **The same name reaches the chat list, an exported transcript and a screen reader.** The shared Bot
   Chat's row in the chat list now leads its preview with the sender — `Robin: draft is ready` — the
   same way an inbound teammate DM already prefixed a handle; a `.md` or `.txt` export of the
-  conversation puts every attributed message under the sender's own name instead of the reader's; and
+  conversation puts every attributed message under the sender's own name instead of the reader's,
+  with any Markdown in a speaker's name — a person's or a bot's — escaped in the `.md` file; and
   a bubble whose visible name is suppressed because it continues a run still carries the sender in its
   accessibility label, once, so a screen reader is never left to guess whose turn it is reading. All
   three read the identical gate the bubble itself does — the shared Bot Chat, an attributed row,

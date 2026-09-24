@@ -370,10 +370,8 @@ describe('author reconciliation', () => {
     expect(userItems[0]?.rowId).toBe(7)
   })
 
-  it("keeps the row's own author even when it differs from the optimistic guess", () => {
-    // Not a real scenario (a reader's own author does not change turn to turn),
-    // but it proves the rule: the fresh row wins, unconditionally.
-    const submitted = beginLocalTurn(fresh(), 'ping', undefined, NOW, { id: 'oidc:stale', name: 'Stale' })
+  it("keeps the row's own author when the pair agrees on the id and differs only in the name", () => {
+    const submitted = beginLocalTurn(fresh(), 'ping', undefined, NOW, { id: author.id, name: 'Old name' })
     const persistedRows: TranscriptRow[] = [
       { role: 'user', text: 'ping', row_id: 9, timestamp: 1_700_000_100, display_metadata: { author } }
     ]
@@ -383,6 +381,56 @@ describe('author reconciliation', () => {
 
     expect(userItems).toHaveLength(1)
     expect(userItems[0]?.author).toEqual(author)
+  })
+
+  /*
+    Two people in one group chat can both say "ok". The reader's optimistic
+    "ok" is theirs; a colleague's persisted "ok" is the colleague's. Pairing
+    them on the words alone gave the reader's bubble the colleague's row — and
+    the colleague's author — and lost the reader's own turn.
+  */
+  const colleague = { id: 'oidc:user-b', name: 'Sam' }
+  const colleaguesOk: TranscriptRow[] = [
+    { role: 'user', text: 'ok', row_id: 12, timestamp: 1_700_000_050, display_metadata: { author: colleague } }
+  ]
+
+  it('never pairs the reader’s optimistic bubble with a colleague’s row that says the same thing (tail)', () => {
+    const submitted = beginLocalTurn(fresh(), 'ok', undefined, NOW, author)
+    const optimisticId = list(submitted)[0]?.id
+
+    const next = reconcileTail(submitted, rowsToItems(colleaguesOk, 'rest'))
+    const userItems = list(next).filter((item): item is UserItem => item.kind === 'user')
+
+    expect(userItems).toHaveLength(2)
+    expect(next.items[optimisticId ?? '']).toMatchObject({ author })
+    expect(next.items[optimisticId ?? '']?.rowId).toBeUndefined()
+    expect(userItems.find(item => item.rowId === 12)?.author).toEqual(colleague)
+  })
+
+  it('never pairs the reader’s optimistic bubble with a colleague’s row that says the same thing (hydration)', () => {
+    const submitted = beginLocalTurn(fresh(), 'ok', undefined, NOW, author)
+    const optimisticId = list(submitted)[0]?.id
+
+    const next = reconcile(submitted, rowsToItems(colleaguesOk, 'rest'))
+    const userItems = list(next).filter((item): item is UserItem => item.kind === 'user')
+
+    expect(userItems).toHaveLength(2)
+    expect(next.items[optimisticId ?? '']).toMatchObject({ author })
+    expect(next.items[optimisticId ?? '']?.rowId).toBeUndefined()
+    expect(userItems.find(item => item.rowId === 12)?.author).toEqual(colleague)
+  })
+
+  it('still pairs an attributed bubble with an unattributed row: a gateway that stamps nobody', () => {
+    // The reader's identity is known, so the bubble carries an author; the
+    // gateway does not stamp, so the row carries none. They are one turn, and
+    // refusing to pair them would draw every message this reader sends twice.
+    const submitted = beginLocalTurn(fresh(), 'ok', undefined, NOW, author)
+
+    const tail = reconcileTail(submitted, rowsToItems([{ role: 'user', text: 'ok', row_id: 3 }], 'rest'))
+    const hydrated = reconcile(submitted, rowsToItems([{ role: 'user', text: 'ok', row_id: 3 }], 'rest'))
+
+    expect(list(tail).filter(item => item.kind === 'user')).toHaveLength(1)
+    expect(list(hydrated).filter(item => item.kind === 'user')).toHaveLength(1)
   })
 
   it('names a foreign placeholder from the row that fills it', () => {

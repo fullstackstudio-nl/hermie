@@ -304,10 +304,19 @@ export function UserBubble({
  * readers too. `height`/`width: 1` with `overflow: 'hidden'` is the ordinary
  * "visually hidden" shape instead: a real, fully opaque node a click can
  * never land on and an eye can never see, but one AT can still find.
+ *
+ * Its text is drawn in `transparent` ink. A 1×1 box still clips a corner of
+ * the first glyph, and in normal ink that corner is a visible speck beside the
+ * bubble. The element stays opaque and full-size, so a screen reader treats it
+ * exactly as before; only the ink is gone.
  */
 function SenderNameForScreenReader({ name, testID }: { name: string; testID?: string }) {
   return (
-    <Text accessibilityLabel={name} style={{ height: 1, overflow: 'hidden', width: 1 }} testID={testID}>
+    <Text
+      accessibilityLabel={name}
+      style={{ color: 'transparent', height: 1, overflow: 'hidden', width: 1 }}
+      testID={testID}
+    >
       {name}
     </Text>
   )

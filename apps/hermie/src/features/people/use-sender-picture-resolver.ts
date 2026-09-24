@@ -1,19 +1,25 @@
 /**
- * `resolveSenderPictureUri` for the group chat's `TranscriptContext` (HERM-120
- * Task 2) — a colleague's picture, fetched by `author.id` and cached per
- * gateway, the same store the reader's own Account picture uses.
+ * A colleague's picture for the group chat's transcript (HERM-120 Task 2) —
+ * fetched by `author.id` and cached per gateway, the same store the reader's
+ * own Account picture uses.
  *
- * Built here rather than inside a transcript row, because it has to SUBSCRIBE
- * to the cache to repaint once a fetch resolves, and a transcript row is not
- * where a hook may run — `TranscriptList` invokes `resolveSenderName`'s sibling
- * as a plain callback while laying out rows, not as a hook. `ChatScreen`
- * subscribes once, at the top, exactly as it already does for `resolveSenderName`'s
- * eventual `context.users` directory (HERM-83 Task 4's rung 1).
+ * Three stable callbacks, spread straight onto `TranscriptList`:
  *
- * `RowView` only ever calls this for a row that is already proven to be a
- * colleague's (`!own && item.author`), so the reader's own messages and
- * unattributed rows never reach it — nothing here needs to guard against them
- * again.
+ *  - `resolveSenderPictureUri` READS what the cache holds. It starts nothing, so
+ *    a row may call it while it renders;
+ *  - `requestSenderPicture` ASKS for it — a row calls it from an effect, never
+ *    during render, because starting the fetch writes the store, and a store
+ *    write from inside another component's render is exactly what React warns
+ *    about;
+ *  - `subscribeSenderPictures` tells a row when the cache changes, so the row
+ *    showing a picture repaints the moment it lands. Rows are memoised against
+ *    the transcript context by IDENTITY, and none of these callbacks changes
+ *    identity when a picture arrives — which is why, before this, a
+ *    colleague's picture only appeared once the next message rebuilt the list.
+ *
+ * `RowView` only ever uses these for a row already proven to be a colleague's
+ * (`!own && item.author`), so the reader's own messages and unattributed rows
+ * never reach them.
  */
 import { useCallback } from 'react'
 
@@ -23,34 +29,43 @@ import type { MessageAuthor } from '@hermie/transcript'
 import { useGateway } from '../../gateway'
 import { personPictureKey, personPictureUri, usePeoplePicturesStore } from './people-pictures'
 
-export function useSenderPictureResolver(): (author: MessageAuthor) => string | undefined {
+export interface SenderPictureSource {
+  resolveSenderPictureUri: (author: MessageAuthor) => string | undefined
+  requestSenderPicture: (author: MessageAuthor) => void
+  subscribeSenderPictures: (listener: () => void) => () => void
+}
+
+const subscribeSenderPictures = (listener: () => void): (() => void) => usePeoplePicturesStore.subscribe(listener)
+
+export function useSenderPictureResolver(): SenderPictureSource {
   const { gatewayId, http } = useGateway()
-  // Subscribed for its OWN sake: reading `byKey` here is what makes this
-  // component re-render once a fetch resolves. The callback below reads the
-  // freshest map through `getState()` rather than this closed-over value, but
-  // the two are the same object on any render this subscription did not just
-  // repaint for.
-  usePeoplePicturesStore(state => state.byKey)
   const ensure = usePeoplePicturesStore(state => state.ensure)
 
-  return useCallback(
+  const resolveSenderPictureUri = useCallback(
+    (author: MessageAuthor) => {
+      if (!gatewayId || !author.id) {
+        return undefined
+      }
+
+      return personPictureUri(
+        usePeoplePicturesStore.getState().byKey[personPictureKey(gatewayId, authPicturePath(author.id))]
+      )
+    },
+    [gatewayId]
+  )
+
+  const requestSenderPicture = useCallback(
     (author: MessageAuthor) => {
       if (!gatewayId || !http || !author.id) {
-        return undefined
+        return
       }
 
       const path = authPicturePath(author.id)
-      const key = personPictureKey(gatewayId, path)
-      const entry = usePeoplePicturesStore.getState().byKey[key]
 
-      if (!entry) {
-        ensure(key, http, path)
-
-        return undefined
-      }
-
-      return personPictureUri(entry)
+      ensure(personPictureKey(gatewayId, path), http, path)
     },
     [gatewayId, http, ensure]
   )
+
+  return { resolveSenderPictureUri, requestSenderPicture, subscribeSenderPictures }
 }

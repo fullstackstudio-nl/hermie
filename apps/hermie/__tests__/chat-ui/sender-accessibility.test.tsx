@@ -39,6 +39,23 @@ describe('UserBubble, the sender name for a screen reader on a mid-run bubble', 
     expect(screen.queryByTestId(`user-sender-name-${userItem.id}`)).toBeNull()
   })
 
+  it('draws its text in no ink, so not even a speck of a glyph shows, and stays exposed to a screen reader', () => {
+    renderScreen(<UserBubble grouped item={userItem} own={false} sender={WRITER} />)
+
+    const marker = screen.getByTestId(`user-sender-name-a11y-${userItem.id}`)
+    const style = Array.isArray(marker.props.style) ? Object.assign({}, ...marker.props.style) : marker.props.style
+
+    expect(style.color).toBe('transparent')
+    // Transparent INK, not a transparent element: no `opacity: 0`, no zero
+    // frame, and the label is still spelled out explicitly.
+    expect(style.opacity).not.toBe(0)
+    expect(style.height).toBeGreaterThan(0)
+    expect(style.width).toBeGreaterThan(0)
+    expect(marker.props.accessibilityLabel).toBe('Robin')
+    expect(marker.props.accessibilityElementsHidden).not.toBe(true)
+    expect(marker.props.importantForAccessibility).not.toBe('no-hide-descendants')
+  })
+
   it('draws no second, hidden name on the first bubble of a run — the visible label already carries it', () => {
     renderScreen(<UserBubble grouped={false} item={userItem} own={false} sender={WRITER} />)
 

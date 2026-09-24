@@ -237,6 +237,50 @@ describe('who a `user` row is exported under (HERM-83, Task 5)', () => {
   })
 })
 
+/*
+  A name is somebody else's text, and in the `.md` file it sits inside
+  `**…**`. Unescaped, a `*` closes the bold early, a `[x](y)` becomes a link,
+  and a `<b>` becomes markup in any renderer that allows HTML. The `.txt` file
+  is plain text and keeps the name exactly as shown in the app.
+*/
+describe('a sender name in the Markdown export', () => {
+  const ME = 'authentik:me'
+  const resolveSenderName = (author: MessageAuthor): string => author.name ?? author.id
+  const GROUP_OPTIONS = { ...OPTIONS, groupChat: true, ownAuthorId: ME, resolveSenderName }
+
+  it('escapes Markdown in a person’s name', () => {
+    const items: TranscriptItem[] = [
+      {
+        ...base(60),
+        author: { id: 'authentik:x', name: '*Robin_[site](https://example.test)` <b>#1' },
+        kind: 'user',
+        text: 'hi'
+      }
+    ]
+
+    const { markdown, text } = exportTranscript(items, GROUP_OPTIONS)
+
+    expect(markdown).toContain('**\\*Robin\\_\\[site\\]\\(https://example.test\\)\\` \\<b\\>\\#1**')
+    expect(text).toContain('*Robin_[site](https://example.test)` <b>#1:')
+  })
+
+  it('escapes Markdown in a bot’s name too', () => {
+    const items: TranscriptItem[] = [{ ...base(60), kind: 'assistant', text: 'done' } as TranscriptItem]
+
+    const { markdown } = exportTranscript(items, { ...OPTIONS, botName: 'ops_*bot*' })
+
+    expect(markdown).toContain('**ops\\_\\*bot\\***')
+  })
+
+  it('leaves an ordinary name exactly as it was', () => {
+    const items: TranscriptItem[] = [
+      { ...base(60), author: { id: 'authentik:x', name: 'Robin Vale' }, kind: 'user', text: 'hi' }
+    ]
+
+    expect(exportTranscript(items, GROUP_OPTIONS).markdown).toContain('**Robin Vale**')
+  })
+})
+
 describe('naming the file', () => {
   it('reduces a bot name to something a file system will take', () => {
     expect(transcriptFileName('Researcher', 'md', '2026-09-22')).toBe('Researcher-2026-09-22.md')

@@ -42,6 +42,29 @@ const toolKeyOf = (item: TranscriptItem): string | undefined =>
 const matchKeyOf = (item: TranscriptItem): string => `${item.kind}\n${itemMatchKey(item)}`
 
 /**
+ * Whether two items that say the same thing may be the same turn, as far as
+ * WHO said it goes (HERM-83).
+ *
+ * In a group chat two people can both say "ok", and a key made of the words
+ * alone paired the reader's optimistic "ok" with a colleague's persisted one —
+ * handing the reader's bubble the colleague's row and author, and losing the
+ * reader's own turn. So two items that each name an author pair only when it
+ * is the same author.
+ *
+ * One side without an author still pairs. That is a gateway that stamps nobody
+ * answering a reader whose identity is known — the bubble carries an author,
+ * its row does not — and they are one turn; refusing them would draw every
+ * message that reader sends twice. It is also every row from before the stamp
+ * existed, which is how pairing always worked.
+ */
+function authorsAgree(a: TranscriptItem | undefined, b: TranscriptItem): boolean {
+  const left = a?.kind === 'user' ? a.author?.id : undefined
+  const right = b.kind === 'user' ? b.author?.id : undefined
+
+  return !left || !right || left === right
+}
+
+/**
  * Notice kinds this client mints itself and the gateway never writes as a row —
  * see the `'command'` case of `NoticeKind` in `types.ts` and `session.reclaimed`
  * (`reducer.ts`), which is a broadcast, not a persisted turn. A re-hydration has
@@ -385,7 +408,9 @@ export function reconcile(state: ChatState, freshItems: readonly TranscriptItem[
     }
 
     if (!matchId || used.has(matchId)) {
-      matchId = isMatchable(fresh) ? byMatchKey.get(matchKeyOf(fresh))?.find(id => !used.has(id)) : undefined
+      matchId = isMatchable(fresh)
+        ? byMatchKey.get(matchKeyOf(fresh))?.find(id => !used.has(id) && authorsAgree(state.items[id], fresh))
+        : undefined
     }
 
     const current = matchId && !used.has(matchId) ? state.items[matchId] : undefined
@@ -560,7 +585,7 @@ export function reconcileTail(state: ChatState, tailItems: readonly TranscriptIt
     }
 
     const liveId = isMatchable(fresh)
-      ? liveByMatchKey.get(matchKeyOf(fresh))?.find(id => !pairedLive.has(id))
+      ? liveByMatchKey.get(matchKeyOf(fresh))?.find(id => !pairedLive.has(id) && authorsAgree(byId.get(id), fresh))
       : undefined
     const liveMatch = liveId ? byId.get(liveId) : undefined
 
