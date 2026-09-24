@@ -17,10 +17,13 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native'
 import { Text as RNText } from 'react-native'
 
+import { chatStrings } from '../src/chat-ui/strings'
 import { ChatScreen } from '../src/features/chats/ChatScreen'
 import { AppearanceSection } from '../src/features/settings/AppearanceSection'
+import { resetActiveLocale, setActiveLocale } from '../src/i18n/active-locale'
 import { type Bot, useBotsStore } from '../src/store/bots'
 import { useChatsStore } from '../src/store/chats'
+import { resetLanguageStore } from '../src/store/language'
 import { useSettingsStore } from '../src/store/settings'
 import { applySnapshot, snapshotFromStores } from '../src/store/ui-meta-bridge'
 import { asTextSize, TEXT_SIZE_SCALE, textSizeScale } from '../src/store/text-size'
@@ -274,5 +277,44 @@ describe('the setting itself', () => {
     expect(useSettingsStore.getState().textSize).toBe('large')
     expect(asTextSize('enormous')).toBeUndefined()
     expect(textSizeScale(undefined)).toBe(1)
+  })
+})
+
+/**
+ * HERM-125: the same four options — Small/Default/Large/Extra large — sit on
+ * the identical `SegmentedRow` in Settings → Appearance and in the chat's own
+ * options popover (`chatStrings.options.textSize`). Four segments leave far
+ * less room per label than the three-way rows next to them, and "Extra
+ * large"/"Extra groot"/"Sehr groß" do not fit one line at a phone's width in
+ * any of the three languages — `numberOfLines={1}` clipped them to
+ * "Standaa…" and "Extra gr…" rather than wrapping.
+ *
+ * The fix is in the shared control (`ui/sheets/controls.tsx`), so this proves
+ * it once, on the Settings surface that needs no `ChatScreen` scaffolding —
+ * the popover draws the exact same control from the exact same options.
+ */
+describe('the text-size segments do not truncate their labels (HERM-125)', () => {
+  afterEach(() => {
+    act(() => {
+      resetLanguageStore()
+    })
+    resetActiveLocale()
+  })
+
+  it.each(['en', 'nl', 'de'] as const)('wraps rather than clipping the longest label in %s', locale => {
+    setActiveLocale(locale)
+    render(withProviders(<AppearanceSection onOpenAdvanced={() => undefined} />))
+
+    // The label is unabridged — nobody shortened the string to make it fit —
+    // and it is now allowed a second line instead of being forced onto one.
+    const longest = screen.getByText(chatStrings.options.textSizes.xlarge as string)
+
+    expect(longest.props.numberOfLines).toBe(2)
+
+    // The shortest label is untouched: a row that already fit keeps fitting,
+    // wrapping only where a label actually needs it.
+    const shortest = screen.getByText(chatStrings.options.textSizes.small as string)
+
+    expect(shortest.props.numberOfLines).toBe(2)
   })
 })

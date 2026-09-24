@@ -104,9 +104,14 @@ describe('the glossary', () => {
 describe('the surfaces with no room to grow', () => {
   /**
    * The segmented control splits ONE row evenly between its options
-   * (`ui/sheets/controls.tsx`), at 13pt semibold with `numberOfLines={1}`. On a
-   * 375pt phone that is roughly 80pt a segment for three options — so the
-   * measure that matters is the WIDEST option, not the total.
+   * (`ui/sheets/controls.tsx`), at 13pt semibold. On a 375pt phone that is
+   * roughly 80pt a segment for three options — so the measure that matters is
+   * the WIDEST option, not the total.
+   *
+   * A label that still does not fit wraps onto a second line rather than
+   * being clipped (HERM-125, `numberOfLines={2}`), which is what the four-way
+   * text-size row needs and the three-way rows below do not — see
+   * `chat-text-size.test.tsx` for that one.
    */
   const widest = (values: readonly string[]): number => Math.max(...values.map(value => value.length))
 

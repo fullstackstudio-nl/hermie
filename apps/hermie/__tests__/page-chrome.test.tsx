@@ -8,6 +8,7 @@ import { act, fireEvent, screen } from '@testing-library/react-native'
 import { Platform } from 'react-native'
 
 import { catalogueFor } from '../src/i18n/catalogue'
+import { chatStrings } from '../src/chat-ui/strings'
 import { strings } from '../src/i18n/strings'
 import { PageChrome, pageScrollProps, usePageScroll } from '../src/ui/chrome'
 import { Text } from '../src/ui/primitives'
@@ -234,6 +235,27 @@ describe('i18n — no InsetGroup header string is stored uppercase', () => {
       }
 
       expect(isShouting(value)).toBe(false)
+    }
+  })
+
+  /**
+   * HERM-125: `chat-ui/strings.ts` is its own tree (`chat`, not `app`), and
+   * `export.header` is the one source string this file's `HEADER_PATHS` never
+   * walked — which is exactly how it stayed stored as `'EXPORT'` through
+   * HERM-106. It answers to three different roles (the sheet's group heading,
+   * the popover's row label, the page's title), and only the first of those
+   * runs through `InsetGroup`'s uppercase-at-render; the other two showed the
+   * stored casing verbatim.
+   */
+  it('the chat tree’s export heading is sentence case in every locale', () => {
+    expect(isShouting(chatStrings.export.header)).toBe(false)
+
+    for (const locale of ['nl', 'de'] as const) {
+      const value = catalogueFor(locale, 'chat').export as { header?: unknown } | undefined
+      const header = value?.header
+
+      expect(typeof header).toBe('string')
+      expect(isShouting(header as string)).toBe(false)
     }
   })
 })

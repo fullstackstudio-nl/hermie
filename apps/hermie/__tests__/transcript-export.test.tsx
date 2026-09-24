@@ -73,4 +73,25 @@ describe('exporting from the chat options sheet', () => {
     expect(screen.queryByTestId('option-export-text')).toBeNull()
     expect(screen.getByTestId('option-model')).toBeTruthy()
   })
+
+  /**
+   * HERM-125: the group's own heading still shouts "EXPORT" — `InsetGroup`
+   * uppercases every header at render (HERM-106) — but the export PAGE's
+   * title is a `SheetPage` title, which is never transformed. A string still
+   * typed in capitals showed through there verbatim, the one row and page
+   * left behind when the rest of the sheet was sentence-cased.
+   */
+  it('shouts the group heading but not the page title', () => {
+    renderScreen(<ChatOptionsSheet {...OPTIONS} initialPane="export" onExport={() => undefined} />)
+
+    // The page reached directly, on the title a reader actually reads.
+    expect(screen.getByText('Export')).toBeTruthy()
+    expect(screen.queryByText('EXPORT')).toBeNull()
+  })
+
+  it('still shouts the root group heading, consistent with its siblings', () => {
+    renderScreen(<ChatOptionsSheet {...OPTIONS} onExport={() => undefined} />)
+
+    expect(screen.getByText('EXPORT')).toBeTruthy()
+  })
 })

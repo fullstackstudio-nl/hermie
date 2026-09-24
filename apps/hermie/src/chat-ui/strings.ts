@@ -429,8 +429,18 @@ const chatStringsEn = {
 
   /** Taking the conversation out of the app as a file. */
   export: {
-    /** The group's heading in the options sheet. */
-    header: 'EXPORT',
+    /**
+     * Three roles, one string: the options sheet's group heading, the
+     * popover's own row label, and the page's title once a reader opens it
+     * (HERM-125).
+     *
+     * Sentence case, like every other heading source string since HERM-106 —
+     * `InsetGroup` uppercases its own header at render, so the group still
+     * shouts "EXPORT" the same as its neighbours. A row label and a page
+     * title do not go through that transform, and a string still typed in
+     * capitals showed through as literal "EXPORT" in both.
+     */
+    header: 'Export',
     /**
      * Two verbs, because the action really is two things: a phone opens the
      * share sheet and a browser can only download. The same rule the image

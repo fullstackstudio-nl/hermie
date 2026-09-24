@@ -293,6 +293,25 @@ describe('the options menu is a popover in the chat', () => {
     expect(within(row).getByText('Example Model')).toBeTruthy()
     expect(within(row).queryByText('example-provider/example-model')).toBeNull()
   })
+
+  /**
+   * HERM-125: `DisclosureRow` prints its label verbatim, with no casing
+   * transform of its own — that is `InsetGroup`'s job, and this row is not
+   * one. `chatStrings.export.header` used to be typed in capitals for the
+   * sheet's group heading and leaked into this row too, the one label here
+   * that shouted next to five that did not.
+   */
+  it('writes the export row the same case as its neighbours', async () => {
+    await openChat()
+
+    fireEvent.press(screen.getByTestId('chat-header-options'))
+    await waitFor(() => expect(screen.getByTestId('chat-options-popover')).toBeTruthy())
+
+    const row = screen.getByTestId('option-export')
+
+    expect(within(row).getByText('Export')).toBeTruthy()
+    expect(within(row).queryByText('EXPORT')).toBeNull()
+  })
 })
 
 /**

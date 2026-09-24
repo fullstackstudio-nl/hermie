@@ -283,6 +283,7 @@ export const chat: Translation<typeof chatStrings> = {
   },
 
   export: {
+    header: 'Exportieren',
     shareMarkdown: 'Als Markdown teilen',
     downloadMarkdown: 'Als Markdown herunterladen',
     shareText: 'Als reinen Text teilen',

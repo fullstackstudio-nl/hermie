@@ -131,7 +131,6 @@ export const UNTRANSLATED_KEYS: Record<TranslatedLocale, readonly string[]> = {
     'chat.clarify.later',
     'chat.context.percent',
     'chat.context.counts',
-    'chat.export.header',
     'chat.options.model',
 
     'connectors.settings.row',
@@ -258,7 +257,6 @@ export const UNTRANSLATED_KEYS: Record<TranslatedLocale, readonly string[]> = {
     'chat.header.offline',
     'chat.context.percent',
     'chat.context.counts',
-    'chat.export.header',
     'chat.options.verbosityOptions.normal',
     'chat.voice.rateOptions.normal',
 

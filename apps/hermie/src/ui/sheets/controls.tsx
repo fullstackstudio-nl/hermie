@@ -7,8 +7,8 @@
  * Android do not share one set of those, and a control that looks different on
  * each would undo the point of having tokens.
  */
-import { useEffect, useRef } from 'react'
-import { Animated, Pressable, View } from 'react-native'
+import { useEffect, useRef, useState } from 'react'
+import { Animated, Pressable, View, type LayoutChangeEvent, type TextStyle } from 'react-native'
 
 import { durationFor, easing } from '../motion'
 import { Text } from '../primitives'
@@ -131,6 +131,28 @@ export interface SegmentedRowProps<T extends string> {
   testID?: string
 }
 
+/**
+ * `word-wrap: break-word` is React Native Web's own default for every `Text`
+ * (`react-native-web/dist/exports/Text`) — native RN Text can break a word
+ * mid-way to stay inside a fixed box, and the web target matches that. A
+ * segment that falls back to a second line (HERM-125) wants the opposite: a
+ * break at a SPACE if there is one, and otherwise a single word that overflows
+ * rather than one split into "Standaa" / "rd".
+ *
+ * `wordWrap` — the property RNW's default sets — is not part of React
+ * Native's own `TextStyle`; the value exists only on this platform. The cast
+ * is the one `text-field-web.web.ts` already uses for `outlineStyle: 'none'`,
+ * for the same reason: the web target's own wider value set, admitted once,
+ * next to why.
+ */
+const KEEP_WORDS_WHOLE = { wordWrap: 'normal' } as unknown as TextStyle
+
+/**
+ * A segment's box at one line — `minHeight` below, and the floor a taller,
+ * wrapped box is measured against.
+ */
+const SEGMENT_ONE_LINE_HEIGHT = 30
+
 export function SegmentedRow<T extends string>({
   label,
   options,
@@ -140,6 +162,52 @@ export function SegmentedRow<T extends string>({
   testID
 }: SegmentedRowProps<T>) {
   const theme = useTheme()
+
+  /**
+   * Whether ANY segment has wrapped onto a second line.
+   *
+   * HERM-125's last resort, not the common case now that a segment is sized
+   * to its own label rather than splitting the row evenly (the Pressable's
+   * `flexBasis` below) — "Klein" gives room to "Standaard" instead of both
+   * getting a quarter of the row regardless of what they say.
+   *
+   * Measured with `onLayout` rather than `onTextLayout`: react-native-web
+   * does not implement `onTextLayout` at all, so a check built on it would
+   * never fire on the web target and the control would never square off
+   * there. A box's HEIGHT growing past the one-line floor is the same fact
+   * on every platform `onLayout` runs on.
+   *
+   * The whole control's radius adapts together, rather than one squared-off
+   * segment sitting next to three still fully round ones — a segmented
+   * control reads as one object, and a row of mismatched corners would read
+   * as two controls glued together.
+   */
+  const wrappedSegments = useRef<Set<T>>(new Set())
+  const [wrapped, setWrapped] = useState(false)
+
+  const handleSegmentLayout = (optionValue: T) => (event: LayoutChangeEvent) => {
+    const isWrapped = event.nativeEvent.layout.height > SEGMENT_ONE_LINE_HEIGHT + 1
+    const segments = wrappedSegments.current
+
+    if (isWrapped === segments.has(optionValue)) {
+      return
+    }
+
+    if (isWrapped) {
+      segments.add(optionValue)
+    } else {
+      segments.delete(optionValue)
+    }
+
+    setWrapped(segments.size > 0)
+  }
+
+  // `radii.inset` — the token the design system itself names for "a field, a
+  // segment, a tab slot" — rather than the fully round `radii.pill`: a pill
+  // whose box has grown taller for a second line stops reading as a pill and
+  // starts reading as an egg, one segment at a time. Squaring the corners off
+  // is the fix that stays a rectangle at any height.
+  const radius = wrapped ? theme.radii.inset : theme.radii.pill
 
   return (
     <View
@@ -168,7 +236,7 @@ export function SegmentedRow<T extends string>({
         style={{
           backgroundColor: theme.tintSunk,
           borderColor: theme.hairlineSoft,
-          borderRadius: theme.radii.pill,
+          borderRadius: radius,
           borderWidth: 1,
           flexDirection: 'row',
           gap: 2,
@@ -187,25 +255,45 @@ export function SegmentedRow<T extends string>({
               disabled={disabled}
               key={option.value}
               onPress={() => onChange(option.value)}
-              style={{ flex: 1 }}
+              // HERM-125: sized to the LABEL, not to an equal quarter of the
+              // row. `flexBasis: 'auto'` is the label's own rendered width —
+              // "Klein" asks for less than "Standaard" does — `flexGrow: 1`
+              // still hands out whatever room is left over evenly, so the row
+              // keeps filling edge to edge, and `flexShrink: 1` means a real
+              // squeeze takes width from the LONGEST labels first (shrink is
+              // proportional to basis), which is the one order that keeps
+              // "Klein" whole the longest.
+              style={{ flexBasis: 'auto', flexGrow: 1, flexShrink: 1 }}
               testID={testID ? `${testID}-${option.value}` : undefined}
             >
               <View
+                onLayout={handleSegmentLayout(option.value)}
                 style={{
                   alignItems: 'center',
                   backgroundColor: selected ? theme.elevation.e4 : 'transparent',
                   borderColor: selected ? theme.hairlineSoft : 'transparent',
-                  borderRadius: theme.radii.pill,
+                  borderRadius: radius,
                   borderWidth: 1,
                   justifyContent: 'center',
-                  minHeight: 30,
+                  minHeight: SEGMENT_ONE_LINE_HEIGHT,
                   ...(selected ? theme.shadows.card : {})
                 }}
               >
+                {/*
+                  HERM-125: a label that still does not fit — after content
+                  sizing has already given it all the room its neighbours can
+                  spare — wraps onto a second line as the LAST resort, rather
+                  than the fixed single line that clipped "Standaard" to
+                  "Standaa…". `KEEP_WORDS_WHOLE` keeps that wrap at a space:
+                  without it, "Extra groot" could wrap correctly while a
+                  single word too wide for its box — the case with no space to
+                  break at — would still be split mid-word instead of
+                  overflowing whole.
+                */}
                 <Text
                   color={selected ? 'text' : 'textMuted'}
-                  numberOfLines={1}
-                  style={{ fontSize: 13, fontWeight: '600', lineHeight: 17 }}
+                  numberOfLines={2}
+                  style={[{ fontSize: 13, fontWeight: '600', lineHeight: 17, textAlign: 'center' }, KEEP_WORDS_WHOLE]}
                 >
                   {option.label}
                 </Text>
