@@ -355,6 +355,122 @@ describe('ChatScreen', () => {
     await waitForGone(() => screen.queryByTestId('composer-attachments'), 'composer-attachments')
   })
 
+  /**
+   * HERM-126: a second Enter, or a tap on the send button, landing while the
+   * first send was still in flight used to find the same chip still staged —
+   * the tray only cleared once `chat.send` resolved — and fired the same
+   * attachment a second time. A second, identical agent turn, with no undo.
+   *
+   * `mockController.send` is held open with a controllable promise so these
+   * tests can assert what happens WHILE a send is outstanding, not only
+   * before or after it.
+   */
+  describe('HERM-126: a second send while one is in flight', () => {
+    async function attachPhoto(picked: { id: string; filename: string; base64: string; uri: string }) {
+      attachments.pickAttachment.mockResolvedValueOnce(picked)
+
+      fireEvent.press(screen.getByTestId('composer-attach'))
+      fireEvent.press(screen.getByTestId('composer-attach-menu-photo'))
+      // An image chip carries the id only on its own remove button — see
+      // `Composer.tsx`, where a file chip's outer view gets
+      // `composer-attachment-${id}` but an image's does not.
+      await waitFor(() => expect(screen.getByTestId(`composer-attachment-remove-${picked.id}`)).toBeTruthy())
+    }
+
+    const SHOT = { id: 'a1', filename: 'shot.jpg', base64: 'AAAA', uri: 'file:///tmp/shot.jpg' }
+
+    it('sends an attachment once when Enter is pressed twice before the first send settles', async () => {
+      const first = deferred<void>()
+
+      mockController.send.mockReturnValueOnce(first.promise)
+      renderChat()
+      await attachPhoto(SHOT)
+
+      // The field is empty on both presses — the shape the owner reported.
+      fireEvent(screen.getByTestId('composer-input'), 'submitEditing')
+      await waitFor(() => expect(mockController.send).toHaveBeenCalledTimes(1))
+
+      fireEvent(screen.getByTestId('composer-input'), 'submitEditing')
+
+      first.resolve()
+      await waitForGone(() => screen.queryByTestId('composer-attachments'), 'composer-attachments')
+      expect(mockController.send).toHaveBeenCalledTimes(1)
+      expect(mockController.send).toHaveBeenCalledWith('researcher', '', [{ filename: 'shot.jpg', base64: 'AAAA' }])
+    })
+
+    it('sends an attachment once when Enter is followed by a tap on the send button before the first send settles', async () => {
+      const first = deferred<void>()
+
+      mockController.send.mockReturnValueOnce(first.promise)
+      renderChat()
+      await attachPhoto(SHOT)
+
+      fireEvent(screen.getByTestId('composer-input'), 'submitEditing')
+      await waitFor(() => expect(mockController.send).toHaveBeenCalledTimes(1))
+
+      fireEvent.press(screen.getByTestId('composer-send'))
+
+      first.resolve()
+      await waitForGone(() => screen.queryByTestId('composer-attachments'), 'composer-attachments')
+      expect(mockController.send).toHaveBeenCalledTimes(1)
+      expect(mockController.send).toHaveBeenCalledWith('researcher', '', [{ filename: 'shot.jpg', base64: 'AAAA' }])
+    })
+
+    it('restores every attachment exactly, in order and without duplicates, when the in-flight send fails', async () => {
+      const first = { id: 'a1', filename: 'first.jpg', base64: 'AAAA', uri: 'file:///tmp/first.jpg' }
+      const second = { id: 'a2', filename: 'second.jpg', base64: 'BBBB', uri: 'file:///tmp/second.jpg' }
+      const failing = deferred<void>()
+
+      mockController.send.mockReturnValueOnce(failing.promise)
+      renderChat()
+      await attachPhoto(first)
+      await attachPhoto(second)
+
+      fireEvent(screen.getByTestId('composer-input'), 'submitEditing')
+      await waitFor(() => expect(mockController.send).toHaveBeenCalledTimes(1))
+
+      failing.reject(new Error('gateway not connected'))
+      await waitFor(() => expect(screen.getByText(/gateway not connected/u)).toBeTruthy())
+
+      // Both chips are back, each exactly once — never dropped, never doubled.
+      expect(screen.getAllByTestId('composer-attachment-remove-a1')).toHaveLength(1)
+      expect(screen.getAllByTestId('composer-attachment-remove-a2')).toHaveLength(1)
+
+      // And in the order they were staged in, which the next, successful
+      // send proves: `first` still comes before `second` in the payload.
+      mockController.send.mockResolvedValueOnce(undefined)
+      fireEvent.press(screen.getByTestId('composer-send'))
+
+      await waitFor(() => expect(mockController.send).toHaveBeenCalledTimes(2))
+      expect(mockController.send).toHaveBeenNthCalledWith(2, 'researcher', '', [
+        { filename: 'first.jpg', base64: 'AAAA' },
+        { filename: 'second.jpg', base64: 'BBBB' }
+      ])
+    })
+
+    it('still lets a genuine next send through once the first one has completed', async () => {
+      const first = deferred<void>()
+
+      mockController.send.mockReturnValueOnce(first.promise)
+      renderChat()
+      await attachPhoto(SHOT)
+
+      fireEvent(screen.getByTestId('composer-input'), 'submitEditing')
+      await waitFor(() => expect(mockController.send).toHaveBeenCalledTimes(1))
+
+      first.resolve()
+      await waitForGone(() => screen.queryByTestId('composer-attachments'), 'composer-attachments')
+
+      // A second, later, and entirely different message — not a repeat of
+      // the first — sent only after the first one is done.
+      fireEvent.changeText(screen.getByTestId('composer-input'), 'and one more thing')
+      fireEvent.press(screen.getByTestId('composer-send'))
+
+      await waitFor(() => expect(mockController.send).toHaveBeenCalledTimes(2))
+      expect(mockController.send).toHaveBeenLastCalledWith('researcher', 'and one more thing', [])
+    })
+  })
+
   it('stages a pasted image the same way the photo picker does', async () => {
     mockReadPasteboardAttachment.mockResolvedValue([
       {

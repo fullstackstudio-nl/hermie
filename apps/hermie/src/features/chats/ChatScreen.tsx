@@ -1251,9 +1251,17 @@ function Conversation({
         return
       }
 
+      // Captured now, not read off state again later: everything past this
+      // point clears the live `attachments` / `uploaded` state before the
+      // request that needs them has even gone out, so a catch block that read
+      // the state instead of these would find it already empty and have
+      // nothing left to put back.
+      const sentAttachments = attachments
+      const sentUploaded = uploaded
+
       const files: AttachmentInput[] = [
-        ...attachments.map(file => ({ filename: file.filename, base64: file.base64 })),
-        ...uploaded.map(file => ({ kind: 'file' as const, filename: file.filename, path: file.path }))
+        ...sentAttachments.map(file => ({ filename: file.filename, base64: file.base64 })),
+        ...sentUploaded.map(file => ({ kind: 'file' as const, filename: file.filename, path: file.path }))
       ]
 
       chat.setDraft('')
@@ -1312,7 +1320,7 @@ function Conversation({
       // Recorded BEFORE the send, so the optimistic bubble already has them:
       // that bubble is painted synchronously and would otherwise show chips
       // for a second and then swap to pictures.
-      const pictures = attachments.filter(file => file.uri)
+      const pictures = sentAttachments.filter(file => file.uri)
 
       if (pictures.length) {
         setSentImages(current => {
@@ -1328,20 +1336,42 @@ function Conversation({
         })
       }
 
+      /*
+        The tray empties HERE, before the request goes out, not after
+        `chat.send` resolves. It used to wait for that, so a failed send never
+        lost a file the reader could not retype — but a second Enter, or a
+        tap on the send button, landing while the first send was still in
+        flight found the same chips still staged and sent them again: a
+        second paid agent turn with no undo, even with an empty text field.
+
+        Emptying it now closes that gap: a second press that lands mid-flight
+        sees nothing left to attach. With no text either, `sendable` in the
+        composer refuses it outright; with text, it goes out as the plain
+        message it looks like, exactly as it does today. A failure below puts
+        `sentAttachments` and `sentUploaded` straight back, ahead of anything
+        staged in the meantime, so the one thing this used to guard against —
+        a file lost to a failed send — still cannot happen.
+      */
+      setAttachments([])
+      setUploaded([])
+
       try {
         await chat.send(body, files)
-
-        // Cleared HERE, after the send has actually been accepted, and not
-        // before it. An attachment removed optimistically was gone for good on a
-        // failure — the draft came back and the file did not, so the one thing
-        // the reader could not retype was the one thing that vanished. The tray
-        // stays on screen for the second or so the send takes, which is also the
-        // honest picture of what is happening to it.
-        setAttachments([])
-        setUploaded([])
       } catch (error) {
         // The optimistic bubble stays — the words were the user's — and the
-        // draft comes back so the message is not lost with it.
+        // draft comes back so the message is not lost with it. The
+        // attachments come back too, exactly as they were and in the same
+        // order, ahead of anything added to the tray while this send was in
+        // flight, and never duplicated with it.
+        setAttachments(current => [
+          ...sentAttachments,
+          ...current.filter(file => !sentAttachments.some(sent => sent.id === file.id))
+        ])
+        setUploaded(current => [
+          ...sentUploaded,
+          ...current.filter(file => !sentUploaded.some(sent => sent.id === file.id))
+        ])
+
         chat.setDraft(body)
         setNotice(openFailed(messageOf(error)))
       }
