@@ -181,7 +181,11 @@ export function normalizePublicUrl(raw: string, gatewayUrl: string): string {
 
   const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `${new URL(gatewayUrl).protocol}//${trimmed}`
 
-  return new URL(withScheme).origin
+  try {
+    return new URL(withScheme).origin
+  } catch {
+    throw new Error(`--public-url (or HERMIE_PUBLIC_URL) must be a URL or host (got ${raw}).`)
+  }
 }
 
 /**
@@ -216,7 +220,9 @@ export function normalizeLoginReturn(raw: string): string {
   }
 
   if (!isSameOriginPath(trimmed)) {
-    throw new Error(`--login-return must be a path on this origin, starting with a single "/" (got ${raw}).`)
+    throw new Error(
+      `--login-return (or HERMIE_LOGIN_RETURN) must be a path on this origin, starting with a single "/" (got ${raw}).`
+    )
   }
 
   return trimmed
@@ -250,16 +256,18 @@ export interface ResolveOptionsInput {
 export function resolveOptions(input: ResolveOptionsInput = {}): HermieWebOptions {
   const env = input.env ?? process.env
   const packageRoot = input.packageRoot ?? path.resolve(__dirname, '..', '..')
-  const gatewayUrl = new URL(input.gatewayUrl ?? env.HERMIE_GATEWAY_URL ?? DEFAULT_GATEWAY_URL).toString()
-  const rawPort = input.port ?? env.HERMIE_PORT ?? DEFAULT_PORT
-  const port = typeof rawPort === 'number' ? rawPort : Number.parseInt(rawPort, 10)
+  const gatewayUrl = readUrlOption(
+    input.gatewayUrl ?? env.HERMIE_GATEWAY_URL,
+    DEFAULT_GATEWAY_URL,
+    '--gateway',
+    'HERMIE_GATEWAY_URL'
+  )
+  const port = readIntOption(input.port ?? env.HERMIE_PORT, DEFAULT_PORT, '--port', 'HERMIE_PORT', {
+    min: 0,
+    max: 65_535
+  })
 
-  if (!Number.isInteger(port) || port < 0 || port > 65_535) {
-    throw new Error(`--port must be a number between 0 and 65535 (got ${String(rawPort)}).`)
-  }
-
-  const selfUpdate =
-    input.selfUpdate ?? (env.HERMIE_SELF_UPDATE === '0' || env.HERMIE_SELF_UPDATE === 'false' ? false : true)
+  const selfUpdate = input.selfUpdate ?? readBooleanEnv(env.HERMIE_SELF_UPDATE, 'HERMIE_SELF_UPDATE') ?? true
 
   return {
     gatewayUrl,
@@ -274,7 +282,7 @@ export function resolveOptions(input: ResolveOptionsInput = {}): HermieWebOption
     version: input.version ?? env.HERMIE_VERSION ?? readOwnVersion(packageRoot),
     selfUpdate,
     installRoot: path.resolve(input.installRoot ?? env.HERMIE_INSTALL_ROOT ?? path.join(packageRoot, '..')),
-    push: input.push ?? (env.HERMIE_PUSH === '1' || env.HERMIE_PUSH === 'true'),
+    push: input.push ?? readBooleanEnv(env.HERMIE_PUSH, 'HERMIE_PUSH') ?? false,
     gatewayToken: input.gatewayToken ?? env.HERMIE_GATEWAY_TOKEN ?? '',
     // NOT the install root: a self-update replaces that, and a daemon that
     // forgot its VAPID key after an update would orphan every browser
@@ -284,9 +292,77 @@ export function resolveOptions(input: ResolveOptionsInput = {}): HermieWebOption
     vapidSubject: input.vapidSubject ?? env.HERMIE_VAPID_SUBJECT ?? DEFAULT_VAPID_SUBJECT,
     pushServerRequests:
       input.pushServerRequests ??
-      (env.HERMIE_PUSH_SERVER_REQUESTS === '1' || env.HERMIE_PUSH_SERVER_REQUESTS === 'true'),
+      readBooleanEnv(env.HERMIE_PUSH_SERVER_REQUESTS, 'HERMIE_PUSH_SERVER_REQUESTS') ??
+      false,
     allowInsecureOidc:
-      input.allowInsecureOidc ?? (env.HERMIE_ALLOW_INSECURE_OIDC === '1' || env.HERMIE_ALLOW_INSECURE_OIDC === 'true')
+      input.allowInsecureOidc ?? readBooleanEnv(env.HERMIE_ALLOW_INSECURE_OIDC, 'HERMIE_ALLOW_INSECURE_OIDC') ?? false
+  }
+}
+
+/**
+ * A boolean flag's environment counterpart, checked.
+ *
+ * `1`, `true` and `yes` are on; `0`, `false` and `no` are off — case- and
+ * whitespace-insensitive, since a unit file or a Kubernetes manifest is typed
+ * by hand. Anything else is a startup failure that names the variable, rather
+ * than a typo that silently reads as "off".
+ */
+function readBooleanEnv(raw: string | undefined, envName: string): boolean | undefined {
+  if (raw === undefined || raw === '') {
+    return undefined
+  }
+
+  const normalized = raw.trim().toLowerCase()
+
+  if (normalized === '1' || normalized === 'true' || normalized === 'yes') {
+    return true
+  }
+
+  if (normalized === '0' || normalized === 'false' || normalized === 'no') {
+    return false
+  }
+
+  throw new Error(`${envName} must be 1/true/yes or 0/false/no (got ${raw}).`)
+}
+
+/**
+ * An integer flag or its environment counterpart, checked. Named after
+ * whichever of the two actually supplies a value, so a typo in a unit file is
+ * a startup failure that says where to look rather than a stack trace or a
+ * silent `NaN`.
+ */
+function readIntOption(
+  raw: string | number | undefined,
+  fallback: number,
+  flagName: string,
+  envName: string,
+  { min, max }: { min: number; max: number }
+): number {
+  if (raw === undefined) {
+    return fallback
+  }
+
+  const value = typeof raw === 'number' ? raw : Number.parseInt(raw, 10)
+
+  if (!Number.isInteger(value) || value < min || value > max) {
+    throw new Error(
+      `${flagName} (or ${envName}) must be a number between ${String(min)} and ${String(max)} (got ${String(raw)}).`
+    )
+  }
+
+  return value
+}
+
+/** A URL flag or its environment counterpart, checked — a scheme is required. */
+function readUrlOption(raw: string | undefined, fallback: string, flagName: string, envName: string): string {
+  if (raw === undefined) {
+    return new URL(fallback).toString()
+  }
+
+  try {
+    return new URL(raw).toString()
+  } catch {
+    throw new Error(`${flagName} (or ${envName}) must be a URL with a scheme (got ${raw}).`)
   }
 }
 
@@ -305,7 +381,9 @@ function readCacheMaxMb(raw: string | number | undefined): number {
   const value = typeof raw === 'number' ? raw : Number.parseFloat(raw)
 
   if (!Number.isFinite(value) || value < 0) {
-    throw new Error(`--cache-max-mb must be a number of megabytes, 0 or more (got ${String(raw)}).`)
+    throw new Error(
+      `--cache-max-mb (or HERMIE_CACHE_MAX_MB) must be a number of megabytes, 0 or more (got ${String(raw)}).`
+    )
   }
 
   return value

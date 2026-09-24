@@ -45,21 +45,24 @@ The package is scoped and the command is not: `npm i -g @hermie/web` puts a `her
 
 ## Flags
 
-Flags beat environment variables beat defaults.
+Flags beat environment variables beat defaults. A bad value in either fails at start with a message naming the flag or the variable. This is the whole configuration surface for a container — Docker or Kubernetes — since the image's `ENTRYPOINT` takes no `args`; see
+[deploy/web/README.md](../../deploy/web/README.md#flags-and-environment) for the rest (push, `--state-dir`
+and the others this shorter table leaves out) and
+[deploy/k8s/README.md](../../deploy/k8s/README.md) for worked Kubernetes manifests.
 
-| Flag                    | Environment                    | Default                  |                                                                                                                 |
-| ----------------------- | ------------------------------ | ------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| `--gateway <url>`       | `HERMIE_GATEWAY_URL`           | `http://127.0.0.1:9119`  | The gateway. Fixed at start; the only thing that can set one is `/setup`, and only while there is none.         |
-| `--port <n>`            | `HERMIE_PORT`                  | `9120`                   |                                                                                                                 |
-| `--host <addr>`         | `HERMIE_HOST`                  | `127.0.0.1`              | Anything else puts an unauthenticated port on the network.                                                      |
-| `--public-url <url>`    | `HERMIE_PUBLIC_URL`            | derived from `--gateway` | The gateway's own `dashboard.public_url`, written into `Host` and `Origin` on every proxied request.            |
-| `--static <dir>`        | `HERMIE_STATIC_DIR`            | the bundled `dist/web`   | The exported browser build.                                                                                     |
-| `--install-root`        | `HERMIE_INSTALL_ROOT`          | the package's parent     | Where self-update unpacks releases and keeps the `current` link.                                                |
-| `--no-self-update`      | `HERMIE_SELF_UPDATE=0`         | on                       | Turns `/hermie/update` into a refusal.                                                                          |
-| `--rollback`            |                                |                          | Point `current` at the previous release and exit.                                                               |
-| `--cache-max-mb <n>`    | `HERMIE_CACHE_MAX_MB`          | `64`                     | Disk the message cache may take. `0` turns it off.                                                              |
-| `--allow-insecure-oidc` | `HERMIE_ALLOW_INSECURE_OIDC=1` | off                      | Let the built-in identity provider be enabled on a non-https origin. The gateway refuses such an issuer anyway. |
-| `--help`                |                                |                          |                                                                                                                 |
+| Flag                    | Environment                             | Default                  |                                                                                                                 |
+| ----------------------- | --------------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `--gateway <url>`       | `HERMIE_GATEWAY_URL`                    | `http://127.0.0.1:9119`  | The gateway. Fixed at start; the only thing that can set one is `/setup`, and only while there is none.         |
+| `--port <n>`            | `HERMIE_PORT`                           | `9120`                   |                                                                                                                 |
+| `--host <addr>`         | `HERMIE_HOST`                           | `127.0.0.1`              | Anything else puts an unauthenticated port on the network.                                                      |
+| `--public-url <url>`    | `HERMIE_PUBLIC_URL`                     | derived from `--gateway` | The gateway's own `dashboard.public_url`, written into `Host` and `Origin` on every proxied request.            |
+| `--static <dir>`        | `HERMIE_STATIC_DIR`                     | the bundled `dist/web`   | The exported browser build.                                                                                     |
+| `--install-root`        | `HERMIE_INSTALL_ROOT`                   | the package's parent     | Where self-update unpacks releases and keeps the `current` link.                                                |
+| `--no-self-update`      | `HERMIE_SELF_UPDATE=0/false/no`         | on                       | Turns `/hermie/update` into a refusal.                                                                          |
+| `--rollback`            |                                         |                          | Point `current` at the previous release and exit.                                                               |
+| `--cache-max-mb <n>`    | `HERMIE_CACHE_MAX_MB`                   | `64`                     | Disk the message cache may take. `0` turns it off.                                                              |
+| `--allow-insecure-oidc` | `HERMIE_ALLOW_INSECURE_OIDC=1/true/yes` | off                      | Let the built-in identity provider be enabled on a non-https origin. The gateway refuses such an issuer anyway. |
+| `--help`                |                                         |                          |                                                                                                                 |
 
 It answers `GET /healthz`, `GET /hermie/config.json` and `GET|POST /hermie/update` itself, plus
 `/setup` and `/hermie/setup/*` while no gateway is configured. Everything under `/api`, `/auth`,

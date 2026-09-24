@@ -339,11 +339,19 @@ The configurations are in [deploy/web/README.md](../deploy/web/README.md); in br
 | `npx @hermie/web` | One command next to `hermes serve`. Nothing to install, nothing to update — and no supervisor.                                                                                                               |
 | A release zip     | `hermie-web.zip` from a GitHub release, unpacked under `/opt/hermie-web/releases/<version>/` with a `current` symlink. This is the layout self-update expects.                                               |
 | Docker            | `ghcr.io/fullstackstudio-nl/hermie-web`. The image is the version, so self-update refuses and points at `docker pull`.                                                                                       |
+| Kubernetes        | The same image, entirely configured from `env` — see [deploy/k8s/README.md](../deploy/k8s/README.md) for a sidecar-in-one-Pod shape and a two-Deployment shape.                                              |
 | systemd           | A unit pointing `ExecStart` at `current`, with `Restart=always` and the install root in `ReadWritePaths`.                                                                                                    |
 | TLS in front      | Caddy, nginx or `tailscale serve`. All three pass `X-Forwarded-Proto`, which is what makes the gateway issue `Secure` cookies; nginx needs the two upgrade headers spelled out or the socket never connects. |
 
 The gateway needs `dashboard.public_url` set to the address Hermie Web claims to be, and
 `dashboard.trusted_proxies` naming Hermie Web's machine if the two are not the same host.
+
+**Every flag has an environment variable.** `--gateway`, `--port`, `--host` and the rest each read an
+environment variable of the same shape (`HERMIE_GATEWAY_URL`, `HERMIE_PORT`, `HERMIE_HOST`, …) when
+the flag is absent, and `--help` names each one next to its flag. This is what lets a container be
+configured entirely through `docker run -e ...` or a Kubernetes `env`/`envFrom`, with the image's
+`ENTRYPOINT` left as `["hermie-web"]` and no `args` at all. The full table is
+[deploy/web/README.md#flags-and-environment](../deploy/web/README.md#flags-and-environment).
 
 ## What it cannot do
 

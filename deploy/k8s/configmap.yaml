@@ -1,0 +1,29 @@
+# Non-secret configuration shared by both example shapes in this directory.
+#
+# Copy this into your own manifests and edit the values — this is a worked
+# example, not something to `kubectl apply` unmodified onto a real cluster.
+# Anything that looks like a credential belongs in secret.example.yaml instead.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hermie-config
+data:
+  # --- Hermie Web (packages/hermie-web) ---
+  # See ../web/README.md#flags-and-environment for the full set. The gateway
+  # URL differs between the two shapes in this directory and is set on the
+  # Deployment itself, not here, so this ConfigMap is shared by both.
+  HERMIE_PUBLIC_URL: 'https://hermie.example.com'
+  HERMIE_HOST: '0.0.0.0'
+  HERMIE_PORT: '9120'
+  HERMIE_STATE_DIR: '/data'
+  HERMIE_CACHE_MAX_MB: '64'
+
+  # --- Hermes gateway (the hermes-agent image) ---
+  # These names are set by the Hermes image's own env-configuration work; this
+  # ConfigMap uses them ahead of that landing, so check the Hermes image docs
+  # once it has, and align the names here if they changed.
+  HERMES_DASHBOARD_PUBLIC_URL: 'https://hermie.example.com'
+  HERMES_DASHBOARD_HOST: '0.0.0.0'
+  HERMES_DASHBOARD_PORT: '9119'
+  HERMES_PROFILES_MAX: '10'
+  HERMIE_PLUGIN: 'true'

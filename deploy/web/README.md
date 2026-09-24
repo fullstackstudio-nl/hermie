@@ -66,29 +66,40 @@ A mismatch shows up as HTTP 403 on `/api/status`, or a WebSocket that refuses th
 
 ## Flags and environment
 
-| Flag                    | Environment                    | Default                  |                                                                                                                             |
-| ----------------------- | ------------------------------ | ------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
-| `--gateway <url>`       | `HERMIE_GATEWAY_URL`           | `http://127.0.0.1:9119`  | The gateway. Fixed at start; nothing at runtime can change it.                                                              |
-| `--port <n>`            | `HERMIE_PORT`                  | `9120`                   |                                                                                                                             |
-| `--host <addr>`         | `HERMIE_HOST`                  | `127.0.0.1`              | Anything else puts an unauthenticated port on the network.                                                                  |
-| `--public-url <url>`    | `HERMIE_PUBLIC_URL`            | derived from `--gateway` | Written into `Host` and `Origin` on proxied requests.                                                                       |
-| `--static <dir>`        | `HERMIE_STATIC_DIR`            | the bundled `dist/web`   |                                                                                                                             |
-| `--login-return <p>`    | `HERMIE_LOGIN_RETURN`          | `/`                      | Where a finished sign-in should land. See **OIDC** below.                                                                   |
-| `--install-root`        | `HERMIE_INSTALL_ROOT`          | the package's parent     | Where self-update unpacks releases and keeps the `current` link.                                                            |
-| `--no-self-update`      | `HERMIE_SELF_UPDATE=0`         | on                       | Turns `/hermie/update` into a refusal.                                                                                      |
-| `--rollback`            |                                |                          | Point `current` at the previous release and exit.                                                                           |
-| `--cache-max-mb <n>`    | `HERMIE_CACHE_MAX_MB`          | `64`                     | Disk the message cache may take. `0` turns it off.                                                                          |
-| `--allow-insecure-oidc` | `HERMIE_ALLOW_INSECURE_OIDC=1` | off                      | Let the built-in identity provider be enabled on a non-https origin. The gateway refuses such an issuer anyway — see below. |
+| Flag                    | Environment                             | Default                  |                                                                                                                             |
+| ----------------------- | --------------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| `--gateway <url>`       | `HERMIE_GATEWAY_URL`                    | `http://127.0.0.1:9119`  | The gateway. Fixed at start; nothing at runtime can change it.                                                              |
+| `--port <n>`            | `HERMIE_PORT`                           | `9120`                   |                                                                                                                             |
+| `--host <addr>`         | `HERMIE_HOST`                           | `127.0.0.1`              | Anything else puts an unauthenticated port on the network.                                                                  |
+| `--public-url <url>`    | `HERMIE_PUBLIC_URL`                     | derived from `--gateway` | Written into `Host` and `Origin` on proxied requests.                                                                       |
+| `--static <dir>`        | `HERMIE_STATIC_DIR`                     | the bundled `dist/web`   |                                                                                                                             |
+| `--login-return <p>`    | `HERMIE_LOGIN_RETURN`                   | `/`                      | Where a finished sign-in should land. See **OIDC** below.                                                                   |
+| `--install-root`        | `HERMIE_INSTALL_ROOT`                   | the package's parent     | Where self-update unpacks releases and keeps the `current` link.                                                            |
+| `--no-self-update`      | `HERMIE_SELF_UPDATE=0/false/no`         | on                       | Turns `/hermie/update` into a refusal.                                                                                      |
+| `--rollback`            |                                         |                          | Point `current` at the previous release and exit.                                                                           |
+| `--cache-max-mb <n>`    | `HERMIE_CACHE_MAX_MB`                   | `64`                     | Disk the message cache may take. `0` turns it off.                                                                          |
+| `--allow-insecure-oidc` | `HERMIE_ALLOW_INSECURE_OIDC=1/true/yes` | off                      | Let the built-in identity provider be enabled on a non-https origin. The gateway refuses such an issuer anyway — see below. |
+
+A container — Docker or Kubernetes — is meant to be configured entirely through this column: the
+image's `ENTRYPOINT` is `["hermie-web"]` with no `args`, so `docker run -e HERMIE_GATEWAY_URL=... image`
+or a Kubernetes `env`/`envFrom` is the whole configuration. See **Docker** below and
+[../k8s/README.md](../k8s/README.md) for worked examples.
+
+Every environment variable is validated exactly like its flag — a bad `HERMIE_PORT` or
+`HERMIE_GATEWAY_URL` fails at start with a message naming the variable, not a stack trace or a silent
+wrong default — and a flag always beats its environment variable, which beats the default above. A
+boolean one (`=1/true/yes` or `=0/false/no` above) accepts either spelling, case-insensitively;
+anything else is refused the same way, by name.
 
 And, for push (see below):
 
-| Flag                     | Environment                     | Default                     |                                                                              |
-| ------------------------ | ------------------------------- | --------------------------- | ---------------------------------------------------------------------------- |
-| `--push`                 | `HERMIE_PUSH=1`                 | off                         | Also watch every Bot Chat and notify registered devices.                     |
-| `--gateway-token <t>`    | `HERMIE_GATEWAY_TOKEN`          |                             | The session token an ungated gateway takes.                                  |
-| `--state-dir <dir>`      | `HERMIE_STATE_DIR`              | `~/.local/state/hermie-web` | Watch state, VAPID keys and any stored sign-in. Written `0600`.              |
-| `--vapid-subject <uri>`  | `HERMIE_VAPID_SUBJECT`          | `https://hermie.dev`        | `mailto:` or `https:` contact in the VAPID token (RFC 8292 §2.1).            |
-| `--push-server-requests` | `HERMIE_PUSH_SERVER_REQUESTS=1` | off                         | **Only if your gateway fans server requests out to every peer** — see below. |
+| Flag                     | Environment                              | Default                     |                                                                              |
+| ------------------------ | ---------------------------------------- | --------------------------- | ---------------------------------------------------------------------------- |
+| `--push`                 | `HERMIE_PUSH=1/true/yes`                 | off                         | Also watch every Bot Chat and notify registered devices.                     |
+| `--gateway-token <t>`    | `HERMIE_GATEWAY_TOKEN`                   |                             | The session token an ungated gateway takes.                                  |
+| `--state-dir <dir>`      | `HERMIE_STATE_DIR`                       | `~/.local/state/hermie-web` | Watch state, VAPID keys and any stored sign-in. Written `0600`.              |
+| `--vapid-subject <uri>`  | `HERMIE_VAPID_SUBJECT`                   | `https://hermie.dev`        | `mailto:` or `https:` contact in the VAPID token (RFC 8292 §2.1).            |
+| `--push-server-requests` | `HERMIE_PUSH_SERVER_REQUESTS=1/true/yes` | off                         | **Only if your gateway fans server requests out to every peer** — see below. |
 
 Endpoints it answers itself: `GET /healthz`, `GET /hermie/config.json`, `GET|POST /hermie/update`,
 `GET /hermie/cache/<id>`, `/setup` and `/hermie/setup/*` while no gateway is configured, and — with

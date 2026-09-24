@@ -1,0 +1,69 @@
+/**
+ * The `--help` text, kept out of `cli.ts` on purpose.
+ *
+ * `cli.ts` calls `main()` at module scope — it is the process entry point, and
+ * that is the right thing for a CLI to do. It also means importing `cli.ts`
+ * from anywhere else, including a test, starts the whole server. This module
+ * has no side effects, so a test can check that every flag names its
+ * environment variable without binding a port to do it.
+ */
+import { DEFAULT_CACHE_MAX_MB } from './cache'
+import { DEFAULT_GATEWAY_URL, DEFAULT_HOST, DEFAULT_PORT } from './options'
+
+export const HELP = [
+  '@hermie/web — serves Hermie in a browser and proxies one Hermes gateway',
+  '',
+  `  --gateway <url>      the gateway to proxy to (default ${DEFAULT_GATEWAY_URL}, env HERMIE_GATEWAY_URL)`,
+  `  --port <n>           listen port (default ${DEFAULT_PORT}, env HERMIE_PORT)`,
+  `  --host <addr>        bind address (default ${DEFAULT_HOST}, env HERMIE_HOST)`,
+  '  --public-url <url>   the gateway’s own dashboard.public_url; written into Host and Origin',
+  '                       on every proxied request (default: derived from --gateway,',
+  '                       env HERMIE_PUBLIC_URL)',
+  '  --static <dir>       the exported web build (default: the bundled dist/web,',
+  '                       env HERMIE_STATIC_DIR)',
+  '  --login-return <p>   where the gateway sends the browser after a sign-in (default /,',
+  '                       env HERMIE_LOGIN_RETURN). Only needed when Hermie Web and the',
+  '                       gateway’s public_url differ in PORT: the callback is fixed to',
+  '                       public_url, so the round trip has to be pointed back here.',
+  '  --install-root <dir> where releases are unpacked and the `current` link lives',
+  '                       (env HERMIE_INSTALL_ROOT)',
+  '  --no-self-update     refuse the self-update endpoints (env HERMIE_SELF_UPDATE=0/false/no)',
+  '  --rollback           switch `current` back to the previous release and exit',
+  `  --cache-max-mb <n>   disk the message cache may take (default ${String(DEFAULT_CACHE_MAX_MB)}, env HERMIE_CACHE_MAX_MB).`,
+  '                       0 turns it off. The cache holds Bot Chat TAILS on this',
+  '                       machine, which is what makes a chat paint the moment it',
+  '                       opens on a device that has never seen it. ADR-0025.',
+  '  --help',
+  '',
+  'Push (ADR-0017 — docs/web.md has the whole of it):',
+  '',
+  '  --push               also watch every Bot Chat and notify registered devices',
+  '                       (env HERMIE_PUSH=1/true/yes)',
+  '  --gateway-token <t>  the session token an ungated gateway takes (env HERMIE_GATEWAY_TOKEN)',
+  '  --state-dir <dir>    watch state, VAPID keys and any stored sign-in (env HERMIE_STATE_DIR)',
+  '  --vapid-subject <u>  mailto: or https: contact in the VAPID token (env HERMIE_VAPID_SUBJECT)',
+  '  --push-server-requests',
+  '                       ask the gateway to route approval/clarify requests to the daemon',
+  '                       (env HERMIE_PUSH_SERVER_REQUESTS=1/true/yes).',
+  '                       ONLY if your gateway fans server requests out to every peer: on one',
+  '                       that picks a single peer, the daemon receiving a question and holding',
+  '                       it open takes it away from you. Off by default; open questions are',
+  '                       read from the resume snapshot and an approval.pending poll instead.',
+  '',
+  'Built-in identity provider (ADR-0025 — off unless /admin turns it on):',
+  '',
+  '  --allow-insecure-oidc',
+  '                       let it be enabled on an origin that is not https',
+  '                       (env HERMIE_ALLOW_INSECURE_OIDC=1/true/yes). The gateway',
+  '                       REFUSES an issuer that is not https — loopback http it allows by',
+  '                       name, so that needs no flag — which makes this useful only for',
+  '                       reproducing that refusal deliberately. Not for a deployment.',
+  '',
+  '  hermie-web login [--provider <name>] [--redirect-port <n>]',
+  '                       sign in to an OIDC-gated gateway once, for --push. Prints the',
+  '                       authorisation URL and listens on a loopback redirect port.',
+  '',
+  'Binding to anything but a loopback address puts an unauthenticated port on the',
+  'network. Put TLS in front of it — Caddy, nginx or Tailscale Serve; deploy/web/README.md',
+  'has the configurations.'
+].join('\n')
