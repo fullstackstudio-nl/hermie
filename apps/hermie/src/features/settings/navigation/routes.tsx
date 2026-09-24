@@ -17,7 +17,6 @@ import * as Advanced from '../categories/Advanced'
 import * as Appearance from '../categories/Appearance'
 import * as Capabilities from '../categories/Capabilities'
 import * as ChatsMessages from '../categories/ChatsMessages'
-import * as Context from '../categories/Context'
 import * as Gateways from '../categories/Gateways'
 import * as Memory from '../categories/Memory'
 import * as Notifications from '../categories/Notifications'
@@ -46,7 +45,6 @@ const COMPONENTS: Record<SettingsRouteName, ComponentType<Record<string, never>>
 
   ChatsMessages: ChatsMessages.Page,
   Notifications: Notifications.Page,
-  Context: Context.Page,
 
   Memory: Memory.Page,
   MemoryBot: Memory.BotPage,
@@ -114,7 +112,6 @@ const CATEGORIES: Record<SettingsCategoryName, SettingsCategory> = {
   Gateways: { useSummary: Gateways.useSummary },
   ChatsMessages: { useSummary: ChatsMessages.useSummary },
   Notifications: { useSummary: Notifications.useSummary },
-  Context: { useSummary: Context.useSummary },
   Memory: { useSummary: Memory.useSummary },
   Appearance: { useSummary: Appearance.useSummary },
   Privacy: { useSummary: Privacy.useSummary },
@@ -135,7 +132,7 @@ export const settingsCategory = (name: SettingsCategoryName): SettingsCategory =
  */
 const GROUPS: readonly (readonly SettingsCategoryName[])[] = [
   ['Account', 'Gateways'],
-  ['ChatsMessages', 'Notifications', 'Context', 'Memory'],
+  ['ChatsMessages', 'Notifications', 'Memory'],
   ['Appearance', 'Privacy', 'Voice'],
   ['Capabilities'],
   ['Advanced', 'About']

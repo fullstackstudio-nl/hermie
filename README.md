@@ -134,7 +134,7 @@ no third-party network call. The only address Hermie knows is the one you typed.
   is.
 
 - **Settings, as a proper settings app.** A list of categories — Account,
-  Gateways, Chats & messages, Notifications, Context, Memory, Appearance,
+  Gateways, Chats & messages, Notifications, Memory, Appearance,
   Privacy & security, Voice, Bots & capabilities, Advanced, About — each
   opening its own page, with a one-line summary of where it stands right on the
   category row. Every page but the list carries exactly one round back button,

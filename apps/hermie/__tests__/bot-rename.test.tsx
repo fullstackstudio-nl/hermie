@@ -449,7 +449,6 @@ describe('renameBot', () => {
     useChatLayoutStore.getState().setLabel('researcher', 'De Onderzoeker')
     useChatLayoutStore.getState().setArchived('researcher', true)
     useChatLayoutStore.getState().setMute('researcher', 0)
-    useDeviceContextStore.getState().setBotNote('researcher', 'Prefers footnotes.', 10)
     await cache().write({
       bot: 'researcher',
       itemsJson: '[]',
@@ -488,7 +487,6 @@ describe('renameBot', () => {
     expect(layout.accents.researcher).toBeUndefined()
     expect(layout.archived.analyst).toBe(true)
     expect(layout.mutes.analyst).toBe(0)
-    expect(useDeviceContextStore.getState().perBot).toEqual({ analyst: 'Prefers footnotes.' })
 
     expect((await cache().read('analyst'))?.lastRowId).toBe(9)
     expect(await cache().read('researcher')).toBeNull()

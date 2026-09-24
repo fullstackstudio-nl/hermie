@@ -15,7 +15,6 @@
  */
 import { keyValueStore } from '../src/platform/key-value-store'
 import { CHAT_LAYOUT_KEY, useChatLayoutStore } from '../src/store/chat-layout'
-import { DEVICE_CONTEXT_KEY, useDeviceContextStore } from '../src/store/device-context'
 import { useSettingsStore } from '../src/store/settings'
 import { applySnapshot, snapshotFromStores, UiMetaBridge, type HermieAppShape } from '../src/store/ui-meta-bridge'
 
@@ -24,8 +23,6 @@ const settled = () => new Promise(resolve => setTimeout(resolve, 5))
 beforeEach(async () => {
   useChatLayoutStore.getState().reset()
   useSettingsStore.getState().reset()
-  useDeviceContextStore.getState().reset()
-  await keyValueStore.delete(DEVICE_CONTEXT_KEY)
   // The arrangement is persisted per gateway, so one case's dividers are the
   // next one's unless the disk is cleared with the store.
   await keyValueStore.delete(CHAT_LAYOUT_KEY)
@@ -330,130 +327,5 @@ describe('the bridge', () => {
     expect(Object.keys((writes[0]?.params?.ui_meta ?? {}) as object).sort()).toEqual(['hermie', 'hermie-app:owner'])
 
     stop()
-  })
-
-  /**
-   * The one thing a diff over the local stores cannot notice.
-   *
-   * Everything above sends because something HERE moved. The context section is
-   * keyed by person rather than by device, so one row serves a desktop and a
-   * phone both — and the phone that opens an hour later has moved nothing of its
-   * own. Nothing to diff, nothing sent, and the bot goes on being told about the
-   * desktop, which is what was reported.
-   */
-  describe('the device the person is actually on', () => {
-    /** That gateway, with a row for `owner` written from somewhere else. */
-    function gatewayHoldingAnotherDevice() {
-      const gateway = recorder()
-      const base = gateway.request
-
-      return {
-        ...gateway,
-        request: async (method: string, params?: Record<string, unknown>) => {
-          const result = (await base(method, params)) as {
-            profiles?: { ui_meta?: Record<string, unknown> }[]
-          }
-          const profile = result.profiles?.[0]
-
-          if (profile?.ui_meta) {
-            profile.ui_meta['hermie-app:owner'] = {
-              v: 1,
-              context: {
-                v: 1,
-                default: OWNER,
-                users: {
-                  [OWNER]: {
-                    device: { model: 'Mac', os: 'macOS · iOS 27.0', appVersion: '0.1.0 (1284) · 7c838c4' },
-                    timezone: 'Europe/Amsterdam',
-                    locale: 'nl-NL',
-                    updatedAt: 1_789_953_543
-                  }
-                }
-              }
-            }
-          }
-
-          return result
-        }
-      }
-    }
-
-    /** This device: signed in, facts read, and nothing of its own to report. */
-    async function onThisDevice(model: string): Promise<void> {
-      const context = useDeviceContextStore.getState()
-
-      await context.hydrate()
-      context.setIdentity({
-        baseUrl: 'http://gateway.example',
-        gated: false,
-        userId: OWNER,
-        displayName: '',
-        email: ''
-      })
-      context.refreshFacts(1_789_957_143, {
-        model,
-        os: 'iOS 27.0',
-        appVersion: '0.1.0 (1284) · 7c838c4',
-        timezone: 'Europe/Amsterdam',
-        locale: 'nl-NL'
-      })
-    }
-
-    it('claims the row when the gateway still names another machine', async () => {
-      const gateway = gatewayHoldingAnotherDevice()
-      const bridge = new UiMetaBridge({ gateway, debounceMs: 0 })
-
-      await onThisDevice('iPad Pro')
-      bridge.setUser(OWNER)
-
-      const stop = bridge.start()
-
-      await bridge.reconcile()
-      gateway.calls.length = 0
-
-      expect(bridge.claimDeviceContext(1_789_960_000)).toBe(true)
-
-      await settled()
-
-      const write = gateway.calls.find(call => call.method === 'profiles.configure')
-      const section = (write?.params?.ui_meta as Record<string, HermieAppShape> | undefined)?.['hermie-app:owner']
-      const row = section?.context?.users[OWNER] as { device?: { model?: string }; updatedAt?: number }
-
-      expect(row?.device?.model).toBe('iPad Pro')
-      // Re-dated as well as rewritten: a row that still said this morning would
-      // read as present rather than as current.
-      expect(row?.updatedAt).toBe(1_789_960_000)
-
-      stop()
-    })
-
-    it('says nothing at all on the machine that wrote it', async () => {
-      const gateway = gatewayHoldingAnotherDevice()
-      const bridge = new UiMetaBridge({ gateway, debounceMs: 0 })
-
-      await onThisDevice('Mac')
-      // The Mac reports both halves of what it is; `device-facts.ts` says why.
-      useDeviceContextStore.getState().refreshFacts(1_789_957_143, {
-        model: 'Mac',
-        os: 'macOS · iOS 27.0',
-        appVersion: '0.1.0 (1284) · 7c838c4',
-        timezone: 'Europe/Amsterdam',
-        locale: 'nl-NL'
-      })
-      bridge.setUser(OWNER)
-
-      const stop = bridge.start()
-
-      await bridge.reconcile()
-      gateway.calls.length = 0
-
-      expect(bridge.claimDeviceContext(1_789_960_000)).toBe(false)
-
-      await settled()
-
-      expect(gateway.calls).toHaveLength(0)
-
-      stop()
-    })
   })
 })

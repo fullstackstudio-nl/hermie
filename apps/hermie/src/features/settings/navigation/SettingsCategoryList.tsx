@@ -61,10 +61,10 @@ export interface SettingsCategoryListProps {
  *
  * Written out one call at a time on purpose: a summary is a HOOK, and a hook
  * cannot be called in a loop whose length this build decides. The `Record` type is
- * what keeps the list complete — a thirteenth category added to
- * `SETTINGS_CATEGORIES` and forgotten here does not compile.
+ * what keeps the list complete — a category added to `SETTINGS_CATEGORIES` and
+ * forgotten here does not compile.
  *
- * All twelve are read even where a category is hidden. That costs a store
+ * Every one is read even where a category is hidden. That costs a store
  * subscription and buys the thing the search needs: one object, with a stable hook
  * order, whatever this platform decided to show.
  */
@@ -74,7 +74,6 @@ function useCategorySummaries(): Record<SettingsCategoryName, string> {
     Gateways: settingsCategory('Gateways').useSummary(),
     ChatsMessages: settingsCategory('ChatsMessages').useSummary(),
     Notifications: settingsCategory('Notifications').useSummary(),
-    Context: settingsCategory('Context').useSummary(),
     Memory: settingsCategory('Memory').useSummary(),
     Appearance: settingsCategory('Appearance').useSummary(),
     Privacy: settingsCategory('Privacy').useSummary(),

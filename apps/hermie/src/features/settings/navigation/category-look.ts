@@ -33,7 +33,7 @@
  * this platform has no voice, or where a release build drops Advanced).
  *
  * Every one of the eight is used, and none of them more than twice. That is not a
- * rule the test enforces — it is a budget, and a thirteenth category will spend
+ * rule the test enforces — it is a budget, and a twelfth category will spend
  * the rest of it — but it is why the table looks arbitrary and is not: the second
  * use of a hue is always most of the list away from the first.
  *
@@ -88,7 +88,6 @@ export const SETTINGS_CATEGORY_LOOK: Record<SettingsCategoryName, SettingsCatego
   Gateways: { icon: 'server', tint: 'teal', blurb: () => (WEB_GATEWAY_BASE_URL ? blurb().gateway : blurb().gateways) },
   ChatsMessages: { icon: 'chats', tint: 'indigo', blurb: () => blurb().chats },
   Notifications: { icon: 'bell', tint: 'orange', blurb: () => blurb().notifications },
-  Context: { icon: 'idCard', tint: 'magenta', blurb: () => blurb().context },
   Memory: { icon: 'book', tint: 'slate', blurb: () => blurb().memory },
   Appearance: { icon: 'contrast', tint: 'violet', blurb: () => blurb().appearance },
   Privacy: { icon: 'lock', tint: 'teal', blurb: () => blurb().privacy },
@@ -103,7 +102,7 @@ export function categoryWell(name: SettingsCategoryName): string {
   return ACCENTS[SETTINGS_CATEGORY_LOOK[name].tint].bubble
 }
 
-/** Whether a route is one of the twelve categories, which is what earns a header card. */
+/** Whether a route is one of the eleven categories, which is what earns a header card. */
 export function isSettingsCategory(route: string): route is SettingsCategoryName {
   return route in SETTINGS_CATEGORY_LOOK
 }

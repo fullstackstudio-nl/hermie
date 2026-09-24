@@ -18,7 +18,7 @@ import { namespace } from '../../src/gateway/namespace'
 import { keyValueStore } from '../../src/platform/key-value-store'
 import { APP_STAMP_KEY, useAppStampStore } from '../../src/store/app-stamp'
 import { CHAT_LAYOUT_KEY, useChatLayoutStore } from '../../src/store/chat-layout'
-import { DEVICE_CONTEXT_KEY, useDeviceContextStore } from '../../src/store/device-context'
+import { useDeviceContextStore } from '../../src/store/device-context'
 import { usePluginStore } from '../../src/store/plugin'
 import { usePushStore } from '../../src/store/push'
 import { CHAT_VIEW_KEY, useSettingsStore } from '../../src/store/settings'
@@ -154,7 +154,6 @@ export async function newDevice(): Promise<void> {
   await keyValueStore.delete(NS.key(CHAT_VIEW_KEY))
   await keyValueStore.delete(NS.key(APP_STAMP_KEY))
   await keyValueStore.delete(CHAT_LAYOUT_KEY)
-  await keyValueStore.delete(DEVICE_CONTEXT_KEY)
   useSettingsStore.getState().reset()
   useAppStampStore.getState().reset()
   useChatLayoutStore.getState().reset()

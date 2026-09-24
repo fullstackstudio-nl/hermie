@@ -114,6 +114,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now lives in one `--ui-font` custom property on `:root`, used by `body` and every one of those
   shorthands, rather than the literal stack repeated in each.
 
+### Removed
+
+- **Settings → Context, and everything it sent.** A bot is no longer told your name, what you wrote
+  about yourself, your device, your app's language, or a per-conversation note — none of it is
+  collected or sent any more, on the app side or the plugin side. Most of it was already duplicated:
+  the gateway itself now confirms who is sending a message, and the timezone comes from the gateway's
+  own session rather than from this app. What is genuinely lost is the **device** (phone or Mac) and
+  the app's own **language** — a bot no longer knows either, so answers that used to lean on "you're
+  on an iPhone" or "the app is in Dutch" will not any more. If you had written something under "About
+  me / this device" or a per-conversation note, it stops being sent from this version onward; nothing
+  further is required, and the version's own local copy of it is cleared automatically.
+
 ### Fixed
 
 - **Pasting a file into the composer on the Mac no longer attaches it twice or drops its path into

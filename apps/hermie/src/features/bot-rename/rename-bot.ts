@@ -5,15 +5,13 @@
  *
  * A bot's name is not a label in this app, it is the PRIMARY KEY. The chat
  * store holds transcripts under it, the roster holds bots and watermarks under
- * it, the arrangement holds entries, folders, archive flags, colours, the name
- * the reader gave the bot and mutes under it, the device-context store holds the
- * per-bot note under it, and the
- * on-disk transcript cache has a column of it. So the moment core's
- * `PATCH /api/profiles/{name}` really renames a profile — which it does for
- * every profile except `default` — every one of those keys is pointing at a bot
- * that no longer exists, and the next roster read drops the rows rather than
- * moving them. The reader's colours, their folder, their note and their cached
- * conversation would all quietly go.
+ * it, the arrangement holds entries, folders, archive flags, colours and the
+ * name the reader gave the bot under it, and the on-disk transcript cache has a
+ * column of it. So the moment core's `PATCH /api/profiles/{name}` really
+ * renames a profile — which it does for every profile except `default` —
+ * every one of those keys is pointing at a bot that no longer exists, and the
+ * next roster read drops the rows rather than moving them. The reader's
+ * colours, their folder and their cached conversation would all quietly go.
  *
  * ## Build everything, then apply everything
  *
@@ -56,7 +54,6 @@ import { chatCacheFor } from '../../platform/chat-cache'
 import { useBotsStore, type Bot, type BotCanonicalSession } from '../../store/bots'
 import { useChatLayoutStore } from '../../store/chat-layout'
 import { useChatsStore, type QueuedMessage } from '../../store/chats'
-import { useDeviceContextStore } from '../../store/device-context'
 import type { AccentName } from '../../ui/tokens'
 
 /** What could not be moved. Empty is the whole of success. */
@@ -104,7 +101,6 @@ export async function renameBot(from: string, to: string, gatewayId: string | nu
   const bots = useBotsStore.getState()
   const chats = useChatsStore.getState()
   const layout = useChatLayoutStore.getState()
-  const context = useDeviceContextStore.getState()
 
   /* Everything that has to be put back if the writes below throw. */
   const before = {
@@ -203,16 +199,6 @@ export async function renameBot(from: string, to: string, gatewayId: string | nu
 
   if (watermark !== undefined) {
     useBotsStore.getState().markSeen(to, watermark)
-  }
-
-  /* The per-bot note, through the setter that stamps, clamps and persists. */
-  const note = context.perBot[from]
-
-  if (note) {
-    const stamp = Math.floor(Date.now() / 1000)
-
-    context.setBotNote(to, note, stamp)
-    context.setBotNote(from, '', stamp)
   }
 
   // -- the cached transcript ------------------------------------------------

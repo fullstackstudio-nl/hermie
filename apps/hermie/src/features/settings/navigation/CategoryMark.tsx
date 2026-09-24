@@ -3,7 +3,7 @@
  * category's own colour.
  *
  * One component for both sizes, because they are one mark. The row size is what
- * makes a list of twelve labels scannable — the eye finds the orange square long
+ * makes a list of eleven labels scannable — the eye finds the orange square long
  * before it reads "Notifications" — and the header size is the same square on the
  * card that opens the category, so the row somebody tapped and the page they
  * landed on are visibly the same thing.

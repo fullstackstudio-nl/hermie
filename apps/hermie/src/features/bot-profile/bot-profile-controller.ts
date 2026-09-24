@@ -6,9 +6,9 @@
  * with a hand-written `ChatGateway`, which is the only way the upload path is
  * testable at all without a photo library.
  *
- * ## What is written WHERE, and why it is three places rather than one
+ * ## What is written WHERE, and why it is two places rather than one
  *
- * A reader changing "this bot" in one sheet is touching three stores that have
+ * A reader changing "this bot" in one sheet is touching two stores that have
  * nothing to do with each other, and pretending otherwise would mean moving one
  * of them:
  *
@@ -20,14 +20,10 @@
  *    like the rest of the arrangement, and it is moving to per-account storage
  *    in a parallel round — so this calls the existing setter and restructures
  *    nothing.
- *  - **The per-bot note is the device-context store's**, through `setBotNote`.
- *    It is one key inside the `context` section that the gateway-side plugin
- *    renders into the system prompt, and it is bounded, carried and projected
- *    by machinery that already exists.
  *
- * Only the first of the three can fail in a way worth a message, which is why
- * this module is about those two calls and the other two are one line each at
- * the call site.
+ * Only the first of the two can fail in a way worth a message, which is why
+ * this module is about those two calls and the other is one line at the call
+ * site.
  *
  * ## The display name is not one of the socket calls, but it IS one of the changes
  *

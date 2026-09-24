@@ -41,7 +41,6 @@ export const SETTINGS_ROUTE_META: Record<SettingsRouteName, SettingsRouteMeta> =
 
   ChatsMessages: { title: () => category.chats, parent: 'Root' },
   Notifications: { title: () => category.notifications, parent: 'Root' },
-  Context: { title: () => category.context, parent: 'Root' },
 
   Memory: { title: () => category.memory, parent: 'Root' },
   MemoryBot: { title: () => memoryStrings.title, parent: 'Memory' },
@@ -94,7 +93,7 @@ export function isSettingsRouteVisible(name: SettingsRouteName): boolean {
  *
  * What the sidebar's search reads. A reader looking for the licences types
  * "licence", and the word is on a page two levels down from About — so a search
- * over the twelve category names alone would answer nothing while the thing sat
+ * over the eleven category names alone would answer nothing while the thing sat
  * right there in the registry. Derived from the same `parent` links the back
  * walk uses, so a route added anywhere is searchable the moment it exists —
  * except a route this build does not have, which must not be searchable either.

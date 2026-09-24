@@ -16,15 +16,6 @@ const orList = (items: string[]): string => {
   return `${items.slice(0, -1).join(', ')} of ${items[items.length - 1]}`
 }
 
-/** `a, b en c`, voor de zin die opsomt wat een bot verder nog te horen krijgt. */
-const andList = (items: string[]): string => {
-  if (items.length <= 1) {
-    return items[0] ?? ''
-  }
-
-  return `${items.slice(0, -1).join(', ')} en ${items[items.length - 1]}`
-}
-
 export const app: Translation<typeof strings> = {
   app: {
     loading: 'Starten…'
@@ -519,7 +510,6 @@ export const app: Translation<typeof strings> = {
       gateway: 'Gateway',
       chats: 'Chats en berichten',
       notifications: 'Meldingen',
-      context: 'Context over jou',
       memory: 'Geheugen',
       appearance: 'Weergave',
       privacy: 'Privacy en beveiliging',
@@ -533,7 +523,6 @@ export const app: Translation<typeof strings> = {
         gateway: 'Welke gateway dit is, en hoe het daarmee gaat.',
         chats: 'Wat een nieuw gesprek laat zien, en hoe een bot wordt aangesproken.',
         notifications: 'Wanneer een bot je mag bereiken, en hoeveel een melding zegt.',
-        context: 'Wat een bot over jou en dit apparaat te horen krijgt.',
         memory: 'Wat elke bot tussen gesprekken onthoudt.',
         appearance: 'Licht of donker, de taal, de tekstgrootte en het thema.',
         privacy: 'De vergrendeling op dit apparaat, en wat nodig is om hem te openen.',
@@ -550,8 +539,6 @@ export const app: Translation<typeof strings> = {
         on: 'Aan',
         off: 'Uit',
         notificationKinds: (count: number) => (count === 1 ? 'Aan · 1 soort' : `Aan · ${count} soorten`),
-        shared: 'Gedeeld',
-        notShared: 'Niet gedeeld',
         bots: (count: number) => (count === 1 ? '1 bot' : `${count} bots`),
         capabilities: 'Skills · MCP · Connectors',
         lockBrowser: 'Niet in een browser',
@@ -622,41 +609,6 @@ export const app: Translation<typeof strings> = {
       statusUnsupported: (detail: string) => `Dit apparaat kan zich niet registreren: ${detail}`,
       retry: 'Opnieuw',
       retryHint: 'Vraagt opnieuw om toestemming en vraagt opnieuw een push token aan.'
-    },
-
-    context: {
-      hint: 'Je bots krijgen te horen met wie ze praten en waarop je zit. Het wordt aan het begin van een gesprek toegevoegd, niet aan de berichten.',
-      unavailable: 'Er moet een gateway verbonden zijn voordat er een plek is om dit te bewaren.',
-
-      noticeTitle: 'Voordat dit gedeeld wordt',
-      notice:
-        'Wordt bewaard in het gateway-profiel; iedereen met toegang tot deze gateway kan het lezen. Dat geldt ook voor je naam, je apparaat en alles wat je hieronder schrijft.',
-      noticeConfirm: 'Ik snap het — deel het',
-      noticeDecline: 'Nu niet',
-      noticePending: 'Er is nog niets gedeeld.',
-
-      displayName: 'Gebruik mijn naam',
-      displayNameValue: 'Naam verstuurd',
-      displayNameSource: 'Uit je inlog op de gateway',
-      displayNameNone: 'Nog geen naam bekend',
-
-      about: 'Over mij / dit apparaat',
-      aboutHint:
-        'Leeg tot je iets schrijft. Daarna wordt het aan elk gesprek op deze gateway toegevoegd — zet dit uit om het niet meer mee te sturen.',
-      aboutPlaceholder: 'Wat een bot over je zou moeten weten',
-      aboutCount: (used: number, limit: number) => `${used} van ${limit} tekens`,
-
-      device: 'Dit apparaat',
-      deviceHint: 'Wordt altijd meegestuurd, zodat een bot met de juiste tijd en de juiste taal kan antwoorden.',
-      deviceModel: 'Apparaat',
-      deviceOs: 'Systeem',
-      deviceTimezone: 'Tijdzone',
-      deviceLocale: 'Taal',
-
-      perBot: 'Per gesprek',
-      perBotHint: 'Een notitie die alleen die bot ziet, bovenop alles hierboven.',
-      perBotPlaceholder: 'Niets extra’s',
-      perBotEmpty: 'Nog geen bots op deze gateway.'
     },
 
     gateways: {
@@ -871,15 +823,6 @@ export const app: Translation<typeof strings> = {
     descriptionPlaceholder: 'Waar deze bot voor is',
     colour: 'KLEUR',
     colourHint: 'Alleen deze chat. Het kleurt de bubbels, de ring om de avatar en de rij in de lijst.',
-
-    context: 'CONTEXT VOOR DEZE BOT',
-    contextPlaceholder: 'Niets extra’s',
-    contextCount: (used: number, limit: number) => `${used} van ${limit} tekens`,
-    contextAlso: (parts: string[]) => `Deze bot krijgt ook ${andList(parts)}.`,
-    contextAlsoName: 'je naam',
-    contextAlsoAbout: 'wat je over jezelf hebt geschreven',
-    contextAlsoDevice: 'dit apparaat',
-    contextSettingsLink: 'Wijzigen bij Instellingen → Context',
 
     about: 'OVER DEZE BOT',
     session: 'Sessie',

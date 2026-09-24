@@ -84,7 +84,7 @@ export interface ChatRuntimeValue {
 }
 
 /**
- * The identity the context section is written under.
+ * The identity this device's chats and `ui_meta` profile are read under.
  *
  * `/api/auth/me` is the only thing that knows, and it is asked once per ready
  * edge rather than held in the stored config: a config written by an older
@@ -126,8 +126,8 @@ async function readIdentity(
 
   if (!http) {
     // Gated, and no REST half to ask. Empty rather than the owner id: writing
-    // somebody's context under a name the gateway never agreed to is worse
-    // than writing none.
+    // to a profile under a name the gateway never agreed to is worse than
+    // writing to none.
     return { baseUrl, gated: true, userId: '', displayName: '', email: '' }
   }
 
@@ -281,8 +281,8 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
-    // The reader's switches have to be in memory before the first projection or
-    // the defaults would travel as though they were decisions.
+    // One-time cleanup of what a build before HERM-119 left on disk; see
+    // `store/device-context.ts`.
     void useDeviceContextStore.getState().hydrate()
     // Before the first chat is drawn, because "read replies aloud" is armed by
     // a transcript effect: a chat opened against an unhydrated store would take
@@ -311,7 +311,6 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
         one gateway's rows from being offered to the next.
       */
       usePushStore.getState().applyRemote({ others: {}, seen: {} })
-      useDeviceContextStore.getState().applyRemote({ others: {}, remoteDefault: '', own: null })
       // No gateway, so nobody is "the reader" by id: every row draws as their own.
       useOwnAuthorStore.getState().bind(null)
       setValue(null)
@@ -603,8 +602,7 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     */
     setPushRetire(async () => {
       await push.retire()
-      // The identity and everybody else's context rows belong to the gateway
-      // that is going away; the reader's own switches do not, and survive.
+      // The identity belongs to the gateway that is going away.
       useDeviceContextStore.getState().retire()
       await uiMeta.sync.flush()
     })
@@ -673,13 +671,14 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
     wasReady.current = true
     void value.bots.refresh().catch(() => undefined)
     /*
-      Who the gateway thinks this is, for the context section.
+      Who the gateway thinks this is.
 
       Read here rather than taken from the stored config, for two reasons: a
       setup saved by an older build has no user id in it at all, and a display
       name is the gateway's to change. A session-token gateway has nobody to ask
-      about — there are no accounts — so it answers with the fixed owner id that
-      makes the plugin's "the only registered person" branch a hit.
+      about — there are no accounts — so it answers with the fixed owner id
+      that makes "my chats" and the `ui_meta` profile a hit rather than a coin
+      toss.
     */
     void (async () => {
       const identity = await readIdentity(config, http).catch(() => null)
@@ -714,12 +713,6 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
       // And deliberately AFTER the roster: the key lives on the default profile,
       // and which profile that is comes out of `profiles.list`.
       await value.uiMeta.reconcile().catch(() => undefined)
-      /*
-        And, with the gateway's copy now in hand, whether the row it holds for
-        this person describes the machine they are actually sitting at. A no-op
-        on the device that wrote it — see `UiMetaBridge.claimDeviceContext`.
-      */
-      value.uiMeta.claimDeviceContext()
       /*
         Only NOW can the roster know which chats are this reader's own.
 
@@ -850,16 +843,6 @@ export function ChatRuntimeProvider({ children }: { children: ReactNode }) {
         // means anything while somebody is actually looking.
         runtime.push.setForeground(true)
         void runtime.push.refresh().catch(() => undefined)
-        // A new build, a flight across a timezone, a phone that was renamed
-        // while the app was away. A no-op when nothing actually moved.
-        useDeviceContextStore.getState().refreshFacts(Math.floor(Date.now() / 1000))
-        /*
-          And the other half of the same question, which no amount of reading
-          this device can answer: the person may have been talking to the same
-          bot from another one while this app was away, in which case the row
-          on the gateway is that machine's. A no-op when it is still this one.
-        */
-        runtime.uiMeta.claimDeviceContext()
         /*
           And the mutes that lapsed while the phone was in a drawer.
 

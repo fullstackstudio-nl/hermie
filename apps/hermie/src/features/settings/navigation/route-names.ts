@@ -16,7 +16,6 @@ export type SettingsParamList = {
   GatewayAdd: undefined
   ChatsMessages: undefined
   Notifications: undefined
-  Context: undefined
   Memory: undefined
   MemoryBot: { profile: string }
   Appearance: undefined
@@ -53,7 +52,6 @@ const ROUTE_SET: Record<SettingsRouteName, true> = {
   GatewayAdd: true,
   ChatsMessages: true,
   Notifications: true,
-  Context: true,
   Memory: true,
   MemoryBot: true,
   Appearance: true,
@@ -84,7 +82,6 @@ export const SETTINGS_CATEGORIES = [
   'Gateways',
   'ChatsMessages',
   'Notifications',
-  'Context',
   'Memory',
   'Appearance',
   'Privacy',

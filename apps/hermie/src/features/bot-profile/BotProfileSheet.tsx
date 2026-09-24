@@ -15,9 +15,6 @@
  *    list's own setting, it rides to the gateway with the rest of the
  *    arrangement on ADR-0016's debounce, and a swatch that needed confirming
  *    would be the only one in the app that did.
- *  - **The per-bot note** calls `setBotNote` as it is typed, exactly as the same
- *    field in Settings → Context does. The device-context store stamps and
- *    persists; the `ui_meta` bridge notices the projection changed and sends it.
  *  - **Description and photo** are `profiles.configure` and
  *    `profiles.set_asset`, which are writes to the profile on the gateway's
  *    disk. Those wait for Save, and Save is what reports a failure.
@@ -43,18 +40,8 @@
  * Renaming the profile itself is still a separate act behind its own
  * disclosure; that one needs `http`, needs the stores rekeyed, and lives in
  * `features/bot-rename`.
- *
- * ## The sharing notice is not asked twice
- *
- * On a gateway with accounts, nothing is projected into the context section
- * until the reader has been shown who can read it and said yes — and that
- * answer belongs to the gateway, not to the screen it was given on. So this
- * reads the same `needsSharingNotice` and calls the same `acknowledge` as
- * Settings → Context: a reader who accepted it there is not asked here, and
- * accepting it here settles it there.
  */
 import type { GatewayHttp } from '@hermie/gateway-client'
-import { CONTEXT_LIMITS } from '@hermie/gateway-client/context'
 import { prettyModelName, type ContextUsage } from '@hermie/transcript'
 import { useCallback, useEffect, useState } from 'react'
 import { View } from 'react-native'
@@ -65,7 +52,6 @@ import { contextSummary } from '../../chat-ui/ContextMeter'
 import { Avatar } from '../../chat-ui/primitives/Avatar'
 import { chatStrings } from '../../chat-ui/strings'
 import { useChatLayoutStore } from '../../store/chat-layout'
-import { effectiveDisplayName, needsSharingNotice, useDeviceContextStore } from '../../store/device-context'
 import { botNames, useHideHandleWhenNamed, useNameOrder } from '../../store/bot-names'
 import type { Bot } from '../../store/bots'
 import { AccentSwatches } from '../../ui/AccentSwatches'
@@ -87,8 +73,6 @@ import { CapabilitiesSheet } from '../profiles/CapabilitiesSheet'
 import { profileStrings } from '../profiles/strings'
 import { clearAvatar, changesFor, saveDescription, uploadAvatar } from './bot-profile-controller'
 import { pickAvatar } from './avatar'
-
-const stamp = (): number => Math.floor(Date.now() / 1000)
 
 export interface BotProfileSheetProps {
   visible: boolean
@@ -231,18 +215,6 @@ export function BotProfileSheet({
 
   const accent = useChatLayoutStore(state => state.accents[bot.name] ?? 'default')
   const setAccent = useChatLayoutStore(state => state.setAccent)
-
-  const note = useDeviceContextStore(state => state.perBot[bot.name] ?? '')
-  const setBotNote = useDeviceContextStore(state => state.setBotNote)
-  const shareDisplayName = useDeviceContextStore(state => state.shareDisplayName)
-  const shareAbout = useDeviceContextStore(state => state.shareAbout)
-  // The same fallback ladder the Settings row prints, so this line cannot say a
-  // name is withheld while the projection is sending one.
-  const contextDisplayName = useDeviceContextStore(effectiveDisplayName)
-  const contextAbout = useDeviceContextStore(state => state.about)
-  const pendingNotice = useDeviceContextStore(needsSharingNotice)
-  const contextBaseUrl = useDeviceContextStore(state => state.baseUrl)
-  const acknowledge = useDeviceContextStore(state => state.acknowledge)
 
   const onPickPhoto = useCallback(async () => {
     setError(null)
@@ -396,18 +368,6 @@ export function BotProfileSheet({
     [bot, gatewayId, http, onSaved]
   )
 
-  /*
-    What this bot gets BESIDES the note, said in the same breath as the note
-    itself. It is read off the switches as they stand rather than described in
-    general, because the whole complaint the Settings screen answers is that a
-    reader cannot decide about a value they cannot see.
-  */
-  const alsoParts: string[] = [
-    ...(shareDisplayName && contextDisplayName ? [text.contextAlsoName] : []),
-    ...(shareAbout && contextAbout ? [text.contextAlsoAbout] : []),
-    text.contextAlsoDevice
-  ]
-
   const shown = avatar === null ? undefined : (avatar?.uri ?? avatarUri)
 
   return (
@@ -475,51 +435,6 @@ export function BotProfileSheet({
             />
           </InsetRow>
         </InsetGroup>
-
-        {/*
-          The notice, or the field — never both. Showing the field under a notice
-          that has not been accepted would be offering a control whose effect is
-          suspended, which is the same call `ContextSection` makes.
-        */}
-        {pendingNotice ? (
-          <InsetGroup footer={strings.settings.context.noticePending} header={text.context}>
-            <InsetRow>
-              <Text variant="body">{strings.settings.context.noticeTitle}</Text>
-              <Text color="textMuted" testID={`${testID}-notice`} variant="meta">
-                {strings.settings.context.notice}
-              </Text>
-            </InsetRow>
-            <InsetButtonRow
-              onPress={() => acknowledge(contextBaseUrl)}
-              testID={`${testID}-notice-accept`}
-              title={strings.settings.context.noticeConfirm}
-            />
-          </InsetGroup>
-        ) : (
-          <InsetGroup header={text.context}>
-            <InsetRow>
-              <TextField
-                multiline
-                maxLength={CONTEXT_LIMITS.perBot}
-                onChangeText={next => setBotNote(bot.name, next, stamp())}
-                placeholder={text.contextPlaceholder}
-                testID={`${testID}-note`}
-                value={note}
-              />
-              <Text color="textMuted" variant="meta">
-                {text.contextCount(note.length, CONTEXT_LIMITS.perBot)}
-              </Text>
-            </InsetRow>
-            <InsetRow>
-              <Text color="textMuted" testID={`${testID}-note-also`} variant="meta">
-                {text.contextAlso(alsoParts)}
-              </Text>
-              <Text color="textFaint" variant="micro">
-                {text.contextSettingsLink}
-              </Text>
-            </InsetRow>
-          </InsetGroup>
-        )}
 
         {/*
           One row, because the three groups behind it are one question: what can

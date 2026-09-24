@@ -940,7 +940,6 @@ const stringsEn = {
       gateway: 'Gateway',
       chats: 'Chats & messages',
       notifications: 'Notifications',
-      context: 'Context about you',
       memory: 'Memory',
       appearance: 'Appearance',
       privacy: 'Privacy & security',
@@ -963,7 +962,6 @@ const stringsEn = {
         gateway: 'Which gateway this is, and how it is doing.',
         chats: 'What a new conversation shows, and how a bot is addressed.',
         notifications: 'When a bot may reach you, and how much a notification says.',
-        context: 'What a bot is told about you and this device.',
         memory: 'What each bot remembers between conversations.',
         appearance: 'Light or dark, the language, the text size and the theme.',
         privacy: 'The lock on this device, and what it takes to open it.',
@@ -981,8 +979,6 @@ const stringsEn = {
         on: 'On',
         off: 'Off',
         notificationKinds: (count: number) => (count === 1 ? 'On · 1 kind' : `On · ${count} kinds`),
-        shared: 'Shared',
-        notShared: 'Not shared',
         bots: (count: number) => (count === 1 ? '1 bot' : `${count} bots`),
         capabilities: 'Skills · MCP · Connectors',
         lockBrowser: 'Not in a browser',
@@ -1105,55 +1101,6 @@ const stringsEn = {
       statusUnsupported: (detail: string) => `This device cannot register: ${detail}`,
       retry: 'Retry',
       retryHint: 'Asks for permission again and re-requests a push token.'
-    },
-
-    /**
-     * The device context the gateway plugin renders into a bot's prompt.
-     *
-     * Two jobs for the wording here, and the second is the harder one. The
-     * first is to say what a bot will be told. The second is to be honest about
-     * WHERE it is kept: this is not a setting on the phone, it is a section in
-     * the gateway's own profile, and on a gateway shared with other people they
-     * can read it. So the device facts are shown back verbatim rather than
-     * described, and on a gateway with accounts nothing is written at all until
-     * the reader has read that sentence and said yes.
-     */
-    context: {
-      header: 'Context',
-      hint: 'Your bots are told who they are talking to and what you are on. It is added to the start of a conversation, not to the messages.',
-      unavailable: 'A gateway has to be connected before there is anywhere to keep this.',
-
-      noticeTitle: 'Before this is shared',
-      notice:
-        'Stored in the gateway profile; everyone with access to this gateway can read it. That includes your name, your device and anything you write below.',
-      noticeConfirm: 'I understand — share it',
-      noticeDecline: 'Not now',
-      noticePending: 'Nothing has been shared yet.',
-
-      displayName: 'Use my name',
-      displayNameValue: 'Name sent',
-      displayNameSource: 'From your gateway sign-in',
-      displayNameNone: 'No name known yet',
-
-      about: 'About me / this device',
-      aboutHint:
-        'Empty until you write something. Once you do, it is added to every conversation on this gateway — turn this off to stop sending it.',
-      aboutPlaceholder: 'What a bot should know about you',
-      aboutCount: (used: number, limit: number) => `${used} of ${limit} characters`,
-
-      device: 'This device',
-      deviceHint: 'Always sent, so a bot can answer with the right time and the right language.',
-      deviceModel: 'Device',
-      deviceOs: 'System',
-      deviceApp: 'Hermie',
-      deviceTimezone: 'Timezone',
-      deviceLocale: 'Language',
-      deviceUnknown: '—',
-
-      perBot: 'Per conversation',
-      perBotHint: 'A note only that bot sees, on top of everything above.',
-      perBotPlaceholder: 'Nothing extra',
-      perBotEmpty: 'No bots on this gateway yet.'
     },
 
     /**
@@ -1524,16 +1471,6 @@ const stringsEn = {
     colour: 'COLOUR',
     colourHint: 'This chat only. It tints the bubbles, the avatar ring and the row in the list.',
 
-    context: 'CONTEXT FOR THIS BOT',
-    contextPlaceholder: 'Nothing extra',
-    contextCount: (used: number, limit: number) => `${used} of ${limit} characters`,
-    /** What the bot is told BESIDES this note, as the Settings switches stand. */
-    contextAlso: (parts: string[]) => `This bot also gets ${andList(parts)}.`,
-    contextAlsoName: 'your name',
-    contextAlsoAbout: 'what you wrote about yourself',
-    contextAlsoDevice: 'this device',
-    contextSettingsLink: 'Change in Settings → Context',
-
     about: 'ABOUT THIS BOT',
     model: 'Model',
     provider: 'Provider',
@@ -1547,17 +1484,6 @@ const stringsEn = {
     photoFailed: 'That photo could not be uploaded.'
   }
 } as const
-
-/** `a, b and c` — the sentence form the context line needs, which `list` does not give. */
-function andList(items: string[]): string {
-  if (items.length <= 1) {
-    return items[0] ?? ''
-  }
-
-  const head = items.slice(0, -1).join(', ')
-
-  return `${head} and ${items[items.length - 1]}`
-}
 
 /*
  * The English table above is the SOURCE, and `localised` is what makes it one

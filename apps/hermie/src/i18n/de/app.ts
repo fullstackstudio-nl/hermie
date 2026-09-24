@@ -8,9 +8,9 @@ import type { Translation } from '../catalogue'
 import type { strings } from '../strings'
 
 /**
- * The two sentence joins the English table builds with its own `list` and
- * `andList` helpers. They are rebuilt here rather than imported because the
- * conjunction is the part that changes: `or` is `oder`, `and` is `und`.
+ * The sentence join the English table builds with its own `list` helper.
+ * Rebuilt here rather than imported because the conjunction is the part that
+ * changes: `or` is `oder`.
  */
 const orList = (items: string[]): string => {
   if (items.length <= 1) {
@@ -18,14 +18,6 @@ const orList = (items: string[]): string => {
   }
 
   return `${items.slice(0, -1).join(', ')} oder ${items[items.length - 1]}`
-}
-
-const andList = (items: string[]): string => {
-  if (items.length <= 1) {
-    return items[0] ?? ''
-  }
-
-  return `${items.slice(0, -1).join(', ')} und ${items[items.length - 1]}`
 }
 
 export const app: Translation<typeof strings> = {
@@ -531,7 +523,6 @@ export const app: Translation<typeof strings> = {
       gateway: 'Gateway',
       chats: 'Chats und Nachrichten',
       notifications: 'Mitteilungen',
-      context: 'Kontext über dich',
       memory: 'Gedächtnis',
       appearance: 'Darstellung',
       privacy: 'Datenschutz und Sicherheit',
@@ -545,7 +536,6 @@ export const app: Translation<typeof strings> = {
         gateway: 'Welches Gateway das ist, und wie es darum steht.',
         chats: 'Was ein neues Gespräch zeigt, und wie ein Bot angesprochen wird.',
         notifications: 'Wann ein Bot dich erreichen darf, und wie viel eine Mitteilung sagt.',
-        context: 'Was ein Bot über dich und dieses Gerät erfährt.',
         memory: 'Was sich jeder Bot zwischen Gesprächen merkt.',
         appearance: 'Hell oder dunkel, die Sprache, die Textgröße und das Thema.',
         privacy: 'Die Sperre auf diesem Gerät, und was nötig ist, um sie zu öffnen.',
@@ -562,8 +552,6 @@ export const app: Translation<typeof strings> = {
         on: 'An',
         off: 'Aus',
         notificationKinds: (count: number) => (count === 1 ? 'An · 1 Art' : `An · ${count} Arten`),
-        shared: 'Geteilt',
-        notShared: 'Nicht geteilt',
         bots: (count: number) => (count === 1 ? '1 Bot' : `${count} Bots`),
         capabilities: 'Skills · MCP · Connectors',
         lockBrowser: 'Nicht im Browser',
@@ -635,41 +623,6 @@ export const app: Translation<typeof strings> = {
       statusUnsupported: (detail: string) => `Dieses Gerät kann sich nicht registrieren: ${detail}`,
       retry: 'Wiederholen',
       retryHint: 'Fragt erneut nach der Berechtigung und fordert ein neues Push-Token an.'
-    },
-
-    context: {
-      header: 'Kontext',
-      hint: 'Deinen Bots wird gesagt, mit wem sie sprechen und womit du unterwegs bist. Es wird an den Anfang einer Unterhaltung gesetzt, nicht an die Nachrichten.',
-      unavailable: 'Es muss ein Gateway verbunden sein, damit es einen Ort dafür gibt.',
-
-      noticeTitle: 'Bevor das geteilt wird',
-      notice:
-        'Wird im Gateway-Profil gespeichert; jeder mit Zugang zu diesem Gateway kann es lesen. Dazu gehören dein Name, dein Gerät und alles, was du unten schreibst.',
-      noticeConfirm: 'Verstanden — teilen',
-      noticeDecline: 'Jetzt nicht',
-      noticePending: 'Es wurde noch nichts geteilt.',
-
-      displayName: 'Meinen Namen verwenden',
-      displayNameValue: 'Name wird gesendet',
-      displayNameSource: 'Aus deiner Gateway-Anmeldung',
-      displayNameNone: 'Noch kein Name bekannt',
-
-      about: 'Über mich / dieses Gerät',
-      aboutHint:
-        'Leer, bis du etwas schreibst. Sobald du es tust, wird es jeder Unterhaltung auf diesem Gateway hinzugefügt — schalte das aus, um es nicht mehr zu senden.',
-      aboutPlaceholder: 'Was ein Bot über dich wissen sollte',
-      aboutCount: (used: number, limit: number) => `${used} von ${limit} Zeichen`,
-
-      device: 'Dieses Gerät',
-      deviceHint: 'Wird immer gesendet, damit ein Bot mit der richtigen Zeit und der richtigen Sprache antworten kann.',
-      deviceModel: 'Gerät',
-      deviceTimezone: 'Zeitzone',
-      deviceLocale: 'Sprache',
-
-      perBot: 'Pro Unterhaltung',
-      perBotHint: 'Eine Notiz, die nur dieser Bot sieht, zusätzlich zu allem oben.',
-      perBotPlaceholder: 'Nichts Zusätzliches',
-      perBotEmpty: 'Noch keine Bots auf diesem Gateway.'
     },
 
     gateways: {
@@ -891,15 +844,6 @@ export const app: Translation<typeof strings> = {
     descriptionPlaceholder: 'Wofür dieser Bot da ist',
     colour: 'FARBE',
     colourHint: 'Nur dieser Chat. Sie tönt die Sprechblasen, den Ring um den Avatar und die Zeile in der Liste.',
-
-    context: 'KONTEXT FÜR DIESEN BOT',
-    contextPlaceholder: 'Nichts Zusätzliches',
-    contextCount: (used: number, limit: number) => `${used} von ${limit} Zeichen`,
-    contextAlso: (parts: string[]) => `Dieser Bot bekommt außerdem ${andList(parts)}.`,
-    contextAlsoName: 'deinen Namen',
-    contextAlsoAbout: 'was du über dich geschrieben hast',
-    contextAlsoDevice: 'dieses Gerät',
-    contextSettingsLink: 'Ändern unter Einstellungen → Kontext',
 
     about: 'ÜBER DIESEN BOT',
     model: 'Modell',
