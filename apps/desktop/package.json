@@ -1,6 +1,6 @@
 {
   "name": "@hermie/desktop",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "private": true,
   "description": "Hermie desktop shell — a webview over a Hermie Web instance (Tauri 2)",
   "type": "module",

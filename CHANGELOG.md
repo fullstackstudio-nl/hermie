@@ -7,8 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-09-24
+
+### Added
+
+- **Hermie Web configures itself from the environment.** Every command-line option now has an
+  environment variable (`HERMIE_GATEWAY_URL`, `HERMIE_PUBLIC_URL`, `HERMIE_STATE_DIR`, …), so a
+  container or a Kubernetes Deployment can set it up without overriding its arguments. `--help`
+  names the variable next to each option, and a bad value stops the start with the variable's name.
+  `deploy/k8s/` has sidecar and standalone examples with probes, a NetworkPolicy and a restricted
+  security context.
+- **A container image for Hermie Web.** Every release now publishes
+  `ghcr.io/fullstackstudio-org/hermie-web` for amd64 and arm64, tagged with the version.
+- **Switch off sign-in with SSO.** `HERMIE_OIDC=0` hides the SSO option in the web app and makes
+  Hermie Web refuse the gateway's SSO routes, whatever the spelling of the path; password sign-in,
+  also from the native app, keeps working.
+- **Admins from the container.** `HERMIE_ADMINS` names gateway user ids that are always Hermie Web
+  admins and cannot be removed from the admin pages; admins added by hand are kept as before.
+  `HERMIE_LOCAL_ADMIN_PASSWORD_HASH` sets the local admin password as a hash, and
+  `hermie-web hash-secret` makes one.
+- **Hermie Web on a domain of its own.** With `--pass-host` and `--web-public-url`, Hermie Web sends
+  its own address to a gateway that lists it in `dashboard.public_urls`, so sign-in, SSO included,
+  comes back to Hermie Web's own domain. At start it checks that the gateway accepts the address
+  and falls back to the old behaviour, with a line saying what to add, when it does not.
+
+### Security
+
+- **Hermie Web no longer disguises another site's requests as its own.** It rewrote every browser
+  `Origin` to the gateway's own, which switched off the gateway's cross-origin checks for requests
+  that came through Hermie Web. Only Hermie Web's own origin is rewritten now; any other origin
+  reaches the gateway as sent and is refused there unless the gateway lists it.
+
 ### Fixed
 
+- **The text-size choices fit on a phone.** "Standaard" and "Extra groot" were cut off in the chat
+  options on a phone; each choice is now as wide as its label, so all four fit in English, Dutch
+  and German. The export row reads "Export" instead of "EXPORT".
+- **Hermie Web reports its own version again.** Its version number was left behind at 0.1.6 by the
+  release script; it now moves with the app's, and a test fails when the versions disagree.
 - **A sent message no longer stays behind in the composer.** On the Mac, and on an iPad with a
   keyboard, a key pressed straight after Return could reach the field before the clear did — and
   the field then reported the sent message with that key stuck to it, which became the draft. For
@@ -3064,4 +3100,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `expo-glass-effect`, `expo-blur` and `expo-linear-gradient` are new dependencies. `npx expo-doctor`
   stays at 18/18.
 
-[Unreleased]: https://github.com/fullstackstudio-org/hermie/compare/main...HEAD
+[Unreleased]: https://github.com/fullstackstudio-org/hermie/compare/v0.1.9...HEAD
+[0.1.9]: https://github.com/fullstackstudio-org/hermie/compare/v0.1.8...v0.1.9
