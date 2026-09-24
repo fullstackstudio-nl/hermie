@@ -7,6 +7,8 @@
  * permission refused while the reader's finger is still down, and a result
  * arriving for a session that has already been replaced.
  */
+import { act, renderHook } from '@testing-library/react-native'
+
 import {
   anchorAt,
   DICTATION_IDLE,
@@ -15,7 +17,7 @@ import {
   type DictationAnchor
 } from '../src/features/voice/dictation'
 import { HOLD_MS, PRESS_IDLE, pressIn, pressOut } from '../src/features/voice/press-to-talk'
-import { noticeFor } from '../src/features/voice/useComposerDictation'
+import { noticeFor, useComposerDictation } from '../src/features/voice/useComposerDictation'
 import type { RecognitionEngine, RecognitionPermission, RecognitionRequest } from '../src/platform/platform-contracts'
 
 function fakeEngine(over: { available?: boolean; permission?: RecognitionPermission } = {}) {
@@ -253,6 +255,55 @@ describe('hold to talk, or tap to toggle', () => {
     // Without this the release would stop an already-idle recognizer, which on
     // a slow tap would also cut a session the NEXT press had just started.
     expect(pressOut(down.state, 2000 + HOLD_MS + 50).do).toBe('none')
+  })
+})
+
+/*
+  A send in the middle of a session.
+
+  Every result is written as the anchor PLUS the whole transcript, so a result
+  that arrives after the draft was sent does not add to an empty field — it puts
+  the entire sent sentence back. Tapping the mic off asks the recognizer for its
+  final result, which arrives a moment later, and a Return in that moment is
+  exactly the reader's report: the message went, and its words are still in the
+  field.
+*/
+describe('dictating into a draft that is then sent', () => {
+  it('stops the session and never writes the sent words back', async () => {
+    const engine = fakeEngine()
+    const writes: string[] = []
+    const { rerender, result } = renderHook(
+      ({ value }: { value: string }) =>
+        useComposerDictation({ engine, onChangeText: text => void writes.push(text), value }),
+      { initialProps: { value: '' } }
+    )
+
+    act(() => result.current.onPressIn())
+    await act(async () => undefined)
+
+    act(() => engine.partial('hello there'))
+    rerender({ value: 'hello there' })
+
+    expect(writes).toEqual(['hello there'])
+
+    act(() => result.current.onSent?.())
+    rerender({ value: '' })
+
+    act(() => engine.partial('hello there again'))
+    act(() => engine.final('hello there again'))
+
+    expect(writes).toEqual(['hello there'])
+    expect(engine.aborts).toBe(1)
+    expect(result.current.listening).toBe(false)
+  })
+
+  it('leaves an idle recognizer alone', () => {
+    const engine = fakeEngine()
+    const { result } = renderHook(() => useComposerDictation({ engine, onChangeText: () => undefined, value: '' }))
+
+    act(() => result.current.onSent?.())
+
+    expect(engine.aborts).toBe(0)
   })
 })
 

@@ -106,7 +106,27 @@ export function useComposerDictation({
     ...(engine ? { engine } : {})
   })
 
-  const { clearError, listening, start, state, stop } = dictation
+  const { cancel, clearError, listening, start, state, stop } = dictation
+
+  /*
+    The draft this session was anchored to has been sent.
+
+    Every result is the anchor plus the WHOLE transcript, so one that arrives
+    now would not add to the empty field — it would put the sent sentence back
+    in it. That is not a corner: tapping the mic off asks the recognizer for
+    its final result, which comes a moment later, and a Return inside that
+    moment is enough. So the anchor goes, and a session still running (or still
+    owing that final result — it is `listening` until the recognizer ends) is
+    cancelled rather than stopped: `cancel` disowns anything it has yet to
+    deliver, where `stop` would ask for exactly the result this is avoiding.
+  */
+  const onSent = useCallback(() => {
+    anchor.current = null
+
+    if (listening) {
+      cancel()
+    }
+  }, [cancel, listening])
 
   /*
     An explanation that outlives its moment is clutter, so the next press clears
@@ -169,8 +189,9 @@ export function useComposerDictation({
       caret,
       onSelection: (start_: number, end: number) => {
         selection.current = { start: start_, end }
-      }
+      },
+      onSent
     }),
-    [caret, dictation.available, listening, message, onOpenVoiceMode, onPressIn, onPressOut, state.failure]
+    [caret, dictation.available, listening, message, onOpenVoiceMode, onPressIn, onPressOut, onSent, state.failure]
   )
 }

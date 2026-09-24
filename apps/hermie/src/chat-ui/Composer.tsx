@@ -11,7 +11,7 @@
  *   - The slash popover is fed by props. The composer asks (`onQuerySlash`) and
  *     paints what it is given; it never calls the gateway itself.
  */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
 import {
   Image,
   KeyboardAvoidingView,
@@ -22,6 +22,7 @@ import {
   StyleSheet,
   type TextInputKeyPressEventData,
   type TextInputSelectionChangeEventData,
+  type TextInputSubmitEditingEventData,
   TextInput,
   View
 } from 'react-native'
@@ -46,6 +47,7 @@ import { AttachMenu } from './AttachMenu'
 import { FileChip } from './FileChip'
 import { QueuedChip } from './QueuedChip'
 import { revertStrayPasteText, type PasteSnapshot } from './paste-revert'
+import { SEND_ECHO_WINDOW_MS, withoutSentText } from './send-echo'
 import { shouldSend } from './send-key'
 import { chatStrings } from './strings'
 import type { AttachChoice, ComposerAttachment, ComposerDictation, SlashFailure, SlashSuggestion } from './types'
@@ -501,6 +503,163 @@ export function Composer({
   }, [closeRevertWindow, value])
 
   /**
+   * The draft as this component knows it right now, which inside one group of
+   * events is AHEAD of `value`.
+   *
+   * Every event in a group runs against the handlers of the render before the
+   * group, so a key and a Return that arrive together see a `value` without
+   * that key — and sending `value` lost it. Every write this component makes
+   * goes through here first, a send empties it (every caller clears its draft
+   * in `onSend`), and each commit puts the owner's `value` back as the truth,
+   * which also covers an owner that kept the draft or rewrote it.
+   */
+  const draft = useRef(value)
+
+  useLayoutEffect(() => {
+    draft.current = value
+  })
+
+  /** Hand the owner a new draft, and remember it until the owner's commit says otherwise. */
+  const write = (text: string) => {
+    draft.current = text
+    onChangeText(text)
+  }
+
+  /**
+   * The message that just went, while the text view may still report it.
+   *
+   * A send empties `value` straight away and the `UITextView` only later, and
+   * React Native's own event counter can drop that later clear altogether when
+   * a key beats it to the view — see `send-echo.ts` for both orderings. Inside
+   * this window a change report may still be `sent + expected` with the next
+   * key on the end, and `onFieldChangeText` takes the sent part back off.
+   *
+   * `expected` is what the field should hold, as far as this component has
+   * asked for it since the send; `until` is `SEND_ECHO_WINDOW_MS` after the
+   * commit that pushed the clear, or the last rewrite, out to the view (see
+   * `restartAtCommit` below). Armed on iOS alone — the iPhone, the iPad
+   * and the Mac build — because that is the one text view with the counter. A
+   * browser's `<textarea>` is written synchronously and Android's field has no
+   * such race to lose, so there nothing is ever second-guessed.
+   *
+   * One known cost, left as it is: a rewrite reaches the view as a new
+   * attributed string, and a view that is mid-composition in an input method
+   * (Japanese, Chinese) ends that composition when it takes one. That needs a
+   * dropped clear AND a composition begun inside the window, and the text
+   * itself survives — only the candidate window closes early.
+   */
+  const echo = useRef<{ sent: string; expected: string; until: number } | null>(null)
+
+  /** The window if it is still open, closing it on the way if it has run out. */
+  const openEcho = () => {
+    if (echo.current && Date.now() > echo.current.until) {
+      echo.current = null
+    }
+
+    return echo.current
+  }
+
+  /**
+   * The field's own `onChangeText`: every report from the text view, taken as
+   * an edit — unless it is an echo of the message that just went.
+   *
+   * The first report that is NOT an echo proves the view has cleared, and from
+   * then on nothing is second-guessed until the next send. A rewritten report
+   * goes to the owner of the draft like any edit; React Native then pushes it
+   * to the view with the newer count, which the view accepts — and if yet
+   * another key has beaten that push too, the next report is rewritten the
+   * same way, so the two copies converge the moment the reader pauses.
+   */
+  const onFieldChangeText = (text: string) => {
+    const open = openEcho()
+
+    if (open) {
+      const rest = withoutSentText(open.sent, open.expected, text)
+
+      if (rest !== null) {
+        echo.current = { ...open, expected: rest, until: Date.now() + SEND_ECHO_WINDOW_MS }
+        restartAtCommit.current = true
+        write(rest)
+
+        return
+      }
+
+      echo.current = null
+    }
+
+    write(text)
+  }
+
+  /*
+    A draft this component did not write is the owner's word on what the field
+    holds — a failed send putting the message back, a slash command's prefill,
+    a dictated sentence, an accepted suggestion, or an owner that kept the draft
+    rather than clearing it — and none of those is an empty field with an echo
+    still to come. Checked after EVERY commit, because "the owner kept it" is a
+    commit in which `value` did not change at all; and in a layout effect rather
+    than a passive one, so it has run before the next event can arrive.
+  */
+  useLayoutEffect(() => {
+    if (echo.current && value !== '' && value !== echo.current.expected) {
+      echo.current = null
+    }
+  })
+
+  /**
+   * The window counts from the commit that sends the clear (or the rewrite)
+   * out, not from the event that asked for it.
+   *
+   * The push to the view happens in the field's own layout effect, which runs
+   * before this one — a child's before its parent's. Counting from the event
+   * instead would charge the render in between to the window, and a render
+   * slower than the window would close it before the key that raced the clear
+   * had even been reported.
+   */
+  const restartAtCommit = useRef(false)
+
+  useLayoutEffect(() => {
+    const current = echo.current
+
+    if (current && current.until === Number.POSITIVE_INFINITY) {
+      // A send's window, on the commit `send` forces: its clock starts now.
+      echo.current = { ...current, until: Date.now() + SEND_ECHO_WINDOW_MS }
+    } else {
+      // A rewrite's request is only honoured while its window is still open.
+      // Nothing forces a commit after a rewrite — one to the draft the owner
+      // already holds changes no state — so the request can outlive it, and a
+      // later, unrelated commit must not bring a window that has since run out
+      // back to life.
+      const open = restartAtCommit.current ? openEcho() : null
+
+      if (open) {
+        echo.current = { ...open, until: Date.now() + SEND_ECHO_WINDOW_MS }
+      }
+    }
+
+    restartAtCommit.current = false
+  })
+
+  /**
+   * A commit after every send, whatever the owner did with the draft.
+   *
+   * The two effects above are how the owner's answer to a send is read: a
+   * cleared draft, or one it kept. An owner that kept it changes no state, so
+   * without this nothing would commit, neither effect would run, and the
+   * window would stay open over a field that never emptied — where the next
+   * key would read as an echo and take the whole message off.
+   */
+  const [, committed] = useReducer((count: number) => count + 1, 0)
+
+  /*
+    A new owner is a new draft. The wide layout keeps one composer mounted and
+    hands it the next chat's draft and setter, so a window opened in one chat
+    must not reach the first thing typed in another.
+  */
+  useLayoutEffect(() => {
+    echo.current = null
+  }, [onChangeText])
+
+  /**
    * Where the caret is, so a newline can be inserted at it rather than appended.
    *
    * A ref and not state: it changes on every keystroke and nothing renders from
@@ -709,7 +868,30 @@ export function Composer({
    * connection folded in here reaches all three and cannot be forgotten in one
    * of them.
    */
-  const canSend = (Boolean(value.trim()) || attachments.length > 0) && !sendBlocked
+  const sendable = (text: string, trayUnsent = true) =>
+    (Boolean(text.trim()) || (trayUnsent && attachments.length > 0)) && !sendBlocked
+  const canSend = sendable(value)
+
+  /**
+   * Whether the handlers running now are asking to send what the draft holds
+   * NOW, or also the tray.
+   *
+   * Every handler in one group of events sees the props of the render before
+   * the group — the tray included, which the owner only empties once its send
+   * has been accepted. So a second send in the same group (a Return and a tap
+   * on the button, two Returns around a key) must not count the tray: the
+   * first one took it, and counting it again sent the attachments twice. Set
+   * by a send and put back by the next commit, which is when the props are
+   * the owner's again.
+   */
+  const sentSinceCommit = useRef(false)
+
+  useLayoutEffect(() => {
+    sentSinceCommit.current = false
+  })
+
+  /** What a handler can send right now: the draft, and the tray unless this group already sent it. */
+  const sendableNow = () => sendable(draft.current, !sentSinceCommit.current)
 
   /**
    * Put the highlighted candidate in the field.
@@ -719,7 +901,7 @@ export function Composer({
    * assumed without one.
    */
   const accept = (suggestion: SlashSuggestion) => {
-    onChangeText(suggestion.insert ?? `/${suggestion.name} `)
+    write(suggestion.insert ?? `/${suggestion.name} `)
     inputRef.current?.focus()
   }
 
@@ -731,10 +913,34 @@ export function Composer({
    * at all leaves `value` at the empty string on both sides of it, so that
    * effect never runs and the window would outlive the message. This is the one
    * seam that knows a send happened regardless of what the draft looked like.
+   *
+   * It is also where the draft is marked as consumed, for the things that
+   * could otherwise write it back or send it twice: a change report the text
+   * view made before it heard about the send (`echo`, above), a Return it took
+   * in the same moment (`onSubmitEditing`), and a dictation session still
+   * anchored to it (`ComposerDictation.onSent`). Every caller clears the draft
+   * in `onSend` itself, in the same event; one that keeps it is noticed on the
+   * next commit, which closes the window before anything is taken off anything.
+   *
+   * A send from inside an open window stacks onto it: a view that has not
+   * heard about the first message holds both, so the new window's `sent` is
+   * the two together.
    */
-  const send = () => {
+  const send = (text: string = draft.current) => {
+    const open = openEcho()
+
     closeRevertWindow()
-    onSend(value)
+    // No deadline yet: the clock starts on the commit this send forces (the
+    // `restartAtCommit` effect), however long the render before it takes.
+    echo.current =
+      Platform.OS === 'ios' && text !== ''
+        ? { expected: '', sent: `${open?.sent ?? ''}${text}`, until: Number.POSITIVE_INFINITY }
+        : null
+    sentSinceCommit.current = true
+    draft.current = ''
+    dictation?.onSent?.()
+    onSend(text)
+    committed()
   }
 
   /**
@@ -748,6 +954,10 @@ export function Composer({
    * typing the next message and pressing Return killed the answer being written
    * instead of queueing the message. Sending mid-turn parks the message in the
    * queue; only the red button, and Escape, stop anything.
+   *
+   * What it sends is `draft`, not `value`: when the last key and the Return
+   * reach JavaScript in one group of events, `value` is still a key behind, and
+   * sending it lost that key while the field went on to clear.
    */
   const submit = () => {
     if (showSuggestions) {
@@ -760,7 +970,7 @@ export function Composer({
       }
     }
 
-    if (!canSend) {
+    if (!sendableNow()) {
       return
     }
 
@@ -776,11 +986,12 @@ export function Composer({
    * than kept, which is what typing any other character would do.
    */
   const insertNewline = () => {
-    const start = Math.max(0, Math.min(selection.current.start, value.length))
-    const end = Math.max(start, Math.min(selection.current.end, value.length))
-    const next = `${value.slice(0, start)}\n${value.slice(end)}`
+    const current = draft.current
+    const start = Math.max(0, Math.min(selection.current.start, current.length))
+    const end = Math.max(start, Math.min(selection.current.end, current.length))
+    const next = `${current.slice(0, start)}\n${current.slice(end)}`
 
-    onChangeText(next)
+    write(next)
     selection.current = { start: start + 1, end: start + 1 }
     setCaret({ start: start + 1, end: start + 1 })
   }
@@ -796,8 +1007,20 @@ export function Composer({
    * The decision itself is `shouldSend`, shared with `onKeyPress` below. Only
    * the ACTION differs: here `submitBehavior: 'submit'` already suppressed the
    * insertion, so a newline has to be put in by hand.
+   *
+   * ## A Return the view took before it heard about the send
+   *
+   * A second Return — a bouncing key, an impatient double press — can reach the
+   * text view before the clear does. It carries the text the view still holds,
+   * which is exactly the sent message with nothing typed since, and it is not a
+   * request to send anything new: it is dropped, attachments and all. With
+   * something typed since, it goes on to `submit`, and what is sent is `draft`
+   * — the rewritten next message, never the stale text the event carries.
    */
-  const onSubmitEditing = () => {
+  const onSubmitEditing = (event?: NativeSyntheticEvent<TextInputSubmitEditingEventData>) => {
+    const typed = event?.nativeEvent?.text
+    const open = openEcho()
+
     const decision = shouldSend('Enter', {
       // Reaching this handler at all IS the platform having decided to submit
       // (`submitBehavior`), so the hardware-keyboard half of the table is
@@ -811,6 +1034,10 @@ export function Composer({
     if (decision === 'newline') {
       insertNewline()
 
+      return
+    }
+
+    if (open && open.expected === '' && typed === open.sent) {
       return
     }
 
@@ -880,8 +1107,14 @@ export function Composer({
       re-accepted a suggestion that was already accepted and the message never
       went — with no way out, because the only thing that dismisses the popover is
       Escape and a phone has no Escape. Watched on an iPhone simulator.
+
+      And `draft`, not `value`, for whether there is anything left to send. The
+      check above stays on `value` because it is about which button was drawn;
+      this one is about the draft, which a Return in the same group of events
+      may already have sent — and a tap that then sent the empty string would
+      send the tray's attachments a second time (see `sentSinceCommit`).
     */
-    if (!canSend) {
+    if (!sendableNow()) {
       return
     }
 
@@ -1054,7 +1287,7 @@ export function Composer({
         const reverted = revertStrayPasteText(before, latestValue.current)
 
         if (reverted) {
-          onChangeText(reverted.value)
+          write(reverted.value)
           selection.current = { start: reverted.caret, end: reverted.caret }
           setCaret({ start: reverted.caret, end: reverted.caret })
 
@@ -1505,7 +1738,7 @@ export function Composer({
                   botName ? chatStrings.composer.messageTo(botName) : chatStrings.composer.placeholder
                 }
                 multiline
-                onChangeText={onChangeText}
+                onChangeText={onFieldChangeText}
                 onKeyPress={onKeyPress}
                 onSelectionChange={onSelectionChange}
                 // Only reached where `submitBehavior` is 'submit', i.e. on a Mac.

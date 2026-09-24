@@ -2,6 +2,7 @@
  * The composer: send, stop, the slash popover, and the attachment tray.
  */
 import { act, fireEvent, screen, waitFor } from '@testing-library/react-native'
+import { useCallback, useState } from 'react'
 import { AccessibilityInfo, Platform, ScrollView, StyleSheet } from 'react-native'
 
 import { Composer } from '../../src/chat-ui'
@@ -20,6 +21,8 @@ import {
   SLASH_POPOVER_MAX_HEIGHT,
   SLASH_SLOW_MS
 } from '../../src/chat-ui/Composer'
+import { SEND_ECHO_WINDOW_MS } from '../../src/chat-ui/send-echo'
+import type { ComposerDictation } from '../../src/chat-ui/types'
 import { renderScreen, withProviders } from '../support/render'
 
 const mockEscapeListeners = new Set<() => void>()
@@ -1658,6 +1661,808 @@ describe('pasting from the general pasteboard', () => {
       expect(handlers.onChangeText).not.toHaveBeenCalled()
       // Nothing left on the clock: the window is a window, not a subscription.
       expect(jest.getTimerCount()).toBe(0)
+    })
+  })
+})
+
+/**
+ * The field after a send, with the native side of the text view modelled.
+ *
+ * `fireEvent.changeText` cannot show this bug, because it has no native side:
+ * the jest preset replaces `TextInput` with a plain host element, so a value the
+ * composer is handed is the value on screen by definition. On a device it is
+ * not. React Native keeps the `UITextView` and the JavaScript `value` in step
+ * with an event counter (`mostRecentEventCount`), and the model below is that
+ * protocol, taken from the 0.81 sources rather than invented:
+ *
+ *  - every edit made ON the native side bumps the counter and is reported to
+ *    JavaScript as a change carrying the new count
+ *    (`RCTTextInputComponentView -textInputDidChange` / `-_updateState`);
+ *  - the text a Return submits travels with the count it was pressed at
+ *    (`-textInputShouldSubmitOnReturn`, `_textInputMetrics`);
+ *  - after each commit, JavaScript pushes its `value` to the view whenever it
+ *    differs from the last text the view reported
+ *    (`useTextInputStateSynchronization` in `TextInput.js`), stamped with the
+ *    newest count JavaScript has SEEN;
+ *  - and the view throws that push away if its own count has moved on since
+ *    (`-setTextAndSelection:` returns early on `_mostRecentEventCount !=
+ *    eventCount`). The state-update road to the same view has the same guard
+ *    (`-updateState:oldState:`).
+ *
+ * Events are delivered in groups, and every event in a group reaches the
+ * handlers the tree had BEFORE the group — `EventQueueProcessor::flushEvents`
+ * dispatches the whole batch in one JavaScript task, and a discrete update
+ * renders in the microtask after it. A group of one is the idle case; a group of
+ * several is what a keyboard produces while the JavaScript thread is busy with
+ * something else, which on a chat screen is a streaming reply.
+ */
+describe('the field after a send, against the native text view', () => {
+  const ORIGINAL_OS = Platform.OS
+
+  // Deadlines are read off `Date.now()`, which fake timers hold still until a
+  // test moves them — so "at once" and "much later" are both exact.
+  beforeEach(() => jest.useFakeTimers())
+  afterEach(() => {
+    jest.useRealTimers()
+    Platform.OS = ORIGINAL_OS
+  })
+
+  interface Owner {
+    /** Put a draft in from outside, the way a failed send or a prefill does. */
+    setDraft: (text: string) => void
+  }
+
+  function nativeField({
+    clearOnSend = true,
+    dictation,
+    slowCommitMs = 0,
+    withAttachment = false
+  }: {
+    clearOnSend?: boolean
+    dictation?: ComposerDictation
+    /** Time that passes between a send and the commit that pushes its clear out. */
+    slowCommitMs?: number
+    withAttachment?: boolean
+  } = {}) {
+    const view = { count: 0, text: '' }
+    const js = { count: 0, lastNativeText: '' }
+    const queue: ((props: Record<string, ((...args: unknown[]) => void) | undefined>) => void)[] = []
+    const pushes: { count: number; text: string }[] = []
+    const sent: string[] = []
+    const owner: Owner = { setDraft: () => undefined }
+
+    /**
+     * One draft per chat and one setter per chat, the way `ChatScreen` hands
+     * them to a composer the wide layout keeps mounted across a switch.
+     */
+    function Host({ chat }: { chat: string }) {
+      const [drafts, setDrafts] = useState<Record<string, string>>({})
+      // An unchanged draft changes no state, the way a store's selector does not
+      // re-render its reader for an equal value.
+      const setDraft = useCallback(
+        (text: string) => setDrafts(all => ((all[chat] ?? '') === text ? all : { ...all, [chat]: text })),
+        [chat]
+      )
+
+      owner.setDraft = setDraft
+
+      return (
+        <Composer
+          hardwareKeyboard
+          onChangeText={setDraft}
+          onSend={text => {
+            sent.push(text)
+
+            // Cleared in the same event, the way `ChatScreen` does it.
+            if (clearOnSend) {
+              setDraft('')
+            }
+
+            if (slowCommitMs) {
+              jest.advanceTimersByTime(slowCommitMs)
+            }
+          }}
+          value={drafts[chat] ?? ''}
+          {...(withAttachment ? { attachments: [{ id: 'att-1', kind: 'image', name: 'diagram.png' }] } : {})}
+          {...(dictation ? { dictation } : {})}
+        />
+      )
+    }
+
+    const rendered = renderScreen(<Host chat="a" />)
+
+    const field = () => screen.getByTestId('composer-input')
+
+    /** The layout effect after a commit: push `value` if the view last said something else. */
+    const sync = () => {
+      const value = field().props.value as string
+
+      if (value !== js.lastNativeText) {
+        pushes.push({ count: js.count, text: value })
+        js.lastNativeText = value
+      }
+    }
+
+    /** One native edit, handled by the view before anything else and then reported. */
+    const edit = (next: string) => {
+      view.text = next
+      view.count += 1
+
+      const text = view.text
+      const eventCount = view.count
+
+      queue.push(props => {
+        props.onChange?.({ nativeEvent: { eventCount, text } })
+        props.onChangeText?.(text)
+        js.lastNativeText = text
+        js.count = eventCount
+      })
+    }
+
+    /** Keys on the hardware keyboard, one edit each. */
+    const type = (keys: string) => {
+      for (const key of keys) {
+        edit(view.text + key)
+      }
+    }
+
+    /** A paste, a QuickType suggestion, one emoji key: several characters in ONE edit. */
+    const insert = (text: string) => edit(view.text + text)
+
+    /** Backspace, one code point. */
+    const backspace = () => edit(Array.from(view.text).slice(0, -1).join(''))
+
+    /**
+     * A key that rewrites the character before the caret instead of adding one:
+     * the Korean keyboard building a syllable, the Japanese 12-key keyboard's
+     * multi-tap and voiced-sound key.
+     */
+    const replaceLast = (character: string) => edit(`${Array.from(view.text).slice(0, -1).join('')}${character}`)
+
+    /** UIKit reporting the same text a second time, with no edit of its own in between. */
+    const repeatReport = () => {
+      const text = view.text
+
+      queue.push(props => props.onChangeText?.(text))
+    }
+
+    /** A tap on the send button, in the same group as whatever is queued before it. */
+    const tapSend = () => {
+      queue.push(() => fireEvent.press(screen.getByTestId('composer-send')))
+    }
+
+    /** The wide layout's chat switch: same composer, the next chat's draft and setter. */
+    const switchChat = (chat: string) => {
+      rendered.rerender(withProviders(<Host chat={chat} />))
+      sync()
+    }
+
+    /** The owner writes the draft itself, outside any event from the field. */
+    const ownerWrites = (text: string) => {
+      act(() => owner.setDraft(text))
+      sync()
+    }
+
+    /** Time passing with nothing typed. */
+    const wait = (ms: number) => act(() => void jest.advanceTimersByTime(ms))
+
+    /** A bare Return, which `submitBehavior: 'submit'` turns into a submit and nothing else. */
+    const pressReturn = () => {
+      const text = view.text
+      const eventCount = view.count
+
+      queue.push(props => props.onSubmitEditing?.({ nativeEvent: { eventCount, text } }))
+    }
+
+    /** Deliver everything queued as ONE group, then commit. */
+    const deliver = () => {
+      const props = field().props as Record<string, ((...args: unknown[]) => void) | undefined>
+      const group = queue.splice(0)
+
+      act(() => {
+        for (const event of group) {
+          event(props)
+        }
+      })
+      sync()
+    }
+
+    /** Let the view act on what JavaScript pushed at it. */
+    const land = () => {
+      for (const push of pushes.splice(0)) {
+        if (push.count === view.count) {
+          view.text = push.text
+        }
+      }
+    }
+
+    /** Type and let everything settle, so the next step starts from rest. */
+    const settle = (keys: string) => {
+      for (const key of keys) {
+        type(key)
+        deliver()
+        land()
+      }
+    }
+
+    /** Deliver and land until nothing is left in flight. */
+    const rest = () => {
+      deliver()
+      land()
+    }
+
+    return {
+      backspace,
+      deliver,
+      edit,
+      field,
+      insert,
+      land,
+      ownerWrites,
+      pressReturn,
+      repeatReport,
+      replaceLast,
+      rest,
+      sent,
+      settle,
+      switchChat,
+      tapSend,
+      type,
+      view,
+      wait
+    }
+  }
+
+  /** Send `text` and let the clear land cleanly: the view is empty and nothing is in flight. */
+  function sentCleanly(f: ReturnType<typeof nativeField>, text: string) {
+    f.settle(text)
+    f.pressReturn()
+    f.rest()
+    expect(f.view.text).toBe('')
+  }
+
+  /** What is on screen and what the owner holds, which must agree once everything has landed. */
+  function expectField(f: ReturnType<typeof nativeField>, text: string) {
+    expect(f.field().props.value).toBe(text)
+    expect(f.view.text).toBe(text)
+  }
+
+  it('clears the field when nothing else happens, which is the ordinary send', () => {
+    const f = nativeField()
+
+    f.settle('hello')
+    f.pressReturn()
+    f.deliver()
+    f.land()
+
+    expect(f.sent).toEqual(['hello'])
+    expect(f.view.text).toBe('')
+    expect(f.field().props.value).toBe('')
+  })
+
+  it('does not bring the sent words back when the next key lands before the clear can render', () => {
+    // Return and the first key of the next message arrive in one group: the
+    // key's report was made from the field as it stood BEFORE the send, so
+    // taking it at face value writes the sent message back into the draft.
+    const f = nativeField()
+
+    f.settle('hello')
+    f.pressReturn()
+    f.type('n')
+    f.deliver()
+    f.land()
+
+    expect(f.sent).toEqual(['hello'])
+    expect(f.field().props.value).toBe('n')
+    expect(f.view.text).toBe('n')
+  })
+
+  it('does not keep the sent words when the view refuses the clear because a key beat it there', () => {
+    // The clear goes out stamped with the count of the Return. A key typed
+    // while it is on its way moves the view's count on, the view drops the
+    // clear as stale, and the next report still starts with the sent message.
+    const f = nativeField()
+
+    f.settle('hello')
+    f.pressReturn()
+    f.deliver()
+    f.type('n')
+    f.land()
+    f.deliver()
+    f.land()
+
+    expect(f.sent).toEqual(['hello'])
+    expect(f.field().props.value).toBe('n')
+    expect(f.view.text).toBe('n')
+  })
+
+  it('keeps up with a reader who goes on typing while the view keeps refusing', () => {
+    const f = nativeField()
+
+    f.settle('hello')
+    f.pressReturn()
+    f.deliver()
+    f.type('n')
+    f.land()
+    f.deliver()
+    f.type('e')
+    f.land()
+    f.deliver()
+    f.type('w')
+    f.deliver()
+    f.land()
+
+    expect(f.sent).toEqual(['hello'])
+    expect(f.field().props.value).toBe('new')
+    expect(f.view.text).toBe('new')
+  })
+
+  it('sends what the field held at the Return, not the draft one render behind it', () => {
+    // The last key and the Return in one group: the submit reaches a handler
+    // that has not re-rendered since `hell`, while the text view has `hello`.
+    const f = nativeField()
+
+    f.settle('hell')
+    f.type('o')
+    f.pressReturn()
+    f.deliver()
+    f.land()
+
+    expect(f.sent).toEqual(['hello'])
+    expect(f.view.text).toBe('')
+    expect(f.field().props.value).toBe('')
+  })
+
+  it('never eats the first key of the next message, even one that repeats the last', () => {
+    // A one-letter message, and the next one starts with the same letter: once
+    // the clear has landed, every report is the reader's own typing.
+    const f = nativeField()
+
+    f.settle('k')
+    f.pressReturn()
+    f.deliver()
+    f.land()
+    f.settle('ko')
+
+    expect(f.sent).toEqual(['k'])
+    expect(f.field().props.value).toBe('ko')
+    expect(f.view.text).toBe('ko')
+  })
+
+  it('never eats a next message that begins with the whole of the last one', () => {
+    const f = nativeField()
+
+    f.settle('ok')
+    f.pressReturn()
+    f.deliver()
+    f.land()
+    f.settle('okay then')
+
+    expect(f.field().props.value).toBe('okay then')
+    expect(f.view.text).toBe('okay then')
+  })
+
+  it('never eats it either when the first key of it raced the clear', () => {
+    const f = nativeField()
+
+    f.settle('ok')
+    f.pressReturn()
+    f.type('o')
+    f.deliver()
+    f.land()
+    f.settle('kay')
+
+    expect(f.sent).toEqual(['ok'])
+    expect(f.field().props.value).toBe('okay')
+    expect(f.view.text).toBe('okay')
+  })
+
+  it('tells the dictation binding that the draft it was writing into has gone', () => {
+    const onSent = jest.fn()
+    const f = nativeField({
+      dictation: {
+        available: true,
+        caret: null,
+        listening: true,
+        notice: null,
+        onPressIn: jest.fn(),
+        onPressOut: jest.fn(),
+        onSelection: jest.fn(),
+        onSent
+      }
+    })
+
+    f.settle('hello')
+    expect(onSent).not.toHaveBeenCalled()
+
+    f.pressReturn()
+    f.deliver()
+
+    expect(onSent).toHaveBeenCalledTimes(1)
+  })
+
+  it('takes a Backspace inside an echo as a Backspace on the next message', () => {
+    // `n` raced the clear and was rewritten; Backspace beats that rewrite to
+    // the view too, which then reports the sent message alone.
+    const f = nativeField()
+
+    f.settle('hello')
+    f.pressReturn()
+    f.deliver()
+    f.type('n')
+    f.land()
+    f.deliver()
+    f.backspace()
+    f.land()
+    f.rest()
+
+    expect(f.sent).toEqual(['hello'])
+    expectField(f, '')
+  })
+
+  it('counts the window from the commit that pushes the clear, not from the Return', () => {
+    // A render slower than the window, between the send and its clear.
+    const f = nativeField({ slowCommitMs: SEND_ECHO_WINDOW_MS + 100 })
+
+    f.settle('hello')
+    f.pressReturn()
+    f.deliver()
+    f.type('n')
+    f.land()
+    f.rest()
+
+    expect(f.sent).toEqual(['hello'])
+    expectField(f, 'n')
+  })
+
+  it('does not bring a window that has run out back to life on a later commit', () => {
+    // A rewrite to the draft the owner already holds commits nothing, so its
+    // request to restart the window is still pending when an unrelated commit
+    // comes along long after the window closed.
+    const f = nativeField()
+
+    f.settle('hello')
+    f.pressReturn()
+    f.deliver()
+    f.type('n')
+    f.land()
+    f.deliver()
+    f.repeatReport()
+    f.rest()
+    expectField(f, 'n')
+
+    f.wait(SEND_ECHO_WINDOW_MS * 2)
+    // Same chat: a commit with nothing changed.
+    f.switchChat('a')
+    // Select all and paste: the one shape an echo of `hello` could have.
+    f.edit('hello!')
+    f.rest()
+
+    expectField(f, 'hello!')
+  })
+
+  describe('keyboards that type by rewriting the last character', () => {
+    /** Send `sent`, have `first` race the clear and be caught, then let the rewrite land. */
+    function caughtAfter(sent: string, first: string) {
+      const f = nativeField()
+
+      f.settle(sent)
+      f.pressReturn()
+      f.deliver()
+      f.type(first)
+      f.land()
+      f.deliver()
+      f.land()
+      expectField(f, first)
+
+      return f
+    }
+
+    it('keeps a Korean syllable built on a caught jamo', () => {
+      // Send 네, then ㄴ + ㅔ is 네 again: the keyboard rewrites ㄴ in place.
+      const f = caughtAfter('네', 'ㄴ')
+
+      f.replaceLast('네')
+      f.rest()
+
+      expect(f.sent).toEqual(['네'])
+      expectField(f, '네')
+    })
+
+    it('keeps a Japanese multi-tap on a caught kana', () => {
+      // Send き, then the か key tapped once and again: か, then き.
+      const f = caughtAfter('き', 'か')
+
+      f.replaceLast('き')
+      f.rest()
+
+      expectField(f, 'き')
+    })
+
+    it('keeps the voiced-sound key on a caught kana', () => {
+      const f = caughtAfter('が', 'か')
+
+      f.replaceLast('が')
+      f.rest()
+
+      expectField(f, 'が')
+    })
+
+    it('keeps a QuickType word that finishes a caught character, space and all', () => {
+      // `ok` sent, a fast `o` caught, then the suggestion turns `o` into `ok `.
+      const f = caughtAfter('ok', 'o')
+
+      f.replaceLast('ok ')
+      f.rest()
+
+      expect(f.sent).toEqual(['ok'])
+      expectField(f, 'ok ')
+    })
+
+    it('keeps the same for a one-letter start', () => {
+      const f = caughtAfter('hi', 'h')
+
+      f.replaceLast('hi ')
+      f.rest()
+
+      expectField(f, 'hi ')
+    })
+
+    it('still takes the echo off when the syllable is built before the rewrite lands', () => {
+      const f = nativeField()
+
+      f.settle('네')
+      f.pressReturn()
+      f.deliver()
+      f.type('ㄴ')
+      f.land()
+      f.deliver()
+      // ㅔ reaches the view while it still holds 네ㄴ: it reports 네네.
+      f.replaceLast('네')
+      f.land()
+      f.rest()
+
+      expect(f.sent).toEqual(['네'])
+      expectField(f, '네')
+    })
+  })
+
+  describe('a second Return', () => {
+    it('sends once when it reaches the view before the clear, in the same group', () => {
+      const f = nativeField()
+
+      f.settle('hello')
+      f.pressReturn()
+      f.pressReturn()
+      f.rest()
+
+      expect(f.sent).toEqual(['hello'])
+      expectField(f, '')
+    })
+
+    it('sends once when it reaches the view before the clear, one group later', () => {
+      const f = nativeField()
+
+      f.settle('hello')
+      f.pressReturn()
+      f.deliver()
+      // The clear is still on its way: the view holds `hello` for this Return.
+      f.pressReturn()
+      f.rest()
+
+      expect(f.sent).toEqual(['hello'])
+      expectField(f, '')
+    })
+
+    it('sends a one-letter message once too', () => {
+      const f = nativeField()
+
+      f.settle('k')
+      f.pressReturn()
+      f.deliver()
+      f.pressReturn()
+      f.rest()
+
+      expect(f.sent).toEqual(['k'])
+    })
+
+    it('does not send the attachments a second time', () => {
+      // The owner keeps the tray until the send is accepted, so a Return the
+      // view took before the clear used to be a send of the tray on its own.
+      const f = nativeField({ withAttachment: true })
+
+      f.settle('look')
+      f.pressReturn()
+      f.deliver()
+      f.pressReturn()
+      f.rest()
+
+      expect(f.sent).toEqual(['look'])
+    })
+
+    it('is not followed by a send-button tap in the same group sending the tray again', () => {
+      const f = nativeField({ withAttachment: true })
+
+      f.settle('look')
+      f.pressReturn()
+      f.tapSend()
+      f.rest()
+
+      expect(f.sent).toEqual(['look'])
+    })
+
+    it('sends the next message, not the stale text the view carried, when a key came between', () => {
+      // `ok`, Return, `?`, Return, all in one group while a reply streams.
+      const f = nativeField()
+
+      f.settle('ok')
+      f.pressReturn()
+      f.type('?')
+      f.pressReturn()
+      f.rest()
+
+      expect(f.sent).toEqual(['ok', '?'])
+      expectField(f, '')
+    })
+
+    it('still takes the echo of both messages off the key after them', () => {
+      const f = nativeField()
+
+      f.settle('ok')
+      f.pressReturn()
+      f.type('?')
+      f.pressReturn()
+      f.deliver()
+      f.type('!')
+      f.land()
+      f.rest()
+      f.land()
+
+      expect(f.sent).toEqual(['ok', '?'])
+      expectField(f, '!')
+    })
+  })
+
+  describe('an insertion that begins with the message just sent', () => {
+    it('keeps a paste at once', () => {
+      const f = nativeField()
+
+      sentCleanly(f, '1')
+      f.insert('10.0.0.5 is the IP')
+      f.rest()
+
+      expectField(f, '10.0.0.5 is the IP')
+    })
+
+    it('keeps a paste much later', () => {
+      const f = nativeField()
+
+      sentCleanly(f, 'y')
+      f.wait(60_000)
+      f.insert('yarn build failed')
+      f.rest()
+
+      expectField(f, 'yarn build failed')
+    })
+
+    it('keeps a pasted link that extends the one just sent', () => {
+      const f = nativeField()
+
+      sentCleanly(f, 'https://x.io/a')
+      f.insert('https://x.io/a/b')
+      f.rest()
+
+      expectField(f, 'https://x.io/a/b')
+    })
+
+    it('keeps a multi-character insert at once', () => {
+      const f = nativeField()
+
+      sentCleanly(f, 'ok')
+      f.insert('okay')
+      f.rest()
+
+      expectField(f, 'okay')
+    })
+
+    it('keeps a QuickType word once the window has closed', () => {
+      const f = nativeField()
+
+      sentCleanly(f, 'Thanks')
+      f.wait(1000)
+      f.insert('Thanks ')
+      f.rest()
+
+      expectField(f, 'Thanks ')
+    })
+
+    it('keeps an emoji whose skin tone the same key added', () => {
+      const f = nativeField()
+
+      sentCleanly(f, '👍')
+      f.insert('👍🏽')
+      f.rest()
+
+      expectField(f, '👍🏽')
+    })
+
+    it('keeps the one shape an echo has, once the window has closed — the app was away', () => {
+      // `hello!` in one go is exactly what an echo of `hello` looks like. The
+      // only thing that tells them apart is time: backgrounding, a chat switch
+      // or anything else a reader does between two messages is longer than
+      // the window.
+      const f = nativeField()
+
+      sentCleanly(f, 'hello')
+      f.wait(5000)
+      f.insert('hello!')
+      f.rest()
+
+      expectField(f, 'hello!')
+    })
+  })
+
+  describe('where nothing is ever taken off', () => {
+    it.each(['web', 'android'] as const)('on %s', os => {
+      Platform.OS = os
+
+      const f = nativeField()
+
+      sentCleanly(f, 'hello')
+      f.insert('hello!')
+      f.rest()
+
+      expectField(f, 'hello!')
+    })
+
+    it('in the next chat, when the composer stays mounted across the switch', () => {
+      const f = nativeField()
+
+      sentCleanly(f, 'hello')
+      f.switchChat('b')
+      f.insert('hello!')
+      f.rest()
+
+      expectField(f, 'hello!')
+    })
+
+    it('after a failed send puts the message back', () => {
+      const f = nativeField()
+
+      sentCleanly(f, 'hello')
+      f.ownerWrites('hello')
+      f.land()
+      f.type('!')
+      f.rest()
+
+      expectField(f, 'hello!')
+    })
+
+    it('after a prefill hands back the text that was sent', () => {
+      // `/undo` and `/queue edit` put text in the field from outside; that is
+      // the owner's word on the draft, whatever it happens to begin with.
+      const f = nativeField()
+
+      sentCleanly(f, '/retry')
+      f.ownerWrites('/retry')
+      f.land()
+      f.type('!')
+      f.rest()
+
+      expectField(f, '/retry!')
+    })
+
+    it('when the owner keeps the draft instead of clearing it', () => {
+      const f = nativeField({ clearOnSend: false })
+
+      f.settle('hello')
+      f.pressReturn()
+      f.rest()
+      f.type('!')
+      f.rest()
+
+      expect(f.sent).toEqual(['hello'])
+      expectField(f, 'hello!')
     })
   })
 })

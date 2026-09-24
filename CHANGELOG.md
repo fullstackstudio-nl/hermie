@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A sent message no longer stays behind in the composer.** On the Mac, and on an iPad with a
+  keyboard, a key pressed straight after Return could reach the field before the clear did — and
+  the field then reported the sent message with that key stuck to it, which became the draft. For
+  half a second after a send, on iPhone, iPad and Mac only, the composer now recognises a report
+  that is exactly the sent message plus one keystroke and takes the message back off it. A key
+  typed on a field that did clear is always kept, even one that repeats the message before or, on
+  a Korean or Japanese keyboard, rewrites the character before it; anything that adds more than
+  one character, such as a paste, is left alone. A second Return that reaches the field before the
+  clear does, or a tap on the send button right after Return, no longer sends the message, or its
+  attachments, twice. Return sends the draft as it stands, where it could send it one keystroke
+  behind. And a dictation still running, or still owing its final
+  result, is ended by the send instead of writing the sent sentence back.
 - **The chat list's status marks keep the one order they were given, and a test now says so.**
   The muted bell, pin and pending-share mark already draw as one run on the big name's line,
   immediately left of the time — a regression test now pins the exact order (name, then the

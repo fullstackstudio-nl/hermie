@@ -165,4 +165,14 @@ export interface ComposerDictation {
   caret: { start: number; end: number } | null
   /** The field's selection, so the binding can take its anchor when it starts. */
   onSelection: (start: number, end: number) => void
+  /**
+   * The draft was just sent.
+   *
+   * A session is anchored to the draft it started on, and every result is that
+   * anchor plus the whole transcript — so a result that arrives after the send
+   * (the final one a stopped session still delivers, or any partial of one that
+   * is still listening) would put the entire sent sentence back into the field.
+   * The binding ends the session here instead.
+   */
+  onSent?: () => void
 }
