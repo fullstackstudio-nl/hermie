@@ -9,8 +9,9 @@
 import type { SignOutReason, TokenSet } from '@hermie/gateway-client'
 import { useState } from 'react'
 
-import { startCookieSignIn } from '../features/onboarding/cookie-sign-in'
+import { reauthAtAppRoot, startCookieSignIn } from '../features/onboarding/cookie-sign-in'
 import { NativeSignInWebView } from '../features/onboarding/NativeSignInWebView'
+import { loadHermieWebConfig } from './web-config'
 import { strings } from '../i18n/strings'
 import { hostOf } from './errors'
 import { useGateway } from './GatewayProvider'
@@ -61,7 +62,10 @@ export function useReauth() {
     /**
      * Start signing in. A native gateway opens the in-app page; a cookie
      * gateway sends the whole tab to its `/auth/login`, which is the only way
-     * an OAuth redirect chain can run; a session-token gateway has no page to
+     * an OAuth redirect chain can run — UNLESS this Hermie Web has turned
+     * OIDC off, in which case that route is refused outright regardless of
+     * which provider is named, and reauth reloads at the app's own root
+     * instead (see `reauthAtAppRoot`). A session-token gateway has no page to
      * open, so it goes back to the token step instead.
      */
     signIn: () => {
@@ -72,7 +76,15 @@ export function useReauth() {
       }
 
       if (cookie && config) {
-        startCookieSignIn(config.baseUrl, config.provider)
+        void loadHermieWebConfig().then(webConfig => {
+          if (webConfig?.oidc === false) {
+            reauthAtAppRoot()
+
+            return
+          }
+
+          startCookieSignIn(config.baseUrl, config.provider)
+        })
 
         return
       }

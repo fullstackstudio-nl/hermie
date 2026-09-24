@@ -126,6 +126,8 @@ export const app: Translation<typeof strings> = {
       tokenBlockedTitle: 'Deze gateway is niet vanuit een browser te gebruiken',
       tokenBlockedBody:
         'Hij authenticeert met een session token, en een browsertab heeft geen veilige plek om er een te bewaren — alles wat in de pagina draait zou het kunnen lezen. Gebruik de Hermie-app, of zet de gateway achter een identity provider zodat hij een browsersessie kan uitgeven.',
+      ssoOff:
+        'Inloggen via SSO staat uit op deze Hermie Web. Vraag degene die hem beheert om je op een andere manier in te loggen.',
       signOutOfSession: 'Uitloggen',
 
       webview: {

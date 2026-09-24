@@ -44,24 +44,29 @@ import {
   saveAdminState,
   type AdminState
 } from './admin/state'
-import { reconcileIssuerPeople } from './admin/people'
+import { reconcileAdminAndIssuer } from './admin/reconcile'
 import { IdentityReader, type GatewayIdentity } from './identity'
 import { webCopy } from './i18n'
 import { OidcProvider } from './oidc/provider'
 import { OidcRouter } from './oidc/routes'
 import { loadOidcState, saveOidcState, type OidcState } from './oidc/state'
 import {
+  canonicalGatewayPath,
   type HermieWebOptions,
   isGatewayPath,
+  isWebSocketGatewayPath,
+  NATIVE_AUTHORIZE_PATH,
+  oidcRouteDecision,
   PUSH_PUBLIC_KEY_PATH,
   resolveOptions,
-  type ResolveOptionsInput
+  type ResolveOptionsInput,
+  splitRequestTarget
 } from './options'
 import { type PushDaemon, startPushDaemon } from './push/daemon'
 import { buildAuthorizeUrl, createPkce, exchangeCode, type Pkce } from './push/login'
 import { sameGateway } from './push/credentials'
 import { loadPushState, PUSH_STATE_VERSION, savePushState } from './push/state'
-import { proxyHttp, type ProxyObserver, proxyUpgrade } from './proxy'
+import { hostPinnedFetch, proxyHttp, type ProxyObserver, proxyUpgrade } from './proxy'
 import {
   normalizeGatewayInput,
   ownOrigin,
@@ -168,6 +173,10 @@ async function readJsonBody(request: IncomingMessage): Promise<Record<string, un
  * the operator is still looking at the terminal they made it in.
  */
 const PROBE_TTL_MS = 60_000
+/** How long one "fresh" probe answers every caller that asks for one. */
+const FRESH_PROBE_TTL_MS = 3_000
+/** The same for a probe that failed: short, so a gateway that is back is seen again quickly. */
+const FAILED_PROBE_TTL_MS = 1_000
 
 export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWebServer> {
   const first = resolveOptions(input)
@@ -188,6 +197,17 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
       })
     : first
   const fetchImpl = input.fetchImpl ?? fetch
+  // The probe's own fetch: an injected one (tests) gets the `Host` as a plain
+  // header; the real one needs `hostPinnedFetch`, since the platform `fetch`
+  // will not send a `Host` of the caller's choosing.
+  const probeFetch = (host: string): typeof fetch =>
+    input.fetchImpl
+      ? (((url: Parameters<typeof fetch>[0], init?: RequestInit) =>
+          fetchImpl(url, {
+            ...init,
+            headers: { ...Object.fromEntries(new Headers(init?.headers)), host }
+          })) as typeof fetch)
+      : hostPinnedFetch(host)
   const releases = input.releaseCache ?? new ReleaseCache()
   const shape = detectInstallShape({ selfUpdate: options.selfUpdate, installRoot: options.installRoot })
   // Mutable, and mutated in exactly one place: the single unconfigured →
@@ -209,6 +229,8 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
   /** The operator's in-flight service sign-in, minted by `/hermie/setup/login`. */
   let pendingLogin: (Pkce & { gatewayUrl: string; redirectUri: string }) | null = null
   let probeCache: { at: number; probe: SetupProbe } | null = null
+  // The single-flight, few-second answer `gatewayProbe({ fresh: true })` shares.
+  let freshProbe: { probe: Promise<SetupProbe | null>; settledAt: number; failed: boolean } | null = null
   const cache = new TranscriptCache({
     dir: cacheDir(options.stateDir),
     maxBytes: Math.round(options.cacheMaxMb * 1024 * 1024)
@@ -283,27 +305,95 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
   }
 
   /**
-   * Put the people list and the administrator list back in step with the issuer.
+   * `HERMIE_LOCAL_ADMIN_PASSWORD_HASH`: enforced every start, for the same
+   * reason `HERMIE_ADMINS` is — a container's configuration should not
+   * silently lose to whatever `/setup` last wrote (or a hand-edited file).
+   * There is nothing to "drop" here the way an id can fall off
+   * `HERMIE_ADMINS`: a container that stops setting this variable simply
+   * stops overwriting whatever is already stored.
    *
-   * Called after every write to the provider's state and once at startup, which
-   * between them cover every way an account can appear, change role or go. It is
-   * idempotent and answers the same object when there is nothing to do, so the
-   * startup call is also the migration for a deployment that predates it and
-   * costs a deployment that does not exactly one comparison.
+   * Ahead of `reconcileAdminState` below, so that one reconcile's single write
+   * carries both, rather than this costing a write of its own first.
    */
-  async function syncIssuerPeople(): Promise<void> {
-    const next = reconcileIssuerPeople(admin, oidc)
+  function withLocalAdminHash(state: AdminState): AdminState {
+    const wanted = options.localAdminPasswordHash
 
-    if (next !== admin) {
-      admin = next
-      await saveAdminState(options.stateDir, next)
+    if (!wanted || (state.localAdmin?.salt === wanted.salt && state.localAdmin.hash === wanted.hash)) {
+      return state
+    }
+
+    return { ...state, localAdmin: wanted }
+  }
+
+  /**
+   * Bring `HERMIE_ADMINS`, the built-in issuer's roles, and
+   * `HERMIE_LOCAL_ADMIN_PASSWORD_HASH` all into step with `admins`, in ONE
+   * pass, and write the result at most once.
+   *
+   * This is the fix for a real bug: `HERMIE_ADMINS=owner` naming an id whose
+   * issuer account had role `user` used to leave `admins` as `[owner]` after
+   * the env reconcile and then `[]` — `owner` gone — the moment
+   * `reconcileIssuerPeople` ran on its own right after, because that
+   * function's role loop deleted any non-admin account from `admins`
+   * regardless of why it was there. Two reconciles, each with its own idea of
+   * the truth, each writing the file its own way, is how that happened; one
+   * function computing the final answer BEFORE anything is written is what
+   * rules it out. `reconcileIssuerPeople` also carries its own guard now
+   * (never delete an env-named id), which is the backstop for a caller that
+   * skips this one — but this is the one every code path in this file
+   * actually takes.
+   *
+   * The whole computation — promoting a named id's issuer role, demoting a
+   * role the container raised once it stops naming the id, and `admins`
+   * following both — is `admin/reconcile.ts`'s, pure. This only writes what
+   * it answers and logs what it had to keep.
+   *
+   * Two files, never one write: the OIDC state (roles, and the `roleFromEnv`
+   * mark beside each role it explains) is written FIRST, then `admin.json`.
+   * A crash between the two leaves roles that are ahead of `admins`, never
+   * the reverse, and the next start's call converges from there: the same
+   * inputs give the same roles (already written, so no second OIDC write) and
+   * the `admins` that should have followed them. Nothing the lost write
+   * would have recorded is needed to recompute it: the `roleFromEnv` mark
+   * lives with the role it explains, and `admins`/`managedAdmins` are reconciled
+   * again from the option and the roles on every call.
+   *
+   * Called after every write to the provider's state and once at startup,
+   * which between them cover every way an account can appear, change role or
+   * go — and, since it is idempotent, the startup call is also the migration
+   * for a deployment that predates any of this.
+   */
+  const keptLogged = new Set<string>()
+
+  async function reconcileAdminState(): Promise<void> {
+    const result = reconcileAdminAndIssuer(withLocalAdminHash(admin), oidc, options.admins)
+
+    // Once per id and reason per process: this runs after every write to
+    // the provider's state, token refreshes included.
+    for (const { id, reason } of result.kept) {
+      const line = `hermie-web: ${id}: ${reason}.`
+
+      if (!keptLogged.has(line)) {
+        keptLogged.add(line)
+        console.warn(line)
+      }
+    }
+
+    if (result.oidc !== oidc) {
+      oidc = result.oidc
+      await saveOidcState(options.stateDir, result.oidc)
+    }
+
+    if (result.admin !== admin) {
+      admin = result.admin
+      await saveAdminState(options.stateDir, result.admin)
     }
   }
 
   const writeOidc = async (next: OidcState): Promise<void> => {
     oidc = next
     await saveOidcState(options.stateDir, next)
-    await syncIssuerPeople()
+    await reconcileAdminState()
   }
 
   const oidcProvider = new OidcProvider({ read: () => oidc, write: writeOidc })
@@ -364,6 +454,7 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
     if (!gatewayFromFlag) {
       configured = false
       probeCache = null
+      freshProbe = null
     }
 
     console.warn(
@@ -439,18 +530,18 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
       // Retention is a setting rather than a flag, so it is applied when it
       // changes rather than on a timer nobody can see.
       void cache.sweep(next.cache.retentionHours * 3600).catch(() => undefined)
-    }
+    },
+    envAdmins: () => options.admins
   })
 
   /*
-    The one-time reconcile, which is also the migration.
-
-    A state directory written before the two lists were one list has accounts on
-    the issuer that the people list has never heard of, and it is corrected here
-    rather than by a version bump: the function is idempotent, so a deployment
-    that is already in step pays one comparison and writes nothing.
+    One reconcile, one write at most: HERMIE_ADMINS, HERMIE_LOCAL_ADMIN_PASSWORD_HASH
+    and the issuer's roles are all brought into step with `admins` before
+    anything is written — see `reconcileAdminState`. It is also the migration
+    for a state directory written before any of this existed: a deployment
+    already in step pays the comparisons and writes nothing.
   */
-  await syncIssuerPeople()
+  await reconcileAdminState()
 
   // Warm the release listing at startup so the first Settings visit is instant,
   // and never let its failure take the server down with it.
@@ -571,6 +662,85 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
 
     if (isGatewayPath(url.pathname)) {
       /*
+        `--no-oidc` / `HERMIE_OIDC=0`: which gateway route is this, really?
+
+        DECIDED ON: the raw request target (`request.url`, the bytes exactly as
+        they arrived), split at its first `?`. The path half is decoded ONCE by
+        `canonicalGatewayPath` — the same single pass uvicorn makes before the
+        gateway routes — and the query half is read with `URLSearchParams`, the
+        same `&`/`=`/`+`/percent rules Starlette's `parse_qsl` applies.
+
+        FORWARDED: that same raw target, byte for byte, behind the gateway's
+        own path prefix (`proxyHttp`'s `verbatimPathAndQuery`). Nothing decoded,
+        re-encoded or normalised on the way — not even by `URL`, which would
+        resolve dot segments and turn a backslash into a slash.
+
+        WHY THEY CANNOT DISAGREE: the gateway decodes the forwarded bytes once;
+        the decision decoded the identical bytes once, the same way. The one
+        place two single passes could still part ways is a decoded segment
+        that is itself decodable or re-parsable — `%256cogin` → `%6cogin`,
+        `login%3F…` → `login?…`, `login%23…` → `login#…`, an encoded `/` or `\`,
+        a `.`/`..` — and every one of those is refused with a 400 before any
+        decision, along with any target that is not visible ASCII in origin
+        form. A parameter the decision reads (`provider`) that appears twice is
+        refused as well: the gateway binds the LAST one, `get()` reads the
+        first. An earlier version decided on a decoded path and then forwarded
+        THAT, so the gateway decoded it a second time; that is the gap this
+        closes.
+
+        Scoped to `!options.oidc`: with OIDC on there is no decision here for an
+        encoding to slip past, and the proxy forwards what it always has.
+      */
+      let verbatimPathAndQuery: string | undefined
+
+      if (!options.oidc) {
+        const rawTarget = request.url ?? '/'
+        const split = splitRequestTarget(rawTarget)
+        const canonicalPath = split ? canonicalGatewayPath(split.path) : null
+
+        if (!split || canonicalPath === null) {
+          json(response, 400, { error: 'bad_path', detail: 'That path could not be safely decoded.' })
+
+          return
+        }
+
+        const query = new URLSearchParams(split.query)
+        // `/auth/native/authorize` needs the gateway's provider list, and reads
+        // it fresh: it is one request per sign-in, and a list up to a minute
+        // stale is a list the gateway may already have changed its answer on.
+        const sessionProviders =
+          canonicalPath === NATIVE_AUTHORIZE_PATH ? ((await gatewayProbe({ fresh: true }))?.providers ?? []) : []
+        const decision = oidcRouteDecision(canonicalPath, query, sessionProviders)
+
+        if (decision === 'ambiguous') {
+          json(response, 400, {
+            error: 'ambiguous_query',
+            detail: 'A sign-in parameter was given more than once.'
+          })
+
+          return
+        }
+
+        if (decision === 'refuse') {
+          /*
+            The gateway's own OIDC/SSO browser routes, refused here too, not
+            merely hidden by the app — so typing the URL by hand, encoded or
+            not, does not start one through this Hermie Web either.
+            Everything else under `/auth` and `/api`, including
+            `/auth/password-login` and the gateway's own `/login` form (where
+            native sign-in with a password provider lands), keeps proxying
+            exactly as before.
+          */
+          response.writeHead(403, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' })
+          response.end('Sign-in with SSO is turned off on this Hermie Web.')
+
+          return
+        }
+
+        verbatimPathAndQuery = rawTarget
+      }
+
+      /*
         The one thing a proxy CAN police, and the honest limit on it.
 
         `readOnly` is a service-level setting (see `admin/access.ts`): it
@@ -596,7 +766,7 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
         return
       }
 
-      proxyHttp(request, response, target, observeForCache(method, url, request.headers.cookie))
+      proxyHttp(request, response, target, observeForCache(method, url, request.headers.cookie), verbatimPathAndQuery)
 
       return
     }
@@ -638,23 +808,56 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
    * build did before this endpoint existed, so a gateway that is briefly down
    * costs a slower sign-in screen and never a stuck one.
    */
-  async function gatewayProbe(): Promise<SetupProbe | null> {
+  async function gatewayProbe({ fresh = false }: { fresh?: boolean } = {}): Promise<SetupProbe | null> {
     if (!configured) {
       return null
     }
 
-    if (probeCache && Date.now() - probeCache.at < PROBE_TTL_MS) {
+    if (!fresh && probeCache && Date.now() - probeCache.at < PROBE_TTL_MS) {
       return probeCache.probe
     }
 
-    try {
-      const probe = await probeGateway(target.gatewayUrl, fetchImpl)
-      probeCache = { at: Date.now(), probe }
-
-      return probe
-    } catch {
-      return null
+    /*
+      "Fresh" still means at most one probe in flight and one per
+      `FRESH_PROBE_TTL_MS`: `/auth/native/authorize` asks for it on every hit,
+      and an unauthenticated client hammering that route must not turn each
+      request into two more against the gateway. Callers inside the window
+      share one answer — a failure for only `FAILED_PROBE_TTL_MS`, so a
+      gateway that is back is seen again within a second.
+    */
+    if (
+      freshProbe &&
+      (!freshProbe.settledAt ||
+        Date.now() - freshProbe.settledAt < (freshProbe.failed ? FAILED_PROBE_TTL_MS : FRESH_PROBE_TTL_MS))
+    ) {
+      return freshProbe.probe
     }
+
+    const current: { probe: Promise<SetupProbe | null>; settledAt: number; failed: boolean } = {
+      settledAt: 0,
+      failed: false,
+      probe: Promise.resolve(null)
+    }
+
+    current.probe = (async () => {
+      try {
+        // With the same `Host` every proxied request carries (`upstreamHeaders`),
+        // so a gateway with its Host guard armed answers this too.
+        const probe = await probeGateway(target.gatewayUrl, probeFetch(new URL(target.publicUrl).host))
+        probeCache = { at: Date.now(), probe }
+
+        return probe
+      } catch {
+        current.failed = true
+
+        return null
+      } finally {
+        current.settledAt = Date.now()
+      }
+    })()
+    freshProbe = current
+
+    return current.probe
   }
 
   /**
@@ -675,6 +878,12 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
       loginReturn: options.loginReturn,
       version: options.version,
       setupRequired: !configured,
+      // Whether the GATEWAY's own OIDC/SSO providers are reachable through
+      // this Hermie Web (`--no-oidc` / `HERMIE_OIDC`). The shared app code
+      // reads this to leave those providers out of the sign-in screen and the
+      // connect wizard; the proxy itself refuses the two browser routes below
+      // regardless of what the app does with this field.
+      oidc: options.oidc,
       // `null` and `[]` are different answers and the app reads them as such:
       // an empty list is a gateway that asks for nothing, `null` is a gateway
       // we could not read, and only the second means "probe it yourself".
@@ -1025,6 +1234,23 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
       */
       const operator = await identities.read({ gatewayUrl, cookie: request.headers.cookie, fresh: true })
       const secret = typeof body.adminSecret === 'string' ? body.adminSecret : ''
+
+      // `HERMIE_LOCAL_ADMIN_PASSWORD_HASH` is the container's own answer to
+      // "what is the local administrator secret" — `/setup` accepting a
+      // plaintext one here would let a browser silently overwrite it with
+      // something the container's configuration never approved, the one
+      // path `enforceLocalAdminHash` cannot re-correct until the NEXT start.
+      if (secret && options.localAdminPasswordHash) {
+        json(response, 400, {
+          error: 'local_admin_managed',
+          detail:
+            'This container sets its own local administrator secret (HERMIE_LOCAL_ADMIN_PASSWORD_HASH); ' +
+            'leave that field blank here.'
+        })
+
+        return
+      }
+
       let next = admin
 
       if (operator?.userId) {
@@ -1056,6 +1282,7 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
           : new URL(gatewayUrl).origin
       configured = true
       probeCache = null
+      freshProbe = null
 
       console.warn(`hermie-web: gateway set to ${target.gatewayUrl} through /setup; /setup is now closed.`)
       // Push and the cache hold a connection that was not started, because at
@@ -1219,16 +1446,78 @@ export async function startHermieWeb(input: StartOptions = {}): Promise<HermieWe
     })
   }
 
-  server.on('upgrade', (request: IncomingMessage, socket: Duplex, head: Buffer) => {
-    const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`)
+  /*
+    Upgrades: WebSockets under `/api`, and nothing else, in either mode.
 
-    if (!isGatewayPath(url.pathname)) {
-      socket.end('HTTP/1.1 404 Not Found\r\nconnection: close\r\n\r\n')
+    Node emits `upgrade` for ANY `Connection: Upgrade`, whatever the Upgrade
+    token says, and uvicorn serves every token but `websocket` as plain HTTP
+    — so an upgrade path that forwarded anything else was a second, unchecked
+    way to reach every gateway route, `/auth/login` and `/auth/callback`
+    included, with the gateway's redirect and cookies relayed straight back.
+    Hence, in order:
+
+     - Only `GET` with `Upgrade: websocket` (any case) is an upgrade at all;
+       everything else is a 400 on the spot.
+     - Only a path under `/api` is proxied: every WebSocket route the gateway
+       has lives there (`web_routers/chat_ws.py`, `display.py`, `audio.py`),
+       and none under `/auth`, `/login` or `/logout`. Anything else is a 404.
+     - With `--no-oidc`, the decision is the same one plain HTTP gets — raw
+       target split, decoded once, `oidcRouteDecision` — and the raw target is
+       what is forwarded, for the same reason (see the HTTP path above).
+  */
+  server.on('upgrade', (request: IncomingMessage, socket: Duplex, head: Buffer) => {
+    const refuse = (status: string): void => {
+      socket.end(`HTTP/1.1 ${status}\r\nconnection: close\r\ncontent-length: 0\r\n\r\n`)
+    }
+
+    if (
+      request.method !== 'GET' ||
+      String(request.headers.upgrade ?? '')
+        .trim()
+        .toLowerCase() !== 'websocket'
+    ) {
+      refuse('400 Bad Request')
 
       return
     }
 
-    proxyUpgrade(request, socket, head, target)
+    const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`)
+
+    if (!isGatewayPath(url.pathname) || !isWebSocketGatewayPath(url.pathname)) {
+      refuse('404 Not Found')
+
+      return
+    }
+
+    let verbatimPathAndQuery: string | undefined
+
+    if (!options.oidc) {
+      const rawTarget = request.url ?? '/'
+      const split = splitRequestTarget(rawTarget)
+      const canonicalPath = split ? canonicalGatewayPath(split.path) : null
+
+      if (!split || canonicalPath === null) {
+        refuse('400 Bad Request')
+
+        return
+      }
+
+      // The route the gateway will actually take, decided the way plain HTTP
+      // decides it. Under `/api` that is always `allow` today; checked anyway,
+      // so a future refused route cannot be reached by upgrading to it.
+      if (
+        !isWebSocketGatewayPath(canonicalPath) ||
+        oidcRouteDecision(canonicalPath, new URLSearchParams(split.query), []) !== 'allow'
+      ) {
+        refuse('404 Not Found')
+
+        return
+      }
+
+      verbatimPathAndQuery = rawTarget
+    }
+
+    proxyUpgrade(request, socket, head, target, verbatimPathAndQuery)
   })
 
   await new Promise<void>((resolve, reject) => {

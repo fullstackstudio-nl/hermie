@@ -66,19 +66,22 @@ A mismatch shows up as HTTP 403 on `/api/status`, or a WebSocket that refuses th
 
 ## Flags and environment
 
-| Flag                    | Environment                             | Default                  |                                                                                                                             |
-| ----------------------- | --------------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
-| `--gateway <url>`       | `HERMIE_GATEWAY_URL`                    | `http://127.0.0.1:9119`  | The gateway. Fixed at start; nothing at runtime can change it.                                                              |
-| `--port <n>`            | `HERMIE_PORT`                           | `9120`                   |                                                                                                                             |
-| `--host <addr>`         | `HERMIE_HOST`                           | `127.0.0.1`              | Anything else puts an unauthenticated port on the network.                                                                  |
-| `--public-url <url>`    | `HERMIE_PUBLIC_URL`                     | derived from `--gateway` | Written into `Host` and `Origin` on proxied requests.                                                                       |
-| `--static <dir>`        | `HERMIE_STATIC_DIR`                     | the bundled `dist/web`   |                                                                                                                             |
-| `--login-return <p>`    | `HERMIE_LOGIN_RETURN`                   | `/`                      | Where a finished sign-in should land. See **OIDC** below.                                                                   |
-| `--install-root`        | `HERMIE_INSTALL_ROOT`                   | the package's parent     | Where self-update unpacks releases and keeps the `current` link.                                                            |
-| `--no-self-update`      | `HERMIE_SELF_UPDATE=0/false/no`         | on                       | Turns `/hermie/update` into a refusal.                                                                                      |
-| `--rollback`            |                                         |                          | Point `current` at the previous release and exit.                                                                           |
-| `--cache-max-mb <n>`    | `HERMIE_CACHE_MAX_MB`                   | `64`                     | Disk the message cache may take. `0` turns it off.                                                                          |
-| `--allow-insecure-oidc` | `HERMIE_ALLOW_INSECURE_OIDC=1/true/yes` | off                      | Let the built-in identity provider be enabled on a non-https origin. The gateway refuses such an issuer anyway — see below. |
+| Flag                    | Environment                             | Default                  |                                                                                                                                                                |
+| ----------------------- | --------------------------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--gateway <url>`       | `HERMIE_GATEWAY_URL`                    | `http://127.0.0.1:9119`  | The gateway. Fixed at start; nothing at runtime can change it.                                                                                                 |
+| `--port <n>`            | `HERMIE_PORT`                           | `9120`                   |                                                                                                                                                                |
+| `--host <addr>`         | `HERMIE_HOST`                           | `127.0.0.1`              | Anything else puts an unauthenticated port on the network.                                                                                                     |
+| `--public-url <url>`    | `HERMIE_PUBLIC_URL`                     | derived from `--gateway` | Written into `Host` and `Origin` on proxied requests.                                                                                                          |
+| `--static <dir>`        | `HERMIE_STATIC_DIR`                     | the bundled `dist/web`   |                                                                                                                                                                |
+| `--login-return <p>`    | `HERMIE_LOGIN_RETURN`                   | `/`                      | Where a finished sign-in should land. See **OIDC** below.                                                                                                      |
+| `--install-root`        | `HERMIE_INSTALL_ROOT`                   | the package's parent     | Where self-update unpacks releases and keeps the `current` link.                                                                                               |
+| `--no-self-update`      | `HERMIE_SELF_UPDATE=0/false/no`         | on                       | Turns `/hermie/update` into a refusal.                                                                                                                         |
+| `--rollback`            |                                         |                          | Point `current` at the previous release and exit.                                                                                                              |
+| `--cache-max-mb <n>`    | `HERMIE_CACHE_MAX_MB`                   | `64`                     | Disk the message cache may take. `0` turns it off.                                                                                                             |
+| `--allow-insecure-oidc` | `HERMIE_ALLOW_INSECURE_OIDC=1/true/yes` | off                      | Let the built-in identity provider be enabled on a non-https origin. The gateway refuses such an issuer anyway — see below.                                    |
+| `--no-oidc`             | `HERMIE_OIDC=0/false/no`                | on                       | Refuse the **gateway's own** OIDC/SSO sign-in routes and hide them from the app. Not the built-in identity provider below — see **Turning SSO off**.           |
+| `--admins <ids>`        | `HERMIE_ADMINS`                         |                          | Comma-separated gateway user ids (OIDC `sub` or basic-auth username, never email) that are administrators of `/admin` on every start — see **Administration**. |
+|                         | `HERMIE_LOCAL_ADMIN_PASSWORD_HASH`      |                          | A local administrator secret, already hashed by `hermie-web hash-secret`. Never a flag — see **Administration**.                                               |
 
 A container — Docker or Kubernetes — is meant to be configured entirely through this column: the
 image's `ENTRYPOINT` is `["hermie-web"]` with no `args`, so `docker run -e HERMIE_GATEWAY_URL=... image`
@@ -139,6 +142,43 @@ automatically — that is the one moment the process can point at somebody witho
 others are added on the page. The gate is the gateway's `/api/auth/me`, asked fresh on every
 request: this service issues no session of its own and has no user database, which is the same rule
 `/hermie/update` and the cache route already follow.
+
+**`--admins` (`HERMIE_ADMINS`)** names administrators from the container itself — a
+comma-separated list of **gateway user ids**, trimmed, with empty entries dropped. A gateway user
+id is an OIDC `sub` or a basic-auth username, exactly the string `/api/auth/me` answers as
+`user_id` — never an email address as a separate way to name somebody, and **not namespaced per
+provider**: if a gateway's OIDC provider and its basic-auth users could ever mint the same string,
+this list cannot tell those two people apart. It is **enforced**: each one is added on every start
+if it is not already there. It is **protected**: an id that is an administrator only because it is
+on this list cannot be removed through `/admin` or its forms — the page marks it "set by
+configuration" and the form refuses with a plain message. An administrator added by hand, through
+`/setup` or the people page, is never affected by this list either way: naming it here changes
+nothing about how it was added, and dropping it from here on a later start does not touch an
+administrator a person actually added — only one this list put there and nothing else did. Restart
+with a shorter list to actually let one of those go.
+
+On the **built-in identity provider**, a listed id that has an account there also has its role
+raised to `admin`, and that raise is taken back — role `user` again — on the first start that no
+longer lists the id. To keep such an account an administrator after the container stops naming it,
+set its role to `admin` on `/admin/oidc` while it is still listed: that makes the role a person's
+decision. Saving it on `/admin/people` does not, since the box there already reads administrator.
+Neither kind of drop ever removes the last way into `/admin`: with no other administrator and no
+local secret, the id stays, the log says which one and why, and a later start lets it go once
+somebody else can get in. If giving back ANY of several raised roles on one start would leave
+nobody, all of them are kept that start, not just one.
+
+**Upgrading and downgrading.** The first start on a version that knows about `HERMIE_ADMINS` reads
+an older `admin.json` — one with no notion of "put there by a container" — and treats every
+administrator already on it as one a person added by hand, so nothing already granted is ever
+silently placed at risk of being dropped by a list that has not even been set yet. Going back to an
+older build afterwards is just as uneventful the other way: that build has never heard of the
+distinction and reads `admins` as one plain list, so every administrator — manual or
+container-declared — keeps working exactly as before, and the "set by configuration" protection is
+the only thing not there until you upgrade again.
+
+If your module needs a way in with no gateway accounts at all, pair this with a **local
+administrator secret** (below) rather than a plaintext password in the environment: hash it once
+with `hermie-web hash-secret` and put the hash in `HERMIE_LOCAL_ADMIN_PASSWORD_HASH`.
 
 **A gateway with no accounts** names everybody the same thing, so an id list would be a list of one.
 Setup can take an **administrator secret** instead, stored as a scrypt hash and never shown back. A
@@ -479,8 +519,8 @@ which is not where `hermes serve` is. Inside a container the self-update endpoin
 `linux/amd64,linux/arm64` and pushes it to GHCR on every `v*` release tag (and, for a one-off
 rebuild of a specific commit, on a manual dispatch):
 
-| Tag                                                     | What it points at                                                           |
-| ------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Tag                                                      | What it points at                                                           |
+| -------------------------------------------------------- | --------------------------------------------------------------------------- |
 | `ghcr.io/fullstackstudio-org/hermie-web:<version>`       | That release, e.g. `:0.2.0`.                                                |
 | `ghcr.io/fullstackstudio-org/hermie-web:<version>-<sha>` | That exact build, pinned to the commit it came from.                        |
 | `ghcr.io/fullstackstudio-org/hermie-web:latest`          | The newest tagged release. Not set by a one-off rebuild of an older commit. |
@@ -488,6 +528,41 @@ rebuild of a specific commit, on a manual dispatch):
 Pick a version or version-sha tag for anything you run more than once; `latest` is for trying it
 out. There is no `npm i` in the image build, so the same `docker pull` gets you the exact bytes
 `hermie-web.zip` on that release would have given you.
+
+## Turning SSO off
+
+`--no-oidc` (`HERMIE_OIDC=0`) is for a deployment that would rather this service offer only
+password sign-in, whatever the gateway is configured with. It does two things together:
+
+- `/hermie/config.json` answers `oidc: false`, and the app leaves every OIDC/SSO provider out of the
+  sign-in screen and the connect wizard — only a password provider remains, and a gateway whose only
+  provider is OIDC/SSO is told so in plain language instead of shown an empty screen.
+- The proxy refuses `GET /auth/login` and `GET /auth/callback` — the OIDC start and callback routes
+  — with a 403 and a short plain-text reason, so typing either URL by hand does not start one
+  either. `/auth/native/authorize` is refused the same way unless the provider the gateway would
+  pick takes a password (named, or the gateway's only provider when none is named); the gateway's
+  own `/login` form, where that flow lands, stays reachable. A gateway path that does not decode
+  cleanly in one pass (an encoded `%`, `?`, `#`, `/` or `\`, a dot segment) or that names
+  `provider` twice is refused with a 400; under `/api`, where names may carry such escapes, the path
+  is forwarded as sent. `POST /auth/password-login`, `/api/auth/me`, logout and every WebSocket
+  ticket are unaffected.
+
+Whatever this flag says, an HTTP upgrade is only proxied as a WebSocket (`GET` with
+`Upgrade: websocket`) to a path under `/api`, where every gateway WebSocket lives. Any other
+`Upgrade` value is a 400, any other path a 404, and a gateway that refuses an upgrade has only its
+status relayed — none of its headers or body. With the flag off, an upgrade gets the same path
+checks as an ordinary request and is forwarded as sent.
+
+With `HERMIE_OIDC=0`, point `--gateway` at the gateway itself (`http://127.0.0.1:9119`, a pod or
+service address), not through an edge proxy that normalises paths: the check decides on the path
+exactly as the gateway will decode it, and a hop that resolves or decodes it again in between can
+turn an allowed path into a refused one.
+
+`hermie-web login` below is a **different thing** and is unaffected either way: it is this CLI
+signing itself in to an OIDC-gated _upstream_ gateway, once, to get the refresh token `--push`
+spends, and it never runs in a browser. This flag is also unrelated to the **built-in identity
+provider** further down — that is this service acting as an OpenID Provider _for_ the gateway; this
+one is about the gateway's _own_ upstream providers, reached through this proxy.
 
 ## OIDC: Hermie Web must share the gateway's public hostname (another port)
 

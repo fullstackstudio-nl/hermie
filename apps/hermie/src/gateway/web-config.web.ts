@@ -126,6 +126,8 @@ async function fetchConfig(): Promise<HermieWebConfig | null> {
     authRequired: typeof body.authRequired === 'boolean' ? body.authRequired : null,
     authKinds: stringsOrNull(body.authKinds),
     providers: providersOrNull(body.providers),
+    // Absent (an older server) reads as on, same as every other flag here.
+    oidc: body.oidc !== false,
     service: serviceOf(body.service),
     branding: brandingOf(body.branding),
     flags: flagsOf(body.flags)

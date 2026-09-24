@@ -1,8 +1,9 @@
-import type { IncomingMessage } from 'node:http'
+import { createServer, type IncomingMessage, type RequestListener } from 'node:http'
+import type { AddressInfo } from 'node:net'
 
 import { describe, expect, it } from 'vitest'
 
-import { isSecureRequest, rewriteSetCookie, upstreamHeaders } from './proxy'
+import { hostPinnedFetch, isSecureRequest, rewriteSetCookie, upstreamHeaders } from './proxy'
 
 /**
  * The two pieces that decide what the gateway is told about the browser, and
@@ -67,6 +68,62 @@ describe('the cookies that come back', () => {
   it('always drops Domain, whichever scheme it was', () => {
     for (const secure of [true, false]) {
       expect(rewriteSetCookie('a=b; Domain=hermes.example.com; Path=/', secure).toLowerCase()).not.toContain('domain=')
+    }
+  })
+})
+
+describe('hostPinnedFetch', () => {
+  async function serve(listener: RequestListener): Promise<{ url: string; close: () => Promise<void> }> {
+    const server = createServer(listener)
+
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+
+    return {
+      url: `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`,
+      close: () =>
+        new Promise(resolve => {
+          server.closeAllConnections()
+          server.close(() => resolve())
+        })
+    }
+  }
+
+  it('sends the Host it was given, and answers the body', async () => {
+    const server = await serve((req, res) => res.end(JSON.stringify({ host: req.headers.host })))
+
+    try {
+      const response = await hostPinnedFetch('hermes.example.test')(`${server.url}/api/status`)
+
+      expect(await response.json()).toEqual({ host: 'hermes.example.test' })
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('refuses an answer larger than a megabyte', async () => {
+    const server = await serve((_req, res) => {
+      res.write(Buffer.alloc(768 * 1024))
+      res.end(Buffer.alloc(768 * 1024))
+    })
+
+    try {
+      await expect(hostPinnedFetch('h')(`${server.url}/`)).rejects.toThrow(/too large/)
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('settles, rather than hangs, when the answer is cut off part-way', async () => {
+    const server = await serve((_req, res) => {
+      res.writeHead(200, { 'content-length': '100' })
+      res.write('partial')
+      setTimeout(() => res.socket?.destroy(), 10)
+    })
+
+    try {
+      await expect(hostPinnedFetch('h')(`${server.url}/`)).rejects.toThrow()
+    } finally {
+      await server.close()
     }
   })
 })

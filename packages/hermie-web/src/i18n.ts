@@ -392,6 +392,10 @@ export interface WebStrings {
       allowedBotsLabel: string
       pushAllowed: string
       administratorBox: string
+      /** The short pill beside a name whose administrator status came from `HERMIE_ADMINS`. */
+      managedNote: string
+      /** The fuller sentence in that same row's panel. */
+      managedAdminNote: string
       addHeading: string
       addLabel: string
       addButton: string
@@ -853,6 +857,10 @@ const EN: WebStrings = {
       allowedBotsLabel: 'Allowed bots (blank = all)',
       pushAllowed: 'Push allowed',
       administratorBox: 'Administrator',
+      managedNote: 'set by configuration',
+      managedAdminNote:
+        'This administrator is named by this container’s HERMIE_ADMINS and cannot be removed here. Drop it from ' +
+        'that list and restart to let it go.',
       addHeading: 'Add somebody',
       addLabel: 'Gateway user id',
       addButton: 'Add',
@@ -1320,6 +1328,10 @@ const NL: WebCatalogue<WebStrings> = {
       allowedBotsLabel: 'Toegestane bots (leeg = alle)',
       pushAllowed: 'Push toegestaan',
       administratorBox: 'Beheerder',
+      managedNote: 'ingesteld via configuratie',
+      managedAdminNote:
+        'Deze beheerder komt uit de HERMIE_ADMINS van deze container en kan hier niet worden verwijderd. Haal het ' +
+        'id van die lijst en herstart om dat wel te doen.',
       addHeading: 'Iemand toevoegen',
       addLabel: 'Gateway-gebruikers-id',
       addButton: 'Toevoegen',
@@ -1771,6 +1783,10 @@ const DE: WebCatalogue<WebStrings> = {
       allowedBotsLabel: 'Erlaubte Bots (leer = alle)',
       pushAllowed: 'Push erlaubt',
       administratorBox: 'Administrator',
+      managedNote: 'per Konfiguration festgelegt',
+      managedAdminNote:
+        'Dieser Administrator wird von HERMIE_ADMINS dieses Containers benannt und kann hier nicht entfernt ' +
+        'werden. Entferne die id aus dieser Liste und starte neu, um das zu ändern.',
       addHeading: 'Jemanden hinzufügen',
       addLabel: 'Gateway-Benutzer-id',
       addButton: 'Hinzufügen',

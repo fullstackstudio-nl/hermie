@@ -8,6 +8,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { startHermieWeb, type HermieWebServer } from './server'
 import { normalizeGatewayInput, ownOrigin, probeGateway, readSetup, SETUP_FILE, writeSetup } from './setup'
+import { hashLocalSecret } from './admin/access'
+import { loadAdminState } from './admin/state'
 import { loadPushState } from './push/state'
 
 /**
@@ -342,6 +344,59 @@ describe('saving the gateway', () => {
       expect(overridden.options.gatewayUrl).toBe('http://127.0.0.1:9999/')
     } finally {
       await overridden.close()
+    }
+  })
+})
+
+describe('a container-managed local administrator secret', () => {
+  it('refuses a plaintext one offered through /setup rather than silently overwriting it', async () => {
+    const stateDir = await state()
+    const web = await startHermieWeb({
+      port: 0,
+      staticDir,
+      stateDir,
+      version: '9.9.9',
+      selfUpdate: false,
+      localAdminPasswordHash: hashLocalSecret('a long enough phrase'),
+      env: {}
+    })
+
+    try {
+      const answer = await post(web, '/hermie/setup/save', {
+        gateway: gateway.url,
+        adminSecret: 'a different phrase typed into the form'
+      })
+
+      expect(answer.status).toBe(400)
+      expect(((await answer.json()) as { error: string }).error).toBe('local_admin_managed')
+
+      // And the container's own hash is what a sign-in still has to match.
+      const state2 = await loadAdminState(stateDir)
+
+      expect(state2.localAdmin).toEqual(hashLocalSecret('a long enough phrase', state2.localAdmin?.salt))
+    } finally {
+      await web.close()
+    }
+  })
+
+  it('still lets the save go through when the form leaves the field blank', async () => {
+    const stateDir = await state()
+    const web = await startHermieWeb({
+      port: 0,
+      staticDir,
+      stateDir,
+      version: '9.9.9',
+      selfUpdate: false,
+      localAdminPasswordHash: hashLocalSecret('a long enough phrase'),
+      env: {}
+    })
+
+    try {
+      const answer = await post(web, '/hermie/setup/save', { gateway: gateway.url })
+
+      expect(answer.status).toBe(200)
+    } finally {
+      await web.close()
     }
   })
 })

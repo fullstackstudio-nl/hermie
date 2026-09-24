@@ -132,6 +132,8 @@ export const app: Translation<typeof strings> = {
       tokenBlockedTitle: 'Dieses Gateway lässt sich aus einem Browser nicht nutzen',
       tokenBlockedBody:
         'Es authentifiziert sich mit einem Session-Token, und ein Browser-Tab hat keinen sicheren Ort dafür — alles, was auf der Seite läuft, könnte es lesen. Nutze die Hermie-App, oder stelle das Gateway hinter einen Identity Provider, damit es eine Browser-Session ausstellen kann.',
+      ssoOff:
+        'Die Anmeldung per SSO ist auf diesem Hermie Web ausgeschaltet. Bitte denjenigen, der es betreibt, dich auf einem anderen Weg anzumelden.',
       signOutOfSession: 'Abmelden',
 
       webview: {

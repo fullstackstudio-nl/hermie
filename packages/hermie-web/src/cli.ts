@@ -6,11 +6,23 @@
  */
 import { parseArgs } from 'node:util'
 
+import { encodeLocalSecret, hashLocalSecret } from './admin/access'
 import { HELP } from './help'
 import { describeHost, resolveOptions } from './options'
 import { login } from './push/login'
 import { rollback } from './update'
 import { startHermieWeb } from './server'
+
+/** All of stdin, as text — what `hash-secret` reads the secret from. */
+async function readStdin(): Promise<string> {
+  const chunks: Buffer[] = []
+
+  for await (const chunk of process.stdin) {
+    chunks.push(chunk as Buffer)
+  }
+
+  return Buffer.concat(chunks).toString('utf8')
+}
 
 async function main(): Promise<void> {
   const { positionals, values } = parseArgs({
@@ -31,6 +43,8 @@ async function main(): Promise<void> {
       'vapid-subject': { type: 'string' },
       'push-server-requests': { type: 'boolean', default: false },
       'allow-insecure-oidc': { type: 'boolean', default: false },
+      'no-oidc': { type: 'boolean', default: false },
+      admins: { type: 'string' },
       provider: { type: 'string' },
       'redirect-port': { type: 'string' },
       help: { type: 'boolean', default: false }
@@ -40,6 +54,35 @@ async function main(): Promise<void> {
 
   if (values.help) {
     console.warn(HELP)
+
+    return
+  }
+
+  /*
+    `hermie-web hash-secret`, for `HERMIE_LOCAL_ADMIN_PASSWORD_HASH`.
+
+    Reads the whole of stdin as the secret — a single trailing newline is
+    stripped, because that is what `echo` and every editor's "save" add and
+    not a character the secret itself is likely to end on — and prints
+    `admin/access.ts`'s `encodeLocalSecret` line and nothing else, so it can
+    be piped straight into a manifest or a `kubectl create secret`. There is
+    no flag for a plaintext password anywhere in this file, on purpose: see
+    `HERMIE_LOCAL_ADMIN_PASSWORD_HASH`'s own note.
+
+    Handled BEFORE `resolveOptions` below: this subcommand needs none of the
+    gateway/port/state-dir machinery that call validates, and running it
+    first means a bad HERMIE_GATEWAY_URL or the like in the calling
+    environment cannot stop `hash-secret` from working when all somebody
+    wants is a hash to paste into a manifest.
+  */
+  if (positionals[0] === 'hash-secret') {
+    const secret = (await readStdin()).replace(/\r?\n$/, '')
+
+    if (!secret) {
+      throw new Error('hash-secret read an empty secret from stdin.')
+    }
+
+    console.log(encodeLocalSecret(hashLocalSecret(secret)))
 
     return
   }
@@ -59,7 +102,9 @@ async function main(): Promise<void> {
     ...(values.push ? { push: true } : {}),
     ...(values['push-server-requests'] ? { pushServerRequests: true } : {}),
     ...(values['allow-insecure-oidc'] ? { allowInsecureOidc: true } : {}),
-    ...(values['no-self-update'] ? { selfUpdate: false } : {})
+    ...(values['no-self-update'] ? { selfUpdate: false } : {}),
+    ...(values['no-oidc'] ? { oidc: false } : {}),
+    ...(values.admins !== undefined ? { admins: values.admins.split(',') } : {})
   })
 
   // A subcommand, not a flag: it is interactive, it exits when it is done, and
@@ -103,7 +148,10 @@ async function main(): Promise<void> {
     cacheMaxMb: options.cacheMaxMb,
     vapidSubject: options.vapidSubject,
     pushServerRequests: options.pushServerRequests,
-    allowInsecureOidc: options.allowInsecureOidc
+    allowInsecureOidc: options.allowInsecureOidc,
+    oidc: options.oidc,
+    admins: options.admins,
+    localAdminPasswordHash: options.localAdminPasswordHash
   })
 
   console.warn(`hermie-web ${options.version} on http://${describeHost(options.host)}:${server.port}`)

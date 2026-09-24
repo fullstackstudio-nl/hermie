@@ -28,11 +28,18 @@ describe('--help', () => {
     ['--state-dir', 'HERMIE_STATE_DIR'],
     ['--vapid-subject', 'HERMIE_VAPID_SUBJECT'],
     ['--push-server-requests', 'HERMIE_PUSH_SERVER_REQUESTS'],
-    ['--allow-insecure-oidc', 'HERMIE_ALLOW_INSECURE_OIDC']
+    ['--allow-insecure-oidc', 'HERMIE_ALLOW_INSECURE_OIDC'],
+    ['--no-oidc', 'HERMIE_OIDC'],
+    ['--admins', 'HERMIE_ADMINS']
   ]
 
   it.each(flagsWithEnv)('lists the flag %s and its environment variable %s', (flag, env) => {
     expect(text).toContain(flag)
     expect(text).toContain(env)
+  })
+
+  it('names hash-secret and its env-only variable, with no flag for the plaintext secret', () => {
+    expect(text).toContain('hash-secret')
+    expect(text).toContain('HERMIE_LOCAL_ADMIN_PASSWORD_HASH')
   })
 })

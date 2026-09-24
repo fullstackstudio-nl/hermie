@@ -106,6 +106,29 @@ export interface AdminState {
   /** Gateway user ids that may open `/admin`. */
   admins: string[]
   /**
+   * Which entries in `admins` are there SOLELY because a past `HERMIE_ADMINS`
+   * reconcile put them there (`admin/env-admins.ts`).
+   *
+   * Recorded POSITIVELY, and only at the moment an env reconcile adds a NEW
+   * id — never derived from "not otherwise accounted for". That is
+   * deliberate: this file used to track the opposite (who put an id there
+   * BY HAND), and dropping "not manual" over into "therefore env-managed"
+   * turned out unsound the moment an id reached `admins` any THIRD way — a
+   * hand-edited file, a migration, a role granted on `/admin/oidc` before
+   * that path recorded anything — because none of those ever had a reason to
+   * mark themselves manual, and the next reconcile read that silence as
+   * license to drop them. Tracking the positive fact instead means an id
+   * never touched by `env-admins.ts` is never touched by it later either,
+   * whatever else is true about how it got onto `admins`.
+   *
+   * A subset of `admins` by construction — `env-admins.ts` never adds one
+   * without the other — so nothing here ever names somebody `admins` itself
+   * does not. Absent on every file written before this existed, which reads
+   * as `[]`: nothing wrote it, so nothing is here because of it, which is the
+   * safe (and correct) reading of "before this feature existed at all".
+   */
+  managedAdmins: string[]
+  /**
    * The local administrator, for a gateway with no accounts.
    *
    * `scrypt`, a per-credential salt, and the hash — never the secret. A token
@@ -131,6 +154,7 @@ export function emptyAdminState(): AdminState {
   return {
     v: ADMIN_STATE_VERSION,
     admins: [],
+    managedAdmins: [],
     push: {
       // Everything on: this is a CEILING an operator can lower, not a second
       // opt-in on top of the one each device already made. A default of "off"
@@ -187,9 +211,24 @@ export function adminStateOf(parsed: unknown): AdminState {
     }
   }
 
+  const admins = Array.isArray(raw.admins)
+    ? raw.admins.filter((id): id is string => typeof id === 'string' && !!id)
+    : []
+  /*
+    `managedAdmins` is read literally, intersected with `admins` so a
+    hand-edited file cannot name somebody `admins` itself does not. Absent
+    entirely — every file written before this existed — reads as `[]`: no
+    admin on such a file is there because of a `HERMIE_ADMINS` reconcile this
+    build ran, since the feature did not exist yet to run one.
+  */
+  const managedAdmins = Array.isArray(raw.managedAdmins)
+    ? raw.managedAdmins.filter((id): id is string => typeof id === 'string' && admins.includes(id))
+    : []
+
   return {
     v: ADMIN_STATE_VERSION,
-    admins: Array.isArray(raw.admins) ? raw.admins.filter((id): id is string => typeof id === 'string' && !!id) : [],
+    admins,
+    managedAdmins,
     ...(str(local.salt) && str(local.hash) ? { localAdmin: { salt: str(local.salt), hash: str(local.hash) } } : {}),
     push: {
       types: Object.fromEntries(PUSH_TYPES.map(type => [type, bool(types[type], base.push.types[type])])) as Record<

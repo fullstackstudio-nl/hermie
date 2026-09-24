@@ -207,18 +207,35 @@ export type ProxyObserver = (upstream: IncomingMessage) => ((chunk: Buffer | nul
  * BROWSER has to walk, because each hop sets cookies on a different origin and
  * the last one lands back on Hermie Web's own `/`. Following them here would
  * collapse the chain into one response and strand every cookie on the way.
+ *
+ * `verbatimPathAndQuery`, when given, is sent upstream EXACTLY as it is,
+ * behind the gateway's own path prefix: no `URL` parse, no decoding, no
+ * re-encoding, no dot-segment or backslash normalisation. `server.ts`'s
+ * `--no-oidc` check passes the raw request target here, because it decided on
+ * those same bytes decoded once the way the gateway decodes them — and any
+ * rewrite in between (a decode, above all) would hand the gateway a path the
+ * check never saw. See the comment at that decision for the whole argument.
  */
 export function proxyHttp(
   request: IncomingMessage,
   response: ServerResponse,
   target: ProxyTarget,
-  observe?: ProxyObserver
+  observe?: ProxyObserver,
+  verbatimPathAndQuery?: string
 ): void {
   const gateway = new URL(target.gatewayUrl)
-  const upstreamUrl = new URL(request.url ?? '/', gateway)
   // The gateway's own path prefix, when it is served under one, is part of the
-  // base URL; `URL` keeps it because the request path is appended to it here.
-  const pathWithPrefix = `${gateway.pathname.replace(/\/+$/, '')}${upstreamUrl.pathname}${upstreamUrl.search}`
+  // base URL and goes in front of the request path either way.
+  const prefix = gateway.pathname.replace(/\/+$/, '')
+  let pathWithPrefix: string
+
+  if (verbatimPathAndQuery !== undefined) {
+    pathWithPrefix = `${prefix}${verbatimPathAndQuery}`
+  } else {
+    const upstreamUrl = new URL(request.url ?? '/', gateway)
+
+    pathWithPrefix = `${prefix}${upstreamUrl.pathname}${upstreamUrl.search}`
+  }
 
   const proxied = agentFor(gateway).request(
     {
@@ -296,10 +313,25 @@ export function proxyHttp(
  * and the frame boundaries are all exactly what the two ends agreed, and it is
  * why this package has no runtime dependencies at all.
  */
-export function proxyUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer, target: ProxyTarget): void {
+export function proxyUpgrade(
+  request: IncomingMessage,
+  socket: Duplex,
+  head: Buffer,
+  target: ProxyTarget,
+  verbatimPathAndQuery?: string
+): void {
   const gateway = new URL(target.gatewayUrl)
-  const upstreamUrl = new URL(request.url ?? '/', gateway)
-  const pathWithPrefix = `${gateway.pathname.replace(/\/+$/, '')}${upstreamUrl.pathname}${upstreamUrl.search}`
+  // Forwarded exactly as `proxyHttp` forwards it — see that function's note.
+  const prefix = gateway.pathname.replace(/\/+$/, '')
+  let pathWithPrefix: string
+
+  if (verbatimPathAndQuery !== undefined) {
+    pathWithPrefix = `${prefix}${verbatimPathAndQuery}`
+  } else {
+    const upstreamUrl = new URL(request.url ?? '/', gateway)
+
+    pathWithPrefix = `${prefix}${upstreamUrl.pathname}${upstreamUrl.search}`
+  }
   const headers = upstreamHeaders(request, target)
 
   // The upgrade headers are hop-by-hop and were stripped above, so they are put
@@ -354,26 +386,128 @@ export function proxyUpgrade(request: IncomingMessage, socket: Duplex, head: Buf
     socket.pipe(upstreamSocket)
   })
 
-  // The gateway answers an ordinary response when it REFUSES the upgrade — a
-  // 403 from the Host/Origin guard, a 401 from a bad ticket. That answer is the
-  // diagnosis, so it is relayed rather than replaced with a generic failure.
+  /*
+    The gateway answers an ordinary response when it REFUSES the upgrade — a
+    403 from the Host/Origin guard, a 401 from a bad ticket. Only the STATUS
+    is relayed: no upstream header and no body. A browser's WebSocket API can
+    read neither (it sees a failed connection and nothing more), so nothing
+    legitimate loses anything, and the status is still there for anybody
+    diagnosing with curl. What a relayed header could carry is the problem:
+    a non-101 answer is by definition the gateway serving this request as
+    something other than a WebSocket, and its `Set-Cookie` or `Location` —
+    a session, a PKCE cookie, an identity provider redirect — must never
+    reach a client through a path none of the HTTP checks ran on.
+  */
   proxied.on('response', upstream => {
-    const lines = [`HTTP/1.1 ${upstream.statusCode ?? 502} ${upstream.statusMessage ?? ''}`, 'connection: close']
+    const status =
+      upstream.statusCode && upstream.statusCode >= 200 && upstream.statusCode <= 599 ? upstream.statusCode : 502
 
-    for (const [name, value] of Object.entries(upstream.headers)) {
-      if (value === undefined || name.toLowerCase() === 'connection') {
-        continue
-      }
-
-      for (const entry of Array.isArray(value) ? value : [value]) {
-        lines.push(`${name}: ${entry}`)
-      }
-    }
-
-    socket.write(`${lines.join('\r\n')}\r\n\r\n`)
-    upstream.pipe(socket)
+    upstream.resume()
+    socket.end(`HTTP/1.1 ${String(status)} Upgrade Refused\r\nconnection: close\r\ncontent-length: 0\r\n\r\n`)
   })
 
   proxied.on('error', error => fail(String(error)))
   proxied.end()
+}
+
+/** Statuses a `Response` may not carry a body for. */
+const NULL_BODY_STATUSES = new Set([101, 103, 204, 205, 304])
+
+/** The most a probe answer may be; the real ones are a few hundred bytes. */
+const HOST_PINNED_MAX_BODY = 1024 * 1024
+
+/** A ceiling of its own, for a caller that passes no signal. */
+const HOST_PINNED_TIMEOUT_MS = 10_000
+
+/**
+ * A `fetch` for this service's OWN small requests to the gateway — the setup
+ * probe — that sends the same `Host` `proxyHttp` does.
+ *
+ * The platform `fetch` will not send a `Host` of the caller's choosing, so a
+ * gateway whose Host guard is armed refuses the probe while it accepts every
+ * proxied request. That failure is fail-closed (no provider list, so
+ * `--no-oidc` refuses native sign-in), but it is still a probe answering a
+ * different question from the one the browser's requests ask. Only what the
+ * probe uses is supported: a URL string, a method, headers, a signal, and a
+ * buffered body in the answer — at most `HOST_PINNED_MAX_BODY`, within
+ * `HOST_PINNED_TIMEOUT_MS`, and settled exactly once whether the answer ends,
+ * errors or is cut off.
+ */
+export function hostPinnedFetch(host: string): typeof fetch {
+  return (async (input: Parameters<typeof fetch>[0], init?: RequestInit): Promise<Response> => {
+    const url = new URL(input instanceof Request ? input.url : String(input))
+    const headers: Record<string, string> = {}
+
+    new Headers(init?.headers).forEach((value, name) => {
+      headers[name] = value
+    })
+    headers.host = host
+
+    return new Promise<Response>((resolve, reject) => {
+      let settled = false
+      const settle = (outcome: () => void): void => {
+        if (!settled) {
+          settled = true
+          outcome()
+        }
+      }
+      const fail = (error: Error): void => settle(() => reject(error))
+
+      const outgoing = agentFor(url).request(
+        url,
+        { method: init?.method ?? 'GET', headers, ...(init?.signal ? { signal: init.signal } : {}) },
+        incoming => {
+          const chunks: Buffer[] = []
+          let size = 0
+
+          incoming.on('data', (chunk: Buffer) => {
+            size += chunk.length
+
+            if (size > HOST_PINNED_MAX_BODY) {
+              fail(new Error('gateway answer too large'))
+              outgoing.destroy()
+
+              return
+            }
+
+            chunks.push(chunk)
+          })
+          incoming.on('error', fail)
+          // `close` without `end` is an answer cut off part-way.
+          incoming.on('close', () => {
+            if (!incoming.complete) {
+              fail(new Error('gateway answer cut off'))
+            }
+          })
+          incoming.on('end', () => {
+            const status = incoming.statusCode ?? 502
+            const responseHeaders = new Headers()
+
+            for (const [name, value] of Object.entries(incoming.headers)) {
+              for (const one of Array.isArray(value) ? value : value === undefined ? [] : [value]) {
+                responseHeaders.append(name, one)
+              }
+            }
+
+            settle(() =>
+              resolve(
+                new Response(NULL_BODY_STATUSES.has(status) ? null : Buffer.concat(chunks), {
+                  status: status < 200 || status > 599 ? 502 : status,
+                  headers: responseHeaders
+                })
+              )
+            )
+          })
+        }
+      )
+
+      outgoing.setTimeout(HOST_PINNED_TIMEOUT_MS, () => {
+        fail(new Error('gateway did not answer in time'))
+        outgoing.destroy()
+      })
+      outgoing.on('error', fail)
+      outgoing.on('close', () => fail(new Error('gateway connection closed')))
+      outgoing.end()
+    })
+  }) as typeof fetch
 }

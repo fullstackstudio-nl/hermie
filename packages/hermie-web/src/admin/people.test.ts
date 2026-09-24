@@ -308,9 +308,15 @@ describe('an account on the issuer is a person on the people list', () => {
 
     const sub = subFor('ada')
     const page = await open(await signIn(), '/admin/people')
-    // Read after the page: the row is written to memory as the request is
-    // served and to the file just behind it.
-    const state = await loadAdminState(stateDir)
+    // The row is written to memory as the request is served and to the file
+    // just behind it, without being awaited — so wait for the file rather than
+    // assume the page took long enough.
+    let state = await loadAdminState(stateDir)
+
+    for (let tries = 0; tries < 100 && !state.users[ADA.userId]; tries++) {
+      await new Promise(resolve => setTimeout(resolve, 20))
+      state = await loadAdminState(stateDir)
+    }
 
     expect(Object.keys(state.users)).toContain(ADA.userId)
     expect(Object.keys(state.users)).toContain(sub)

@@ -19,6 +19,11 @@ export function startCookieSignIn(_baseUrl: string, _provider?: string, _next?: 
   // Native builds never have a cookie session to start.
 }
 
+/** Reload at the app's own root, for reauth when the OAuth door is off. */
+export function reauthAtAppRoot(): void {
+  // Native builds never go through the cookie flow at all.
+}
+
 /** `POST /auth/password-login`; resolves with where the gateway wants us next. */
 export async function passwordLogin(_input: PasswordLoginInput): Promise<string> {
   throw new Error('Password sign-in is a browser-only flow.')

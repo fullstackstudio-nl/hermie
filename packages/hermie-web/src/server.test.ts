@@ -87,7 +87,9 @@ describe('local endpoints', () => {
       gatewayOrigin: `http://${PUBLIC_HOST}`,
       loginReturn: '/hermie',
       version: '9.9.9',
-      setupRequired: false
+      setupRequired: false,
+      // The default, unchanged from before the flag existed.
+      oidc: true
     })
   })
 })
@@ -219,5 +221,218 @@ describe('cookie sign-in end to end, through the proxy', () => {
     })
 
     expect(response.status).toBe(401)
+  })
+})
+
+describe('--no-oidc', () => {
+  let oidcOffWeb: HermieWebServer
+  let oidcOffStateDir: string
+
+  beforeAll(async () => {
+    oidcOffStateDir = await mkdtemp(path.join(tmpdir(), 'hermie-web-no-oidc-state-'))
+    oidcOffWeb = await startHermieWeb({
+      gatewayUrl: gateway.url,
+      port: 0,
+      publicUrl: `http://${PUBLIC_HOST}`,
+      staticDir,
+      stateDir: oidcOffStateDir,
+      version: '9.9.9',
+      selfUpdate: false,
+      oidc: false
+    })
+  })
+
+  afterAll(async () => {
+    await oidcOffWeb.close()
+  })
+
+  it('says so in the bootstrap', async () => {
+    expect(await (await fetch(`${oidcOffWeb.url}/hermie/config.json`)).json()).toMatchObject({ oidc: false })
+  })
+
+  it('refuses the OIDC start route with a short plain-text 403', async () => {
+    const response = await fetch(`${oidcOffWeb.url}/auth/login?provider=self-hosted&next=/`, { redirect: 'manual' })
+
+    expect(response.status).toBe(403)
+    expect(response.headers.get('content-type')).toContain('text/plain')
+    expect(await response.text()).toContain('SSO')
+  })
+
+  it('refuses the OIDC callback route the same way', async () => {
+    const response = await fetch(`${oidcOffWeb.url}/auth/callback?code=whatever&state=whatever`, {
+      redirect: 'manual'
+    })
+
+    expect(response.status).toBe(403)
+  })
+
+  it('still lets password sign-in through', async () => {
+    const response = await fetch(`${oidcOffWeb.url}/auth/password-login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ provider: 'self-hosted', username: 'tester', password: 'hunter2', next: '/' })
+    })
+
+    expect(response.status).toBe(200)
+  })
+
+  it('still lets /api/auth/me and logout through', async () => {
+    const me = await fetch(`${oidcOffWeb.url}/api/auth/me`)
+
+    // 401 (no session) rather than 403 — the route itself is reached, the
+    // gateway is the one answering.
+    expect(me.status).toBe(401)
+
+    const logout = await fetch(`${oidcOffWeb.url}/auth/logout`, { method: 'POST', redirect: 'manual' })
+
+    expect(logout.status).not.toBe(403)
+  })
+
+  /*
+    The actual bypass this whole describe block exists to close:
+    `URL.prototype.pathname` never decodes a percent-escape, and the gateway's
+    own ASGI server decodes one, once, before it routes — so `/auth/login`
+    compared against the literal, undecoded string read as "something else"
+    here while the gateway's own router still ran the login flow.
+  */
+  describe('an encoded attempt at the same route', () => {
+    it('refuses /auth/%6cogin exactly like the plain spelling', async () => {
+      const response = await fetch(`${oidcOffWeb.url}/auth/%6cogin?provider=self-hosted`, { redirect: 'manual' })
+
+      expect(response.status).toBe(403)
+    })
+
+    it('refuses /auth/%63allback exactly like the plain spelling', async () => {
+      const response = await fetch(`${oidcOffWeb.url}/auth/%63allback?code=x&state=y`, { redirect: 'manual' })
+
+      expect(response.status).toBe(403)
+    })
+
+    it('refuses a trailing slash the same way', async () => {
+      const response = await fetch(`${oidcOffWeb.url}/auth/login/?provider=self-hosted`, { redirect: 'manual' })
+
+      expect(response.status).toBe(403)
+    })
+
+    it('refuses an encoded slash hiding inside a segment, with a 400 rather than proxying it anywhere', async () => {
+      const response = await fetch(`${oidcOffWeb.url}/auth/%2Flogin`, { redirect: 'manual' })
+
+      expect(response.status).toBe(400)
+    })
+
+    it('does not treat a double-encoded segment as a match, one way or the other', async () => {
+      // One decode pass turns `%256cogin` into the literal text `%6cogin` —
+      // not `login` — which is exactly what the gateway's own single decode
+      // pass would also land on, so this is not a bypass; it also is not
+      // refused as if it were the OIDC route, since it plainly is not one.
+      const response = await fetch(`${oidcOffWeb.url}/auth/%256cogin`, { redirect: 'manual' })
+
+      expect(response.status).not.toBe(403)
+    })
+
+    it('refuses the encoded route regardless of method', async () => {
+      const head = await fetch(`${oidcOffWeb.url}/auth/%6cogin?provider=self-hosted`, {
+        method: 'HEAD',
+        redirect: 'manual'
+      })
+      const post = await fetch(`${oidcOffWeb.url}/auth/%6cogin?provider=self-hosted`, {
+        method: 'POST',
+        redirect: 'manual'
+      })
+
+      expect(head.status).toBe(403)
+      expect(post.status).toBe(403)
+    })
+  })
+
+  describe('/auth/native/authorize', () => {
+    it('refuses a provider this build does not know takes a password', async () => {
+      const response = await fetch(`${oidcOffWeb.url}/auth/native/authorize?provider=okta`, { redirect: 'manual' })
+
+      expect(response.status).toBe(403)
+    })
+
+    it('lets an empty provider through when the gateway’s only provider takes a password', async () => {
+      // The gateway auto-selects its ONLY session provider, and the fake's one
+      // provider takes a password — so this is native sign-in with a password,
+      // not an SSO round trip. `no-oidc-proxy.test.ts` covers the other side.
+      const noneAtAll = await fetch(`${oidcOffWeb.url}/auth/native/authorize`, { redirect: 'manual' })
+      const explicitlyEmpty = await fetch(`${oidcOffWeb.url}/auth/native/authorize?provider=`, { redirect: 'manual' })
+
+      expect(noneAtAll.status).not.toBe(403)
+      expect(explicitlyEmpty.status).not.toBe(403)
+    })
+
+    it('lets a provider this build knows takes a password through to the gateway', async () => {
+      /*
+        A gateway of its own, WITHOUT `publicHost`: this is the one case in
+        the file that needs `gatewayProbe`'s server-side request to
+        `/api/auth/providers` to actually succeed, and the shared `gateway`
+        above enforces the Host guard on every request including that one —
+        the same guard the WebSocket-upgrade tests need armed. The fake
+        gateway does not implement `/api/auth/providers` at all, so the
+        provider list is supplied through `fetchImpl` instead of asking for
+        real.
+      */
+      const looseGateway = await startFakeGateway({ port: 0, auth: 'cookie', streamDelayMs: 1 })
+      const looseStateDir = await mkdtemp(path.join(tmpdir(), 'hermie-web-no-oidc-loose-state-'))
+      const looseWeb = await startHermieWeb({
+        gatewayUrl: looseGateway.url,
+        port: 0,
+        staticDir,
+        stateDir: looseStateDir,
+        version: '9.9.9',
+        selfUpdate: false,
+        oidc: false,
+        fetchImpl: (async (input: RequestInfo | URL, init?: RequestInit) => {
+          if (String(input).endsWith('/api/auth/providers')) {
+            return new Response(
+              JSON.stringify({
+                providers: [{ name: 'self-hosted', display_name: 'Self-Hosted', supports_password: true }]
+              }),
+              { status: 200, headers: { 'content-type': 'application/json' } }
+            )
+          }
+
+          return fetch(input, init)
+        }) as typeof fetch
+      })
+
+      try {
+        const response = await fetch(`${looseWeb.url}/auth/native/authorize?provider=self-hosted`, {
+          redirect: 'manual'
+        })
+
+        // Whatever the gateway itself answers for a route the fake gateway
+        // may not implement, it is not THIS service's 403 — the point is
+        // that the request reached the gateway rather than being refused
+        // here.
+        expect(response.status).not.toBe(403)
+      } finally {
+        await looseWeb.close()
+        await looseGateway.close()
+      }
+    })
+
+    it('refuses an SSO provider regardless of method too', async () => {
+      const head = await fetch(`${oidcOffWeb.url}/auth/native/authorize?provider=okta`, {
+        method: 'HEAD',
+        redirect: 'manual'
+      })
+      const post = await fetch(`${oidcOffWeb.url}/auth/native/authorize?provider=okta`, {
+        method: 'POST',
+        redirect: 'manual'
+      })
+
+      expect(head.status).toBe(403)
+      expect(post.status).toBe(403)
+    })
+  })
+
+  it('proxies the gateway’s own /login form, where native sign-in with a password provider lands', async () => {
+    const response = await fetch(`${oidcOffWeb.url}/login`, { redirect: 'manual' })
+
+    expect(response.status).toBe(200)
+    expect(await response.text()).toContain('<form')
   })
 })

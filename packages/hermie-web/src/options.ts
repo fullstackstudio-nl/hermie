@@ -11,6 +11,7 @@
 import { hostname } from 'node:os'
 import path from 'node:path'
 
+import { decodeLocalSecret, type LocalSecretHash } from './admin/access'
 import { DEFAULT_CACHE_MAX_MB } from './cache'
 import { defaultStateDir } from './push/state'
 
@@ -121,6 +122,73 @@ export interface HermieWebOptions {
    * later ([ADR-0025](../../../docs/adr/0025-hermie-web-is-a-service-layer.md)).
    */
   allowInsecureOidc: boolean
+  /**
+   * Let the app sign in through the GATEWAY's own OIDC/SSO providers, proxied
+   * through this Hermie Web.
+   *
+   * On by default, so an operator who has never heard of this flag gets the
+   * browser build's ordinary behaviour. Off:
+   *
+   *  - `/hermie/config.json` answers `oidc: false`, and the shared app code
+   *    that reads it leaves every OIDC/SSO provider out of the sign-in screen
+   *    and the connect wizard — only a password provider remains, and a
+   *    gateway that offers nothing else is told so in plain language rather
+   *    than shown an empty screen.
+   *  - This service refuses the two OIDC browser routes itself —
+   *    `/auth/login` and `/auth/callback`, see `OIDC_BROWSER_PATHS` — with a
+   *    403, so nobody starts one through this Hermie Web by typing the URL
+   *    either, and `/auth/native/authorize` unless the provider the gateway
+   *    would pick takes a password (`oidcRouteDecision`). The decision is
+   *    made on the path decoded once the way the gateway decodes it, and the
+   *    original bytes are what is forwarded — see `server.ts`.
+   *
+   * Unaffected: `/auth/password-login`, `/api/auth/me`, logout, WebSocket
+   * tickets, and `hermie-web login` — a different thing entirely, the CLI's
+   * own OIDC sign-in for an OIDC-gated *upstream* gateway, used to obtain a
+   * refresh token for `--push`. It never goes through a browser and this flag
+   * does not touch it.
+   *
+   * Not to be confused with the BUILT-IN identity provider (`allowInsecureOidc`
+   * above, `/admin/oidc`): that one is this service acting as an OpenID
+   * Provider FOR the gateway. This one is about the gateway's own upstream
+   * providers, reached through this proxy.
+   */
+  oidc: boolean
+  /**
+   * Gateway user ids this container declares administrators of `/admin`,
+   * enforced on every start.
+   *
+   * A gateway user id, precisely: whatever `/api/auth/me` answers as
+   * `user_id` — an OIDC `sub`, or a basic-auth username — because that is the
+   * exact string `isAdminIdentity` compares against (`admin/access.ts`). Not
+   * an email address as a separate way to name somebody: `identity.ts` falls
+   * back to `email` only for a gateway whose `/api/auth/me` sends no
+   * `user_id` at all, and even then it is that ONE resulting string that has
+   * to be listed here, never a second lookup on top of it.
+   *
+   * This id space is **not namespaced per provider.** If a gateway's OIDC
+   * provider and its basic-auth users could ever mint the same string as a
+   * `sub` or username — unlikely, but nothing here rules it out — `admins`
+   * cannot tell those two people apart.
+   *
+   * Each one is added as an administrator if it is not already one. An id
+   * that is an administrator ONLY because it is on this list cannot be
+   * removed through `/admin` or its forms while it stays on the list — see
+   * `admin/env-admins.ts` and `admin/access.ts`'s `withoutAdmin`. An id a
+   * person added by hand, through `/setup` or `/admin/people`, is unaffected
+   * either way: naming it here does not change how it was added, and dropping
+   * it from here later does not touch an administrator a person actually
+   * added.
+   */
+  admins: string[]
+  /**
+   * A local administrator secret from the container's own configuration, in
+   * `admin/access.ts`'s `encodeLocalSecret` format — never a plaintext
+   * password; see `HERMIE_LOCAL_ADMIN_PASSWORD_HASH`'s note on
+   * `ResolveOptionsInput` for why. `null` when it is not set, which leaves
+   * whatever `/setup` wrote (or did not) untouched.
+   */
+  localAdminPasswordHash: LocalSecretHash | null
 }
 
 export const DEFAULT_GATEWAY_URL = 'http://127.0.0.1:9119'
@@ -163,6 +231,246 @@ export function isGatewayPath(pathname: string): boolean {
   }
 
   return GATEWAY_PATH_PREFIXES.some(prefix => pathname === prefix || pathname.startsWith(`${prefix}/`))
+}
+
+/**
+ * Where the gateway's WebSocket routes live: `/api/ws`, `/api/pty`,
+ * `/api/console`, `/api/events` and the rest are all under `/api`, and no
+ * route under `/auth`, `/login` or `/logout` is a WebSocket. An upgrade to
+ * anything else is refused rather than proxied (`server.ts`).
+ */
+export function isWebSocketGatewayPath(pathname: string): boolean {
+  return pathname === '/api' || pathname.startsWith('/api/')
+}
+
+/**
+ * The gateway's own OIDC/SSO browser routes that a plain redirect can start or
+ * finish: exactly these two, and nothing wider — `/auth/password-login`,
+ * `/api/auth/me`, `/auth/logout` and everything else under `/auth` and `/api`
+ * are a different door and stay open when `--no-oidc` closes this one. See
+ * `HermieWebOptions.oidc`.
+ *
+ * `/auth/native/authorize` is NOT in this list: it takes a `provider` and is
+ * refused or not depending on which one, so `oidcRouteDecision` below checks
+ * it on its own.
+ */
+export const OIDC_BROWSER_PATHS: readonly string[] = ['/auth/login', '/auth/callback']
+
+/** The one other route that can start a provider round trip, by name. */
+export const NATIVE_AUTHORIZE_PATH = '/auth/native/authorize'
+
+/**
+ * The query parameters `oidcRouteDecision` reads. Each may appear at most once:
+ * the gateway (FastAPI on Starlette) binds a repeated scalar parameter to its
+ * LAST value, `URLSearchParams.get` answers the FIRST, and a request that
+ * names one twice is refused rather than guessed about.
+ */
+const DECISION_PARAMS: readonly string[] = ['provider']
+
+/** Visible ASCII only: what a browser puts on the wire after percent-encoding everything else. */
+const REQUEST_TARGET_CHARS = /^[!-~]*$/
+
+/**
+ * What no decoded path segment may contain. `/` and `\` would turn one segment
+ * into several; `%` would be a second escape for somebody downstream to
+ * unwrap; `?` and `#` would move the end of the path; control characters have
+ * no business in a route. None of them occurs in a legitimate gateway route.
+ */
+// eslint-disable-next-line no-control-regex
+const FORBIDDEN_IN_SEGMENT = /[%?#/\\\u0000-\u001f\u007f-\u009f]/
+
+/**
+ * A raw request target (`IncomingMessage.url`, exactly as it arrived), split
+ * into its path and query at the first `?` — the same split the gateway's own
+ * HTTP parser makes. `null` for anything that is not an origin-form target of
+ * visible ASCII: an absolute or `//`-prefixed target, a raw fragment, a space,
+ * a control character or an unencoded non-ASCII byte. A browser sends none of
+ * those.
+ */
+export function splitRequestTarget(target: string): { path: string; query: string } | null {
+  if (!target.startsWith('/') || target.startsWith('//') || target.includes('#')) {
+    return null
+  }
+
+  if (!REQUEST_TARGET_CHARS.test(target)) {
+    return null
+  }
+
+  const at = target.indexOf('?')
+
+  return at === -1 ? { path: target, query: '' } : { path: target.slice(0, at), query: target.slice(at + 1) }
+}
+
+/**
+ * The route the gateway will take for this raw request path — for a DECISION
+ * only; what is forwarded is always the raw path itself (see `server.ts`).
+ *
+ * The gateway's ASGI server (uvicorn) percent-decodes the path exactly once
+ * and routes on the result, with no dot-segment resolution and no slash
+ * merging. This decodes once too, segment by segment, and then refuses
+ * (`null`) anything whose single decode leaves something a second decoder,
+ * router or intermediary could read differently:
+ *
+ *  - a segment that decodes to contain `%`, `?`, `#`, `/`, `\` or a control
+ *    character — `%256cogin` is `%6cogin` after one pass, which is only
+ *    harmless for as long as nobody decodes it again, and `login%3F…` would
+ *    become a query string the moment anything re-parsed it;
+ *  - a `.` or `..` segment, encoded or not, which a normalising hop could
+ *    resolve into a different route;
+ *  - a malformed escape or one that is not UTF-8.
+ *
+ * Empty segments are dropped rather than refused, so `/auth//login` and
+ * `/auth/login/` both read as `/auth/login`. That only ever makes MORE paths
+ * match a refused route, never fewer: none of the refused routes has an empty
+ * segment, so a path the gateway would route to one of them is unchanged by it.
+ *
+ * Under `/api` — a path whose first segment decodes to exactly `api` — the
+ * rule is narrower, because its routes carry names (a file, a session, a
+ * profile) that may legitimately hold an encoded `%`, `?` or `#`. Those three
+ * are allowed there. What is still refused is anything that could MOVE the
+ * path out of `/api` at a hop between here and the gateway: `--gateway` may
+ * name an edge proxy that decodes `%2e` and resolves dot segments, or decodes
+ * twice, and `/api/%2e%2e/auth/login` would reach `/auth/login` through it.
+ * So each segment is decoded repeatedly, as far as it will go, and refused if
+ * any stage is `.` or `..` or contains `/`, `\` or a control character
+ * (`apiSegmentMayMove`). The answer is `/api` plus the rest AS SENT: nothing
+ * under `/api` is a route `oidcRouteDecision` refuses, so "it is under `/api`
+ * and stays there" is the whole of what the decision needs, and the raw bytes
+ * are what is forwarded either way.
+ */
+export function canonicalGatewayPath(rawPath: string): string | null {
+  if (!rawPath.startsWith('/') || !REQUEST_TARGET_CHARS.test(rawPath)) {
+    return null
+  }
+
+  const firstRaw = rawPath.slice(1).split('/')[0] as string
+  let first: string
+
+  try {
+    first = decodeURIComponent(firstRaw)
+  } catch {
+    return null
+  }
+
+  if (first === 'api') {
+    const rest = rawPath.slice(1 + firstRaw.length)
+
+    return rest.split('/').some(apiSegmentMayMove) ? null : `/api${rest}`
+  }
+
+  const decoded: string[] = []
+
+  for (const segment of rawPath.slice(1).split('/')) {
+    let value: string
+
+    try {
+      value = decodeURIComponent(segment)
+    } catch {
+      return null
+    }
+
+    if (FORBIDDEN_IN_SEGMENT.test(value) || value === '.' || value === '..') {
+      return null
+    }
+
+    if (value) {
+      decoded.push(value)
+    }
+  }
+
+  return `/${decoded.join('/')}`
+}
+
+// eslint-disable-next-line no-control-regex
+const MOVES_A_PATH = /[/\\\u0000-\u001f\u007f-\u009f]/
+
+/**
+ * Whether one raw `/api` path segment is, or could become at a hop that
+ * decodes again, a dot segment or more than one segment. Decoded until it
+ * stops changing (or stops decoding), every stage checked — so `%2e%2e`,
+ * `..%2f`, `%5c` and a double-encoded `%252e%252e` are all caught, while a
+ * name holding `%25`, `%3F` or `%23` that decodes to nothing of the kind is
+ * not.
+ */
+function apiSegmentMayMove(raw: string): boolean {
+  let stage = raw
+
+  for (let pass = 0; pass < 8; pass++) {
+    if (stage === '.' || stage === '..' || MOVES_A_PATH.test(stage)) {
+      return true
+    }
+
+    let next: string
+
+    try {
+      next = decodeURIComponent(stage)
+    } catch {
+      // A malformed escape on the FIRST pass is a malformed request; later, it
+      // is just a literal `%` in a name, which no hop can decode either.
+      return pass === 0
+    }
+
+    if (next === stage) {
+      return false
+    }
+
+    stage = next
+  }
+
+  // Still decoding after eight passes is nothing a real name does.
+  return true
+}
+
+/** A gateway sign-in provider, as `/api/auth/providers` lists it. */
+export interface SessionProvider {
+  name: string
+  supportsPassword: boolean
+}
+
+/**
+ * What `--no-oidc` does with one gateway request.
+ *
+ *  - `refuse`: it would start or finish a browser OIDC/SSO round trip.
+ *  - `ambiguous`: a parameter this decision reads is repeated, so this
+ *    service and the gateway could read it differently.
+ *  - `allow`: anything else.
+ *
+ * `/auth/login` and `/auth/callback` are refused whatever the query string
+ * says: both exist only for that redirect chain. `/auth/native/authorize` is
+ * also how the native flow reaches a PASSWORD provider (the gateway 302s it to
+ * its own `/login` form), so it is allowed exactly when the provider the
+ * gateway will pick takes a password — mirroring `_select_native_provider` in
+ * the gateway's `dashboard_auth/routes.py`: the named one, or, when none is
+ * named, the ONLY session provider there is. With several and none named the
+ * gateway would draw a chooser that links to OIDC providers too, so that is
+ * refused. `sessionProviders` is the gateway's own `/api/auth/providers`
+ * answer; an empty list (the gateway could not be read) refuses every case.
+ */
+export function oidcRouteDecision(
+  canonicalPath: string,
+  searchParams: URLSearchParams,
+  sessionProviders: readonly SessionProvider[]
+): 'allow' | 'refuse' | 'ambiguous' {
+  if (OIDC_BROWSER_PATHS.includes(canonicalPath)) {
+    return 'refuse'
+  }
+
+  if (canonicalPath !== NATIVE_AUTHORIZE_PATH) {
+    return 'allow'
+  }
+
+  if (DECISION_PARAMS.some(name => searchParams.getAll(name).length > 1)) {
+    return 'ambiguous'
+  }
+
+  const named = searchParams.get('provider') ?? ''
+  const chosen = named
+    ? sessionProviders.find(provider => provider.name === named)
+    : sessionProviders.length === 1
+      ? sessionProviders[0]
+      : undefined
+
+  return chosen?.supportsPassword ? 'allow' : 'refuse'
 }
 
 /**
@@ -247,6 +555,17 @@ export interface ResolveOptionsInput {
   vapidSubject?: string | undefined
   pushServerRequests?: boolean | undefined
   allowInsecureOidc?: boolean | undefined
+  oidc?: boolean | undefined
+  /** Already split and trimmed; `resolveOptions` validates it either way. */
+  admins?: string[] | undefined
+  /**
+   * `admin/access.ts`'s `encodeLocalSecret` format, already decoded. There is
+   * deliberately no way to pass a plaintext password here: a secret an
+   * operator has typed into a container's configuration is one that shows up
+   * in a process list, a CI log or a Kubernetes event, and a hash the module
+   * itself produced (`hermie-web hash-secret`) is the only thing this reads.
+   */
+  localAdminPasswordHash?: LocalSecretHash | null | undefined
   env?: NodeJS.ProcessEnv
   /** Where `dist/web` sits when `--static` is not given. */
   packageRoot?: string
@@ -295,8 +614,72 @@ export function resolveOptions(input: ResolveOptionsInput = {}): HermieWebOption
       readBooleanEnv(env.HERMIE_PUSH_SERVER_REQUESTS, 'HERMIE_PUSH_SERVER_REQUESTS') ??
       false,
     allowInsecureOidc:
-      input.allowInsecureOidc ?? readBooleanEnv(env.HERMIE_ALLOW_INSECURE_OIDC, 'HERMIE_ALLOW_INSECURE_OIDC') ?? false
+      input.allowInsecureOidc ?? readBooleanEnv(env.HERMIE_ALLOW_INSECURE_OIDC, 'HERMIE_ALLOW_INSECURE_OIDC') ?? false,
+    oidc: input.oidc ?? readBooleanEnv(env.HERMIE_OIDC, 'HERMIE_OIDC') ?? true,
+    admins: readAdminIds(input.admins ?? env.HERMIE_ADMINS, '--admins', 'HERMIE_ADMINS'),
+    localAdminPasswordHash:
+      input.localAdminPasswordHash ?? readLocalAdminPasswordHash(env.HERMIE_LOCAL_ADMIN_PASSWORD_HASH)
   }
+}
+
+/**
+ * `HERMIE_LOCAL_ADMIN_PASSWORD_HASH`, checked. No flag: see the option's note
+ * on why a container's configuration is the only place this is read from at
+ * all.
+ */
+function readLocalAdminPasswordHash(raw: string | undefined): LocalSecretHash | null {
+  if (!raw) {
+    return null
+  }
+
+  const decoded = decodeLocalSecret(raw)
+
+  if (!decoded) {
+    throw new Error(
+      'HERMIE_LOCAL_ADMIN_PASSWORD_HASH must be a hash `hermie-web hash-secret` produced, not a plaintext ' +
+        'password (got a value of the wrong shape).'
+    )
+  }
+
+  return decoded
+}
+
+/** Longer than any real gateway user id or email; short of "a token pasted here by accident". */
+const MAX_ADMIN_ID_LENGTH = 320
+
+// eslint-disable-next-line no-control-regex
+const CONTAINS_CONTROL_CHARS = /[\u0000-\u001f\u007f]/
+
+/**
+ * `--admins` (or `HERMIE_ADMINS`), checked.
+ *
+ * A comma-separated list, trimmed entry by entry with the empty ones dropped —
+ * `HERMIE_ADMINS=ada@example.invalid, ,grace@example.invalid` is two ids, not
+ * three, since a trailing comma or a stray space in a Kubernetes manifest is
+ * an editing accident and not a decision to name an empty administrator.
+ *
+ * Already-split input (`string[]`, from a test or a repeatable flag) is
+ * trimmed and filtered the same way and validated regardless, so the checks
+ * below cannot be bypassed by whichever caller supplied the list.
+ */
+function readAdminIds(raw: string | string[] | undefined, flagName: string, envName: string): string[] {
+  if (raw === undefined) {
+    return []
+  }
+
+  const ids = (typeof raw === 'string' ? raw.split(',') : raw).map(id => id.trim()).filter(Boolean)
+
+  for (const id of ids) {
+    if (CONTAINS_CONTROL_CHARS.test(id)) {
+      throw new Error(`${flagName} (or ${envName}) may not contain control characters (got ${JSON.stringify(id)}).`)
+    }
+
+    if (id.length > MAX_ADMIN_ID_LENGTH) {
+      throw new Error(`${flagName} (or ${envName}) has an id longer than ${String(MAX_ADMIN_ID_LENGTH)} characters.`)
+    }
+  }
+
+  return ids
 }
 
 /**

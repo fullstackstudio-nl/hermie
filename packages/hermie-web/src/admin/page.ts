@@ -86,6 +86,14 @@ export interface AdminPageInput {
     accounts: number
     bySub: Record<string, { username: string; admin: boolean } | undefined>
   }
+  /**
+   * `HERMIE_ADMINS`, as this container declares it right now.
+   *
+   * Read live rather than from anything stored, so a row's "set by
+   * configuration" note and its disabled switch track the running process
+   * exactly — see `admin/env-admins.ts`.
+   */
+  envAdmins: readonly string[]
   notice: string
 }
 
@@ -376,6 +384,8 @@ interface PersonView {
   name: string
   username: string
   admin: boolean
+  /** Set by configuration: an administrator only `HERMIE_ADMINS` can remove. */
+  managed: boolean
   fromIssuer: boolean
   /** The other row with this username, where there is one of the other kind. */
   alsoKnownAs: 'issuer' | 'gateway' | null
@@ -419,6 +429,7 @@ function peopleViews(input: AdminPageInput): PersonView[] {
       name: row.displayName || account?.username || row.email || row.userId,
       username,
       admin: input.state.admins.includes(row.userId),
+      managed: input.envAdmins.includes(row.userId),
       fromIssuer: !!account,
       alsoKnownAs: shared ? (account ? 'gateway' : 'issuer') : null
     }
@@ -544,7 +555,7 @@ function personRow(view: PersonView, input: AdminPageInput): string {
           <span class="who-text">
             <span class="who-name"><strong title="${escapeHtml(view.name)}">${escapeHtml(view.name)}</strong>${
               view.admin ? pill(text.administrator, 'on') : ''
-            }</span>
+            }${view.managed ? pill(text.managedNote, 'quiet') : ''}</span>
             <span class="who-sub" title="${escapeHtml(row.userId)}">${escapeHtml(view.username)} · ${source}</span>
             ${shared ? `<span class="who-note" title="${escapeHtml(shared.long)}">${shared.short}</span>` : ''}
           </span>
@@ -554,7 +565,7 @@ function personRow(view: PersonView, input: AdminPageInput): string {
         <span class="switches">
           ${toggle({ name: 'readOnly', label: text.readOnly, checked: row.readOnly })}
           ${toggle({ name: 'pushAllowed', label: text.push, checked: row.pushAllowed })}
-          ${toggle({ name: 'admin', label: text.administratorBox, checked: view.admin })}
+          ${toggle({ name: 'admin', label: text.administratorBox, checked: view.admin, disabled: view.managed })}
         </span>
         <a class="more" href="#${panel}" aria-label="${escapeHtml(
           input.strings.common.detailsFor(view.name)
@@ -570,6 +581,7 @@ function personRow(view: PersonView, input: AdminPageInput): string {
           ${row.email ? `<dt>${input.strings.identity.accounts.email}</dt><dd>${escapeHtml(row.email)}</dd>` : ''}
         </dl>
         ${view.fromIssuer ? `<p class="note"><a href="/admin/oidc">${text.openAccount}</a></p>` : ''}
+        ${view.managed ? `<p class="note">${text.managedAdminNote}</p>` : ''}
         <h3>${text.botsHeading}</h3>
         ${botControls(view, input)}
         <div class="actions">

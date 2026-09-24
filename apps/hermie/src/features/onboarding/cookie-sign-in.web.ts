@@ -133,6 +133,22 @@ export function startCookieSignIn(baseUrl: string, provider?: string, next?: str
   })
 }
 
+/**
+ * Reload at the app's own root, for reauth when the OAuth door is off.
+ *
+ * `--no-oidc` (`HERMIE_OIDC=0`) refuses `/auth/login` outright, whatever
+ * provider it names — see `server.ts`'s handling of the flag — so a stored
+ * cookie session that needs reauth cannot use `startCookieSignIn` at all on
+ * such a deployment. It does not need to: `SignInStep.web` never lets sign-in
+ * finish through anything but a password provider while OIDC is off, so a
+ * fresh load of `/` finds no session, same as any other signed-out visit, and
+ * draws that password form again — reaching it without ever asking the OAuth
+ * door for anything.
+ */
+export function reauthAtAppRoot(): void {
+  window.location.assign('/')
+}
+
 export async function passwordLogin(input: PasswordLoginInput): Promise<string> {
   const response = await fetch(new URL('/auth/password-login', input.baseUrl).toString(), {
     method: 'POST',

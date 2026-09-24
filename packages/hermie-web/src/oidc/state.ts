@@ -170,6 +170,9 @@ function userOf(raw: Record<string, unknown>): OidcUser | null {
     email: str(raw.email),
     displayName: str(raw.displayName),
     role: (OIDC_ROLES as readonly string[]).includes(role) ? (role as OidcRole) : 'user',
+    // Only meaningful beside the role it explains; a hand-edited `user` role
+    // with the flag left on is just a `user`.
+    ...(raw.roleFromEnv === true && role === 'admin' ? { roleFromEnv: true as const } : {}),
     ...(password ? { password } : {}),
     totpSecret: str(raw.totpSecret),
     recoveryCodes: strings(raw.recoveryCodes),

@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest'
 
 import { identityOf } from '../identity'
-import { hashLocalSecret, isAdminIdentity, localSecretMatches, mayProxyMethod, withAdmin, withoutAdmin } from './access'
+import {
+  decodeLocalSecret,
+  encodeLocalSecret,
+  hashLocalSecret,
+  isAdminIdentity,
+  localSecretMatches,
+  mayProxyMethod,
+  withAdmin,
+  withoutAdmin
+} from './access'
 import { AdminSessions, cookieOf, tokensMatch } from './session'
 import { emptyAdminState, mayReachBot, optionsFor } from './state'
 
@@ -32,20 +41,92 @@ describe('the administrator list', () => {
     expect(twice.admins).toEqual(['ada@example.invalid', 'grace@example.invalid'])
   })
 
+  it('never marks a freshly-added id env-managed, since only a person calls this', () => {
+    const once = withAdmin(state(), 'ada@example.invalid')
+
+    expect(once.managedAdmins).toEqual([])
+
+    // Adding somebody already on the list, and not env-managed, changes nothing.
+    expect(withAdmin(once, 'ada@example.invalid')).toBe(once)
+  })
+
+  it('records a person confirming an already env-managed id by taking it off that list', () => {
+    // The one case that is not a no-op: `userId` is already an admin, but
+    // ONLY because `HERMIE_ADMINS` named it. A person adding it "by hand" —
+    // a script, a future control; the real UI's checkbox is disabled here —
+    // is a manual decision worth recording, so it stops being a candidate
+    // for `env-admins.ts` to drop later.
+    const held = state({ admins: ['ada@example.invalid'], managedAdmins: ['ada@example.invalid'] })
+    const confirmed = withAdmin(held, 'ada@example.invalid')
+
+    expect(confirmed.admins).toEqual(['ada@example.invalid'])
+    expect(confirmed.managedAdmins).toEqual([])
+  })
+
   it('refuses to remove the last one', () => {
     const held = state({ admins: ['ada@example.invalid'] })
-    const { state: after, removed } = withoutAdmin(held, 'ada@example.invalid')
+    const { state: after, removed, reason } = withoutAdmin(held, 'ada@example.invalid')
 
     expect(removed).toBe(false)
+    expect(reason).toBe('last')
     expect(after.admins).toEqual(['ada@example.invalid'])
   })
 
   it('removes the last one when a local secret can still get back in', () => {
-    const held = state({ admins: ['ada@example.invalid'], localAdmin: hashLocalSecret('a long enough phrase') })
+    const held = state({
+      admins: ['ada@example.invalid'],
+      localAdmin: hashLocalSecret('a long enough phrase')
+    })
     const { state: after, removed } = withoutAdmin(held, 'ada@example.invalid')
 
     expect(removed).toBe(true)
     expect(after.admins).toEqual([])
+  })
+
+  it('refuses an id the running container currently declares, however many others are left', () => {
+    const held = state({ admins: ['ada@example.invalid', 'grace@example.invalid'] })
+    const { state: after, removed, reason } = withoutAdmin(held, 'ada@example.invalid', ['ada@example.invalid'])
+
+    expect(removed).toBe(false)
+    expect(reason).toBe('managed')
+    expect(after).toBe(held)
+  })
+
+  it('removes one fine once the container no longer names it', () => {
+    const held = state({ admins: ['ada@example.invalid', 'grace@example.invalid'] })
+    const { removed } = withoutAdmin(held, 'ada@example.invalid', [])
+
+    expect(removed).toBe(true)
+  })
+
+  it('cleans up a leftover managedAdmins entry for an id it actually removes', () => {
+    // Realistic only after a past "last administrator" refusal kept an
+    // env-managed id around — see `env-admins.ts` — and somebody else was
+    // added since, making it safe to remove by hand.
+    const held = state({
+      admins: ['ada@example.invalid', 'grace@example.invalid'],
+      managedAdmins: ['ada@example.invalid']
+    })
+    const { state: after, removed } = withoutAdmin(held, 'ada@example.invalid', [])
+
+    expect(removed).toBe(true)
+    expect(after.managedAdmins).toEqual([])
+  })
+})
+
+describe('a container-supplied local administrator secret', () => {
+  it('round-trips through the format HERMIE_LOCAL_ADMIN_PASSWORD_HASH carries', () => {
+    const hash = hashLocalSecret('a long enough phrase')
+    const encoded = encodeLocalSecret(hash)
+
+    expect(decodeLocalSecret(encoded)).toEqual(hash)
+  })
+
+  it('refuses anything that is not exactly that shape', () => {
+    expect(decodeLocalSecret('not a hash at all')).toBeNull()
+    expect(decodeLocalSecret('')).toBeNull()
+    expect(decodeLocalSecret(`${'a'.repeat(32)}:short`)).toBeNull()
+    expect(decodeLocalSecret(`${'a'.repeat(32)}:${'b'.repeat(128)}:extra`)).toBeNull()
   })
 })
 

@@ -40,6 +40,24 @@
  * off to test something and finding they are no longer an administrator of the
  * service they turned it off from.
  *
+ * ## A third list, and where it comes in
+ *
+ * `HERMIE_ADMINS` (`env-admins.ts`) is a THIRD way an id ends up an
+ * administrator, and this reconcile has to know about it or it undoes it: an
+ * id the container names is an administrator regardless of what its role says
+ * here, or even whether it has an account here at all, so `envAdmins` below is
+ * checked before this file ever deletes anything from `admins`. And where the
+ * id DOES have an account, the role is brought up to `admin` to match — the
+ * same reasoning `/admin/people`'s own note gives for why the two switches
+ * cannot be left to disagree, applied to a switch a container set rather than
+ * a person — and brought back down to `user` once the container stops naming
+ * it, unless a person has set the role since (`roleFromEnv`, below). None of
+ * this touches `managedAdmins`: that ledger is
+ * `env-admins.ts`'s own record of what an env reconcile added, and an id this
+ * file adds because of a ROLE was never that, so it is never a candidate for
+ * that reconcile to drop later regardless — see that file's note for why
+ * tracking the positive fact is what makes that true.
+ *
  * ## Idempotent, and therefore also the migration
  *
  * It answers the SAME OBJECT when there is nothing to do, which is what lets it
@@ -88,14 +106,27 @@ const sameRow = (left: AdminUserRow, right: AdminUserRow): boolean =>
 /**
  * Bring the people list and the administrator list into step with the issuer.
  *
+ * `envAdmins` — `HERMIE_ADMINS`, read live — is what keeps this from undoing
+ * `env-admins.ts`'s own reconcile: an id it names is an administrator
+ * whatever its role here says, and whatever became of its account, so this
+ * file never deletes one from `admins` over either. Call `promoteEnvAdminRoles`
+ * first (below) so an id that DOES have an account here also shows `admin` on
+ * this page, rather than relying only on the guard in this function to paper
+ * over the disagreement.
+ *
  * The same state object comes back when nothing had to change, so a caller can
  * write the file on `next !== state` and nothing else.
  */
-export function reconcileIssuerPeople(state: AdminState, oidc: OidcState): AdminState {
+export function reconcileIssuerPeople(
+  state: AdminState,
+  oidc: OidcState,
+  envAdmins: readonly string[] = []
+): AdminState {
   if (!oidc.enabled) {
     return state
   }
 
+  const envSet = new Set(envAdmins)
   const accounts = new Map(oidc.users.map(user => [user.sub, user]))
   const users: Record<string, AdminUserRow> = {}
   let changed = false
@@ -143,15 +174,20 @@ export function reconcileIssuerPeople(state: AdminState, oidc: OidcState): Admin
   for (const account of oidc.users) {
     if (account.role === 'admin') {
       admins.add(account.sub)
-    } else {
+    } else if (!envSet.has(account.sub)) {
       admins.delete(account.sub)
     }
+    // else: the container still names this id — see the file note above.
+    // `promoteEnvAdminRoles` should have already brought `role` up to
+    // `admin` for it, and this branch is the backstop for whenever it has
+    // not (a caller that skipped it, a test that reconciles directly).
   }
 
   // Gone accounts take their administrator entry with them, wherever the row
-  // went: an id nothing can authenticate as is an entry nobody can ever use.
+  // went — UNLESS the container still names the id, which needs no account
+  // here to be an administrator at all.
   for (const id of state.admins) {
-    if (!accounts.has(id) && state.users[id]?.fromIssuer === true) {
+    if (!accounts.has(id) && state.users[id]?.fromIssuer === true && !envSet.has(id)) {
       admins.delete(id)
     }
   }
@@ -160,4 +196,89 @@ export function reconcileIssuerPeople(state: AdminState, oidc: OidcState): Admin
   const adminsMoved = nextAdmins.length !== state.admins.length || nextAdmins.some((id, at) => id !== state.admins[at])
 
   return changed || adminsMoved ? { ...state, admins: nextAdmins, users } : state
+}
+
+/**
+ * Bring a `HERMIE_ADMINS` id's own issuer account role up to `admin`, before
+ * `reconcileIssuerPeople` runs.
+ *
+ * Without this, an id the container names is kept on `admins` (that function's
+ * own guard) while `/admin/oidc` still shows its role as `user` — the exact
+ * disagreement between the two pages this file's whole design exists to rule
+ * out, just caused by a container instead of a person forgetting to tick a
+ * box. Touches only an account that already exists and is not already
+ * `admin`; it invents no accounts and demotes nobody.
+ *
+ * Every role it raises is marked `roleFromEnv`, in the same account record
+ * and therefore the same write: that mark is the only thing that lets
+ * `demoteFormerEnvAdminRoles` below give the role back once the container
+ * stops naming the id. A role that was already `admin` is left unmarked —
+ * the container did not raise it, so it has nothing to give back.
+ *
+ * The same state object comes back when nothing had to change.
+ */
+export function promoteEnvAdminRoles(oidc: OidcState, envAdmins: readonly string[]): OidcState {
+  if (!oidc.enabled || !envAdmins.length) {
+    return oidc
+  }
+
+  const envSet = new Set(envAdmins)
+  let changed = false
+
+  const users = oidc.users.map(user => {
+    if (user.role !== 'admin' && envSet.has(user.sub)) {
+      changed = true
+
+      return { ...user, role: 'admin' as const, roleFromEnv: true as const }
+    }
+
+    return user
+  })
+
+  return changed ? { ...oidc, users } : oidc
+}
+
+/**
+ * The other half of `promoteEnvAdminRoles`: an account whose `admin` role the
+ * container raised (`roleFromEnv`) and that `HERMIE_ADMINS` no longer names
+ * goes back to `user`, and `reconcileIssuerPeople` then takes it off `admins`
+ * the ordinary way.
+ *
+ * Without this the raised role outlived the option: `reconcileEnvAdmins`
+ * dropped the id from `admins`, and the very same pass put it back as an
+ * ordinary, unmanaged administrator because its role still read `admin`. A
+ * role a person set is never marked (`setAccountRole` clears the mark), so
+ * this never touches one.
+ *
+ * Only while the provider is enabled, like its counterpart: a disabled
+ * provider's roles decide nothing about `admins`, so the caller's "never the
+ * last way into /admin" check could not see what a demotion there would cost
+ * the day the provider is enabled again. The mark simply waits until then.
+ * Whether the demotion may happen at all is the caller's call, since only the
+ * caller sees the whole administrator list; see `admin/reconcile.ts`.
+ */
+export function demoteFormerEnvAdminRoles(
+  oidc: OidcState,
+  envAdmins: readonly string[]
+): { oidc: OidcState; demoted: string[] } {
+  if (!oidc.enabled) {
+    return { oidc, demoted: [] }
+  }
+
+  const envSet = new Set(envAdmins)
+  const demoted: string[] = []
+
+  const users = oidc.users.map(user => {
+    if (user.roleFromEnv && !envSet.has(user.sub)) {
+      demoted.push(user.sub)
+
+      const { roleFromEnv: _cleared, ...rest } = user
+
+      return { ...rest, role: 'user' as const }
+    }
+
+    return user
+  })
+
+  return demoted.length ? { oidc: { ...oidc, users }, demoted } : { oidc, demoted }
 }

@@ -255,8 +255,20 @@ export function setAccountDisabled(state: OidcState, sub: string, disabled: bool
   }
 }
 
+/**
+ * A role a PERSON set, on `/admin/oidc` or `/admin/people`.
+ *
+ * Always clears `roleFromEnv`: whatever the container once raised, the role is
+ * now a person's decision and no `HERMIE_ADMINS` reconcile may lower it later —
+ * the same thing `admin/access.ts`'s `withAdmin` does for `managedAdmins`.
+ */
 export function setAccountRole(state: OidcState, sub: string, role: OidcRole): OidcState {
-  return { ...state, users: state.users.map(user => (user.sub === sub ? { ...user, role } : user)) }
+  return {
+    ...state,
+    users: state.users.map(user =>
+      user.sub === sub ? (({ roleFromEnv: _cleared, ...rest }) => ({ ...rest, role }))(user) : user
+    )
+  }
 }
 
 /** Take a second factor off an account, for the person who lost their phone. */

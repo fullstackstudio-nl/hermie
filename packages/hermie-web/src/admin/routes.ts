@@ -144,6 +144,12 @@ export interface AdminRouterOptions {
   setupReopens: () => boolean
   /** Told whenever the state changed, so the server can re-read what it caches. */
   onChanged: (state: AdminState) => void
+  /**
+   * `HERMIE_ADMINS` (or `--admins`), read live so a removal is refused for
+   * exactly as long as the running container actually declares the id — see
+   * `admin/access.ts`'s `withoutAdmin` and `admin/env-admins.ts`.
+   */
+  envAdmins: () => readonly string[]
   sessions?: AdminSessions
   /** The built-in identity provider (ADR-0025 part 3) and what it needs to be set up. */
   oidc: {
@@ -230,6 +236,9 @@ export class AdminRouter {
    */
   private pendingInvite: { username: string; url: string } | null = null
   private lastSelfTest: SelfTestStep[] = []
+  /** What every refused, container-declared removal says, word for word. */
+  private readonly setByConfigurationNotice =
+    'Saved, but that administrator is set by configuration (HERMIE_ADMINS) and cannot be removed here.'
 
   constructor(private readonly options: AdminRouterOptions) {
     this.sessions = options.sessions ?? new AdminSessions()
@@ -420,6 +429,7 @@ export class AdminRouter {
         bots: this.options.bots(),
         viewer: identity?.userId ?? '',
         identity: this.identitySummary(),
+        envAdmins: this.options.envAdmins(),
         notice,
         ...webCopy(request)
       })
@@ -594,6 +604,7 @@ export class AdminRouter {
           bots: this.options.bots(),
           viewer: '',
           identity: this.identitySummary(),
+          envAdmins: this.options.envAdmins(),
           notice: '',
           choices,
           setupOpens: this.options.setupReopens(),
@@ -665,6 +676,9 @@ export class AdminRouter {
     const account = this.options.oidc.read().enabled
       ? this.options.oidc.read().users.find(user => user.sub === userId)
       : undefined
+    // Checked live against the running container, the same as `withoutAdmin`
+    // below — see `admin/env-admins.ts`.
+    const envManaged = this.options.envAdmins().includes(userId)
 
     /*
       An account on this service's own issuer has ONE administrator switch.
@@ -674,8 +688,14 @@ export class AdminRouter {
       `admins` would be a second answer that the next reconcile would silently
       undo, so the role is what changes and the reconcile mirrors it back — which
       also means this page and the identity page can never disagree.
+
+      A `HERMIE_ADMINS` container is the one exception: taking the role away
+      here would only have `reconcileIssuerPeople` — or the very next
+      `syncIssuerPeople` — hand it straight back, since the container still
+      names this id. So the switch is refused before it is ever asked for,
+      the same way `withoutAdmin` refuses it for a row with no issuer account.
     */
-    if (account && (account.role === 'admin') !== wantsAdmin) {
+    if (account && (account.role === 'admin') !== wantsAdmin && !(envManaged && !wantsAdmin)) {
       await this.options.oidc.provider.update(next =>
         setAccountRole(next, userId, wantsAdmin ? 'admin' : ('user' as OidcRole))
       )
@@ -704,9 +724,10 @@ export class AdminRouter {
     }
 
     if (account) {
-      // The role already decided the administrator list; everything else on this
-      // form is a service-level option and is saved as it stands.
-      await this.save(response, next, 'Saved.', back)
+      // The role already decided the administrator list (or was refused
+      // above, for a container-declared id); everything else on this form is
+      // a service-level option and is saved as it stands.
+      await this.save(response, next, envManaged && !wantsAdmin ? this.setByConfigurationNotice : 'Saved.', back)
 
       return
     }
@@ -720,7 +741,7 @@ export class AdminRouter {
     }
 
     if (!wantsAdmin && isAdmin) {
-      const { state: after, removed } = withoutAdmin(next, userId)
+      const { state: after, removed, reason } = withoutAdmin(next, userId, this.options.envAdmins())
 
       await this.save(
         response,
@@ -729,7 +750,9 @@ export class AdminRouter {
           ? userId === identity?.userId
             ? 'Saved. You are no longer an administrator of this service.'
             : 'Saved.'
-          : 'Saved, but the last administrator cannot be removed.',
+          : reason === 'managed'
+            ? this.setByConfigurationNotice
+            : 'Saved, but the last administrator cannot be removed.',
         back
       )
 
@@ -958,6 +981,15 @@ export class AdminRouter {
         case 'enable': {
           const off = action === 'disable'
 
+          // Disabling is the quiet way to take an env-named id's access away
+          // without touching `admins` or its role at all — refused for the
+          // same reason removing it is, just below.
+          if (off && this.options.envAdmins().includes(sub)) {
+            this.doneAt('/admin/oidc', this.setByConfigurationNotice)(response)
+
+            return
+          }
+
           await this.options.oidc.provider.update(state => setAccountDisabled(state, sub, off))
 
           if (off) {
@@ -969,13 +1001,24 @@ export class AdminRouter {
           return
         }
 
-        case 'role':
-          await this.options.oidc.provider.update(state =>
-            setAccountRole(state, sub, (form.get('role') === 'admin' ? 'admin' : 'user') as OidcRole)
-          )
+        case 'role': {
+          const role = (form.get('role') === 'admin' ? 'admin' : 'user') as OidcRole
+
+          // The same refusal `saveUser` makes on `/admin/people`: taking the
+          // role away here would only have the next reconcile hand it straight
+          // back, since the container still names this id. See
+          // `admin/env-admins.ts`.
+          if (role === 'user' && this.options.envAdmins().includes(sub)) {
+            this.doneAt('/admin/oidc', this.setByConfigurationNotice)(response)
+
+            return
+          }
+
+          await this.options.oidc.provider.update(state => setAccountRole(state, sub, role))
           this.doneAt('/admin/oidc', 'Saved.')(response)
 
           return
+        }
 
         case 'clear-totp':
           await this.options.oidc.provider.update(state => clearSecondFactor(state, sub))
@@ -986,12 +1029,25 @@ export class AdminRouter {
 
           return
 
-        case 'remove':
+        case 'remove': {
+          // Removing the account would take its admins entry with it too
+          // (`reconcileIssuerPeople`'s "gone accounts" pass) — except for an
+          // env-named id, which that pass already leaves alone. Refused here
+          // as well, before the account is gone at all: an id the container
+          // still names should not lose its whole account over a page nobody
+          // but a person is meant to act on.
+          if (this.options.envAdmins().includes(sub)) {
+            this.doneAt('/admin/oidc', this.setByConfigurationNotice)(response)
+
+            return
+          }
+
           await this.options.oidc.provider.update(state => removeAccount(state, sub))
           this.options.oidc.provider.endSessionsFor(sub)
           this.doneAt('/admin/oidc', 'That account is gone, with everything it held.')(response)
 
           return
+        }
 
         default:
           this.doneAt('/admin/oidc', 'That is not something this page does.')(response)

@@ -51,12 +51,18 @@ export function SignInStep({ draft, update }: SignInStepProps) {
   const [phase, setPhase] = useState<Phase>('probing')
   const [error, setError] = useState<string | null>(null)
   const [host, setHost] = useState<string>('')
+  const [oidcEnabled, setOidcEnabled] = useState(true)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
-    void loadHermieWebConfig().then(config => setHost(config?.gatewayHost ?? ''))
+    void loadHermieWebConfig().then(config => {
+      setHost(config?.gatewayHost ?? '')
+      // Absent (an older server) reads as on, same as everywhere else this
+      // field is read.
+      setOidcEnabled(config?.oidc ?? true)
+    })
   }, [])
 
   /*
@@ -149,7 +155,19 @@ export function SignInStep({ draft, update }: SignInStepProps) {
   }, [discover, phase])
 
   const probe = draft.probe
-  const providers = probe?.providers ?? []
+  const allProviders = probe?.providers ?? []
+  /*
+   * `--no-oidc` / `HERMIE_OIDC=0`: every provider that is not a password one
+   * is an OIDC/SSO redirect, and this Hermie Web refuses that redirect's own
+   * route with a 403 regardless — so it is left out here rather than offered
+   * and then failing the moment it is pressed.
+   */
+  const providers = oidcEnabled ? allProviders : allProviders.filter(provider => provider.supportsPassword)
+  // The gateway has a way in; every one of them was OIDC, and this build has
+  // turned OIDC off. Worth its own sentence rather than the ordinary
+  // "no identity providers" one below, which would blame the gateway for a
+  // limit this build chose.
+  const ssoOnly = !oidcEnabled && allProviders.length > 0 && providers.length === 0
   const onlyProvider = providers.length === 1 ? providers[0] : undefined
   const selected = draft.provider ?? onlyProvider ?? null
 
@@ -260,7 +278,11 @@ export function SignInStep({ draft, update }: SignInStepProps) {
           {strings.onboarding.signIn.signedInAs(draft.cookieIdentity.displayName)}
         </StatusLine>
       ) : phase === 'ready' && probe && authModeOf(probe) === 'cookie' ? (
-        providers.length === 0 ? (
+        ssoOnly ? (
+          <StatusLine testID="signin-sso-off" tone="error">
+            {strings.onboarding.signIn.ssoOff}
+          </StatusLine>
+        ) : providers.length === 0 ? (
           <StatusLine testID="signin-blocked" tone="error">
             {strings.errors.providersUnavailable}
           </StatusLine>

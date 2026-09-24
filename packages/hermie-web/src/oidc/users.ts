@@ -118,6 +118,16 @@ export interface OidcUser {
   email: string
   displayName: string
   role: OidcRole
+  /**
+   * `true` while `role` is `admin` ONLY because a `HERMIE_ADMINS` reconcile
+   * raised it (`admin/people.ts`'s `promoteEnvAdminRoles`). It is what lets
+   * the reconcile lower the role back to `user` once the container stops
+   * naming the id, instead of the raised role outliving the option as an
+   * ordinary administrator. Stored on the account, in the same write as the
+   * role it explains, so the two can never be persisted apart. Cleared by any
+   * role a PERSON sets (`setAccountRole`); absent on every other account.
+   */
+  roleFromEnv?: true
   password?: PasswordHash
   /** Base32 TOTP secret once enrolment is confirmed; empty when there is none. */
   totpSecret: string

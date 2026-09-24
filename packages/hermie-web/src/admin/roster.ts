@@ -74,14 +74,27 @@ export function pill(text: string, kind: 'quiet' | 'on' | 'bad' = 'quiet'): stri
  * lives somewhere the row cannot reach. The name is carried twice on purpose —
  * as the label a reader of the accessibility tree gets, and as the caption a
  * phone shows once the column head strip is gone.
+ *
+ * `disabled` is for a switch a container's own configuration has decided,
+ * such as an administrator named by `HERMIE_ADMINS`: a disabled checkbox posts
+ * nothing at all, which is what keeps a POST from reading as "take this
+ * away" for a value the reader never touched. The server refuses the change
+ * regardless, the same way it refuses one sent by hand with the attribute
+ * stripped off — this is the visible half of that, not the enforcement.
  */
-export function toggle(input: { name: string; label: string; checked: boolean; form?: string }): string {
+export function toggle(input: {
+  name: string
+  label: string
+  checked: boolean
+  form?: string
+  disabled?: boolean
+}): string {
   const owner = input.form ? ` form="${input.form}"` : ''
   const label = escapeHtml(input.label)
 
   return `<label class="switch"><input type="checkbox" name="${input.name}" value="1"${
     input.checked ? ' checked' : ''
-  }${owner} aria-label="${label}"><span class="track"></span><span class="switch-name" aria-hidden="true">${
+  }${input.disabled ? ' disabled' : ''}${owner} aria-label="${label}"><span class="track"></span><span class="switch-name" aria-hidden="true">${
     label
   }</span></label>`
 }

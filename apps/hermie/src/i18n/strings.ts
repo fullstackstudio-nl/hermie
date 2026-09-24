@@ -215,6 +215,14 @@ const stringsEn = {
       tokenBlockedTitle: 'This gateway cannot be used from a browser',
       tokenBlockedBody:
         'It authenticates with a session token, and a browser tab has nowhere safe to keep one — anything running in the page could read it. Use the Hermie app, or put the gateway behind an identity provider so it can issue a browser session.',
+      /**
+       * The gateway is gated and every provider it offers is an OIDC/SSO
+       * redirect, but this Hermie Web has turned that off (`--no-oidc` /
+       * `HERMIE_OIDC=0`) — see `web-config.shared.ts`. Said plainly rather
+       * than left as an empty screen or a "no identity providers" line that
+       * would blame the gateway for a limit this build chose.
+       */
+      ssoOff: 'Sign-in with SSO is turned off on this Hermie Web. Ask whoever runs it to sign you in another way.',
       signOutOfSession: 'Sign out',
 
       webview: {

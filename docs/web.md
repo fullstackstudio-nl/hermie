@@ -103,6 +103,31 @@ The app's credential provider is `CookieSessionCredentials`: no `Authorization` 
 `credentials: 'include'` so the browser attaches the cookie, a ticket per dial. There is no refresh
 token within reach, so a rejection is always "sign in again" rather than a silent renewal.
 
+### Turning the gateway's OIDC/SSO providers off
+
+`--no-oidc` (or `HERMIE_OIDC=0`) is a deployment choice, not a security boundary against the
+gateway itself: a container that would rather this service offer only password sign-in. Two things
+happen together, because either alone is half a switch:
+
+- `/hermie/config.json` answers `oidc: false`, and the app leaves every provider that is not a
+  password one out of the sign-in screen and the connect wizard — see `web-config.shared.ts` and
+  `SignInStep.web.tsx`. A gateway whose only provider is an OIDC/SSO one is told so in plain
+  language rather than shown an empty screen.
+- The proxy itself refuses `GET /auth/login` and `GET /auth/callback` — the OIDC start and callback
+  routes step 3 above describes — with a 403, so typing either URL by hand does not start one
+  either, and `/auth/native/authorize` unless the provider the gateway would pick takes a password.
+  It decides on the path decoded once, exactly as the gateway decodes it, and forwards the original
+  bytes untouched; a path that would decode differently a second time, or a repeated `provider`, is
+  a 400. `POST /auth/password-login`, `/api/auth/me`, the gateway's own `/login` form, logout and
+  every WebSocket ticket keep working exactly as before.
+
+This is unrelated to `hermie-web login` (further down this page): that is the CLI's own sign-in to
+an OIDC-gated _upstream_ gateway, used once to obtain the refresh token `--push` spends, and it never
+goes through a browser. It is also unrelated to the BUILT-IN identity provider a few sections down —
+that is this service acting as an OpenID Provider _for_ the gateway; this flag is about the
+gateway's _own_ upstream providers, reached through this proxy. `deploy/web/README.md`'s
+[flags table](../deploy/web/README.md#flags-and-environment) has the exact variable.
+
 ### OIDC: Hermie Web must share the gateway's public hostname
 
 There is one deployment rule that OAuth makes non-negotiable, and it is worth stating on its own
@@ -338,7 +363,7 @@ The configurations are in [deploy/web/README.md](../deploy/web/README.md); in br
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `npx @hermie/web` | One command next to `hermes serve`. Nothing to install, nothing to update — and no supervisor.                                                                                                               |
 | A release zip     | `hermie-web.zip` from a GitHub release, unpacked under `/opt/hermie-web/releases/<version>/` with a `current` symlink. This is the layout self-update expects.                                               |
-| Docker            | `ghcr.io/fullstackstudio-org/hermie-web`. The image is the version, so self-update refuses and points at `docker pull`.                                                                                       |
+| Docker            | `ghcr.io/fullstackstudio-org/hermie-web`. The image is the version, so self-update refuses and points at `docker pull`.                                                                                      |
 | Kubernetes        | The same image, entirely configured from `env` — see [deploy/k8s/README.md](../deploy/k8s/README.md) for a sidecar-in-one-Pod shape and a two-Deployment shape.                                              |
 | systemd           | A unit pointing `ExecStart` at `current`, with `Restart=always` and the install root in `ReadWritePaths`.                                                                                                    |
 | TLS in front      | Caddy, nginx or `tailscale serve`. All three pass `X-Forwarded-Proto`, which is what makes the gateway issue `Secure` cookies; nginx needs the two upgrade headers spelled out or the socket never connects. |

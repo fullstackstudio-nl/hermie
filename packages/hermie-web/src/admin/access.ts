@@ -53,12 +53,40 @@ import type { AdminState } from './state'
 /** `scrypt` parameters. Node's defaults, named so a reader can see there are some. */
 const SCRYPT_KEYLEN = 64
 
+export interface LocalSecretHash {
+  salt: string
+  hash: string
+}
+
 /** Hash a local administrator secret. The secret itself is never stored. */
-export function hashLocalSecret(
-  secret: string,
-  salt = randomBytes(16).toString('hex')
-): { salt: string; hash: string } {
+export function hashLocalSecret(secret: string, salt = randomBytes(16).toString('hex')): LocalSecretHash {
   return { salt, hash: scryptSync(secret, salt, SCRYPT_KEYLEN).toString('hex') }
+}
+
+const HEX_SALT = /^[0-9a-f]{32}$/u
+const HEX_HASH = /^[0-9a-f]{128}$/u
+
+/**
+ * `hashLocalSecret`'s output, as one line: `<salt>:<hash>`, both hex.
+ *
+ * This is `HERMIE_LOCAL_ADMIN_PASSWORD_HASH`'s format — the one place a local
+ * administrator secret is ever accepted through a container's configuration,
+ * and always as this, never as a plaintext password. `hermie-web hash-secret`
+ * prints exactly this line.
+ */
+export function encodeLocalSecret(value: LocalSecretHash): string {
+  return `${value.salt}:${value.hash}`
+}
+
+/** The reverse of `encodeLocalSecret`, checked. `null` for anything else. */
+export function decodeLocalSecret(raw: string): LocalSecretHash | null {
+  const [salt, hash, ...rest] = raw.split(':')
+
+  if (rest.length || !salt || !hash || !HEX_SALT.test(salt) || !HEX_HASH.test(hash)) {
+    return null
+  }
+
+  return { salt, hash }
 }
 
 /** Constant-time check of a local administrator secret. */
@@ -93,36 +121,80 @@ export function isAdminIdentity(state: AdminState, identity: GatewayIdentity | n
  * Add an administrator, keeping the list a set and in a stable order.
  *
  * Sorted so the file does not churn and two operators editing it do not
- * produce a diff that is only an order.
+ * produce a diff that is only an order. This is always a PERSON's decision —
+ * `/setup`, `/admin/people` — so an id `withAdmin` puts on `admins` for the
+ * first time was never put there by an env reconcile and needs no record in
+ * `managedAdmins` to prove it: that reconcile was never going to touch it
+ * either way.
+ *
+ * The one case worth a comment is the one that looks like a no-op: `userId`
+ * that is ALREADY an administrator only because `HERMIE_ADMINS` names it.
+ * `/admin/people`'s checkbox for such a row is disabled and the real UI never
+ * calls this for it, but if it ever is — a script, a future control — the
+ * call still records something: it takes the id OFF `managedAdmins`, the same
+ * as a fresh add would have. A person confirming "yes, this one" is exactly
+ * the manual decision `managedAdmins`'s own file note says a THIRD channel
+ * can be, and recording it is what lets that id survive `HERMIE_ADMINS`
+ * dropping it later, rather than leaving that to a comment nobody enforces.
  */
 export function withAdmin(state: AdminState, userId: string): AdminState {
-  if (!userId || state.admins.includes(userId)) {
+  if (!userId) {
     return state
+  }
+
+  if (state.admins.includes(userId)) {
+    return state.managedAdmins.includes(userId)
+      ? { ...state, managedAdmins: state.managedAdmins.filter(id => id !== userId) }
+      : state
   }
 
   return { ...state, admins: [...state.admins, userId].sort() }
 }
 
 /**
- * Remove one, refusing to remove the last.
+ * Remove one, refusing to remove the last — and refusing an id the RUNNING
+ * container currently declares through `HERMIE_ADMINS`, which only a restart
+ * with a shorter list can actually let go of (`admin/env-admins.ts`).
+ *
+ * `envAdmins` is checked live rather than against anything stored, which is
+ * what makes the refusal track a container's configuration exactly rather
+ * than a snapshot of it from the last start.
  *
  * A service with no administrators and no local secret is one nobody can
  * configure again without editing JSON on the host, which is a state an
  * operator should have to choose deliberately rather than reach by tidying a
  * list. The local secret counts as an administrator for this rule.
  */
-export function withoutAdmin(state: AdminState, userId: string): { state: AdminState; removed: boolean } {
+export function withoutAdmin(
+  state: AdminState,
+  userId: string,
+  envAdmins: readonly string[] = []
+): { state: AdminState; removed: boolean; reason?: 'last' | 'managed' } {
   if (!state.admins.includes(userId)) {
     return { state, removed: false }
+  }
+
+  if (envAdmins.includes(userId)) {
+    return { state, removed: false, reason: 'managed' }
   }
 
   const rest = state.admins.filter(id => id !== userId)
 
   if (!rest.length && !state.localAdmin) {
-    return { state, removed: false }
+    return { state, removed: false, reason: 'last' }
   }
 
-  return { state: { ...state, admins: rest }, removed: true }
+  return {
+    // `managedAdmins` almost never has this id by the time this line runs —
+    // the `envAdmins` refusal above already catches it while the container
+    // still names it — but the one case it does not (a past "last
+    // administrator" refusal that left the id managed and admin at once,
+    // now safe to remove because somebody else was added since) is exactly
+    // when this cleanup earns its place: nothing should linger in
+    // `managedAdmins` for an id that is not even an administrator any more.
+    state: { ...state, admins: rest, managedAdmins: state.managedAdmins.filter(id => id !== userId) },
+    removed: true
+  }
 }
 
 /** The HTTP methods a read-only reader may still send to the gateway. */

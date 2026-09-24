@@ -95,6 +95,19 @@ export interface HermieWebConfig {
   authKinds: string[] | null
   authRequired: boolean | null
   providers: AuthProvider[] | null
+  /**
+   * Whether this Hermie Web will proxy the gateway's own OIDC/SSO browser
+   * routes at all (`--no-oidc` / `HERMIE_OIDC`).
+   *
+   * `true` on every server too old to send the field, which is the same
+   * "absence reads as the ordinary behaviour" rule `flags` uses below: a build
+   * that has never heard of this switch is unaffected by it. Off, a reader
+   * leaves every provider that is not `supportsPassword` out of the sign-in
+   * screen and the connect wizard — see `SignInStep.web.tsx` — because the
+   * server refuses those routes anyway (a 403 for a URL typed by hand) and an
+   * option a browser tab cannot use should not be shown as one.
+   */
+  oidc: boolean
   service: HermieWebService
   /** Absent on a service that has set none, and on every older one. */
   branding: HermieWebBranding | null
