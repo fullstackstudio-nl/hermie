@@ -469,7 +469,18 @@ const chatStringsEn = {
     howHeader: 'How it answers',
     thisChatHeader: 'This conversation',
     viewHeader: 'What this conversation shows',
-    useDefault: 'Use the default view',
+    /**
+     * The button that discards THIS chat's verbosity/bot-to-bot/thinking
+     * overrides (`resetChatView`) so it goes back to reading `defaults`.
+     *
+     * It used to read "Use the default view", which is what a reader picks to
+     * SWITCH TO a view named "default" — not what deleting a per-chat override
+     * is. The line under it says the same thing again in full, for the reader
+     * who taps nothing until they know what a tap does.
+     */
+    useDefault: "Reset this conversation's view",
+    useDefaultHint:
+      "Clears this conversation's own verbosity and visibility settings and follows the default from Settings again.",
     usingDefault: 'Following the default set in Settings.',
     usingOverride: 'This conversation has its own view.',
     expensiveTitle: 'This model costs more',

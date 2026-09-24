@@ -719,16 +719,30 @@ export function ChatOptionsPopover({
           )}
 
           {viewOverridden && onResetView ? (
-            <Pressable
-              accessibilityRole="button"
-              onPress={onResetView}
-              style={{ justifyContent: 'center', minHeight: CONTROL_MIN_HEIGHT, paddingHorizontal: theme.space.lg }}
-              testID="option-use-default"
-            >
-              <Text color="accentText" variant="meta">
-                {chatStrings.options.useDefault}
+            <>
+              <Pressable
+                accessibilityRole="button"
+                onPress={onResetView}
+                style={{ justifyContent: 'center', minHeight: CONTROL_MIN_HEIGHT, paddingHorizontal: theme.space.lg }}
+                testID="option-use-default"
+              >
+                <Text color="accentText" variant="meta">
+                  {chatStrings.options.useDefault}
+                </Text>
+              </Pressable>
+              {/*
+                What the link above does, in full. The popover never shows the
+                sheet's own `usingOverride` footer, so without this line the link
+                is the only word on screen about the view being overridden at all.
+              */}
+              <Text
+                color="textFaint"
+                style={{ paddingBottom: theme.space.xs, paddingHorizontal: theme.space.lg }}
+                variant="micro"
+              >
+                {chatStrings.options.useDefaultHint}
               </Text>
-            </Pressable>
+            </>
           ) : null}
 
           {row(

@@ -293,7 +293,9 @@ export const chat: Translation<typeof chatStrings> = {
     howHeader: 'Hoe het antwoordt',
     thisChatHeader: 'Dit gesprek',
     viewHeader: 'Wat dit gesprek laat zien',
-    useDefault: 'Gebruik de standaardweergave',
+    useDefault: 'Weergave van dit gesprek resetten',
+    useDefaultHint:
+      'Wist het eigen detailniveau en de zichtbaarheidsinstellingen van dit gesprek en volgt weer de standaard uit Instellingen.',
     usingDefault: 'Volgt de standaard uit Instellingen.',
     usingOverride: 'Dit gesprek heeft een eigen weergave.',
     expensiveTitle: 'Dit model kost meer',

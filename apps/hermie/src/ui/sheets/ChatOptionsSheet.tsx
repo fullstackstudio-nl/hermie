@@ -886,12 +886,22 @@ export function ChatOptionsSheet(props: ChatOptionsSheetProps) {
           ) : null}
 
           {props.viewOverridden && props.onResetView ? (
-            <Button
-              onPress={props.onResetView}
-              testID="option-use-default"
-              title={chatStrings.options.useDefault}
-              variant="secondary"
-            />
+            <View style={{ gap: theme.space.xs }}>
+              <Button
+                onPress={props.onResetView}
+                testID="option-use-default"
+                title={chatStrings.options.useDefault}
+                variant="secondary"
+              />
+              {/*
+                What the button above does, in full — the same footer style an
+                `InsetGroup` draws under its own card, so a reader who does not
+                already know what "reset" clears here can read it before tapping.
+              */}
+              <Text color="textMuted" style={{ textAlign: 'center' }} variant="meta">
+                {chatStrings.options.useDefaultHint}
+              </Text>
+            </View>
           ) : null}
 
           <Button onPress={close} title={chatStrings.options.done} variant="secondary" />

@@ -315,7 +315,9 @@ export const chat: Translation<typeof chatStrings> = {
     howHeader: 'Wie es antwortet',
     thisChatHeader: 'Diese Unterhaltung',
     viewHeader: 'Was diese Unterhaltung zeigt',
-    useDefault: 'Standardansicht verwenden',
+    useDefault: 'Ansicht dieser Unterhaltung zurücksetzen',
+    useDefaultHint:
+      'Löscht den eigenen Detailgrad und die Sichtbarkeitseinstellungen dieser Unterhaltung und folgt wieder dem Standard aus den Einstellungen.',
     usingDefault: 'Folgt dem Standard aus den Einstellungen.',
     usingOverride: 'Diese Unterhaltung hat eine eigene Ansicht.',
     expensiveTitle: 'Dieses Modell kostet mehr',

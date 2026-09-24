@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   display name, which is the bug this row shipped with, fails the suite rather than reaching
   a reader.
 
+### Changed
+
+- **"Use the default view" says what it does.** The button that clears a conversation's own
+  verbosity and visibility settings read like a switch to a view called "default", not like
+  the reset it is. It is "Reset this conversation's view" now, in the chat's (…) menu and in
+  Chat options, with one line under it saying what gets cleared and that the chat goes back
+  to following Settings — in English, Dutch and German. Its behaviour is unchanged.
+
 ## [0.1.8] - 2026-09-24
 
 ### Added
