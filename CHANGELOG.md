@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The chat list's status marks keep the one order they were given, and a test now says so.**
+  The muted bell, pin and pending-share mark already draw as one run on the big name's line,
+  immediately left of the time — a regression test now pins the exact order (name, then the
+  marks, then the time) so a future change that puts a mark back between the name and the
+  display name, which is the bug this row shipped with, fails the suite rather than reaching
+  a reader.
+
 ## [0.1.8] - 2026-09-24
 
 ### Added

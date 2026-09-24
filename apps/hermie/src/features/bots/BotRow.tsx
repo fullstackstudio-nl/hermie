@@ -310,7 +310,12 @@ export const BotRow = memo(function BotRow({
             same thing in the layout itself — the name elides, the marks and the
             time never do.
           */}
-          <Text numberOfLines={1} style={{ flex: 1, fontWeight: unread ? '700' : '600' }} variant="name">
+          <Text
+            numberOfLines={1}
+            style={{ flex: 1, fontWeight: unread ? '700' : '600' }}
+            testID={`bot-name-${bot.name}`}
+            variant="name"
+          >
             {names.primary}
           </Text>
 

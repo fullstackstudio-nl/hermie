@@ -838,6 +838,29 @@ describe('the row’s status marks', () => {
     expect(order.indexOf('bot-preview-researcher')).toBeGreaterThan(time)
   })
 
+  /**
+   * The one order the owner's report pins down: the big name first, the run of
+   * marks second, the time last. Not merely "marks before time" (the test
+   * above) — the bell used to sit BETWEEN the name and the display name, so a
+   * regression that moved the run ahead of the name itself would pass every
+   * other assertion here while reintroducing exactly that bug.
+   */
+  it('draws the name line in one fixed order: name, then icons, then time', () => {
+    renderScreen(<BotsScreen />)
+
+    mute('researcher')
+    pin('researcher')
+
+    const order = drawnOrder('researcher')
+    const name = order.indexOf('bot-name-researcher')
+    const marks = order.indexOf('bot-marks-researcher')
+    const time = order.indexOf('bot-time-researcher')
+
+    expect(name).toBeGreaterThan(-1)
+    expect(marks).toBeGreaterThan(name)
+    expect(time).toBeGreaterThan(marks)
+  })
+
   it('draws every mark at the row-mark size', () => {
     renderScreen(<BotsScreen />)
 
